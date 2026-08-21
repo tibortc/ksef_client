@@ -1,0 +1,58 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  spec:
+    name: "spec (ruby ${{ matrix.ruby }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The full supported range from DESIGN.md §3, plus `head` as early warning for
+        # the next release. 3.2 is the floor and is never dropped without a minor bump.
+        ruby: ["3.2", "3.3", "3.4", "4.0", "head"]
+        include:
+          - ruby: "head"
+            experimental: true
+    continue-on-error: ${{ matrix.experimental || false }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          # Gemfile.lock is gitignored, so every matrix Ruby resolves fresh.
+          bundler-cache: true
+
+      - name: Verify pinned upstream artifacts
+        run: bundle exec rake verify:artifacts
+
+      - name: Run specs
+        run: bundle exec rspec
+
+      - name: Verify the gem packages
+        run: gem build ksef_client.gemspec
+
+      - name: Upload coverage
+        if: matrix.ruby == '4.0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: error
+
+  rubocop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          # Lint on the development Ruby; the cop config targets 3.2 regardless.
+          ruby-version: "4.0"
+          bundler-cache: true
+      - run: bundle exec rubocop --format github

@@ -1,0 +1,13 @@
+# Library convention: the lockfile is not committed, so CI resolves fresh per matrix
+# Ruby. See DESIGN.md §4.1.
+/Gemfile.lock
+
+/coverage/
+/doc/
+/pkg/
+/tmp/
+/.yardoc/
+*.gem
+
+.rspec_status
+.DS_Store

@@ -1,0 +1,50 @@
+name: nightly
+
+# Live integration against the KSeF TEST environment. Never runs per-PR (DESIGN.md §9):
+# it consumes shared TEST-environment state and is subject to the API's rate limits.
+on:
+  # The schedule is deliberately disabled until the `ksef-test` environment has
+  # KSEF_TEST_NIP / KSEF_TEST_TOKEN — that needs a provisioned TEST NIP (DESIGN.md §12.4).
+  # Restore this line once the secrets exist; without them the job can only fail, and a
+  # permanently-red nightly teaches everyone to ignore CI.
+  #
+  # 02:30 UTC is deliberately outside 16:00-18:00 local, when the Ministry runs scheduled
+  # maintenance on the test environments (docs/REFERENCE.md §2).
+  #
+  # schedule:
+  #   - cron: "30 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    environment: ksef-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Refuse to run against production
+        # Belt and braces alongside the in-suite guard (DESIGN.md §4.5).
+        run: |
+          if [ "${KSEF_ENV}" = "prod" ]; then
+            echo "::error::Nightly integration must never target production."
+            exit 1
+          fi
+        env:
+          KSEF_ENV: test
+
+      - name: Check the pinned spec still matches the live TEST contract
+        # An upstream contract change should surface here, not in a user's pipeline.
+        run: bundle exec rake verify:artifacts
+
+      - name: Run live integration specs
+        run: bundle exec rspec --tag integration
+        env:
+          KSEF_ENV: test
+          KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
+          KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}

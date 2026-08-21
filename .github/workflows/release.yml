@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+# RubyGems Trusted Publishing (OIDC) — no long-lived API key exists anywhere
+# (DESIGN.md §10). Configure the trusted publisher on RubyGems before the first release.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: rubygems
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Verify pinned upstream artifacts
+        run: bundle exec rake verify:artifacts
+
+      - name: Run the full suite, including release gates
+        # KSEF_RELEASE_CHECK enables spec/release_readiness_spec.rb, which fails while the
+        # DESIGN.md §12.1 metadata placeholders are unresolved.
+        run: bundle exec rspec
+        env:
+          KSEF_RELEASE_CHECK: "1"
+
+      - run: bundle exec rubocop
+
+      - name: Check the tag matches Ksef::VERSION
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(ruby -Ilib -rksef_client -e 'print Ksef::VERSION')"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag $tag does not match Ksef::VERSION $version"
+            exit 1
+          fi
+
+      # DESIGN.md §10 also requires a green nightly on this commit and a deliberate local
+      # full-suite run on Ruby 3.2. Both are human pre-release steps, checked off in
+      # CONTRIBUTING.md rather than faked here.
+      - uses: rubygems/release-gem@v1

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+bundle install
+
+echo
+echo "Verifying pinned upstream artifacts..."
+bundle exec rake verify:artifacts
+
+echo
+echo "Ready. Run 'bundle exec rake' for the full check."

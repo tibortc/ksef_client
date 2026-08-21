@@ -1,0 +1,64 @@
+plugins:
+  - rubocop-rake
+  - rubocop-rspec
+
+AllCops:
+  # The floor from DESIGN.md §3, not the development Ruby — RuboCop must flag syntax the
+  # oldest supported interpreter cannot parse.
+  TargetRubyVersion: 3.2
+  NewCops: enable
+  Exclude:
+    - "lib/ksef/fa3/generated/**/*"  # codegen output; never hand-edited (DESIGN.md §7.1)
+    - "vendor/**/*"
+    - "tmp/**/*"
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+Style/FrozenStringLiteralComment:
+  Enabled: true
+
+Style/Documentation:
+  Enabled: true
+
+Layout/LineLength:
+  Max: 120
+
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*"
+    - "*.gemspec"
+
+# Much of this gem maps external wire formats onto immutable value objects. That is
+# inherently linear keyword-argument construction, where splitting a method would hurt
+# readability rather than help it.
+Metrics/MethodLength:
+  Max: 20
+
+# The cop guards against callers mixing up positional arguments. Keyword arguments are
+# self-labelling, so the risk it protects against does not apply.
+Metrics/ParameterLists:
+  CountKeywordArgs: false
+
+Naming/FileName:
+  Exclude:
+    - "lib/ksef_client.rb"  # entry point for the gem name; namespace is Ksef
+
+RSpec/ExampleLength:
+  Max: 15
+
+RSpec/MultipleExpectations:
+  Max: 5
+
+RSpec/NestedGroups:
+  Max: 4
+
+# These specs assert properties of the repository itself — pinned upstream artifacts and
+# release gates — not the behaviour of a class.
+RSpec/DescribeClass:
+  Exclude:
+    - "spec/artifacts_spec.rb"
+    - "spec/release_readiness_spec.rb"
