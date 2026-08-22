@@ -285,6 +285,27 @@ properties, notably `SigningCertificate/CertDigest/DigestMethod`.
 Every one of those is explicitly listed above; the combination needs no further
 verification, only a test that the emitted document validates.
 
+**Built directly on Nokogiri and stdlib `openssl`, adding no dependency.** Decided
+2026-08-22 after confirming every primitive the signature and §10 need is already
+available (measured, both on 3.2.11 and 4.0.6):
+
+| Need | Available as |
+|---|---|
+| Exclusive c14n | `Nokogiri::XML::XML_C14N_EXCLUSIVE_1_0` (also `_1_0` = 0 and `_1_1` = 2) via `Node#canonicalize` |
+| `rsa-sha256` signature | `OpenSSL::PKey::RSA#sign("SHA256", …)` — 256-byte output for a 2048-bit key |
+| RSA-OAEP SHA-256 + MGF1-SHA-256 | `#encrypt(data, rsa_padding_mode: "oaep", rsa_oaep_md: "sha256", rsa_mgf1_md: "sha256")` — the plain `#public_encrypt` will **not** do, it cannot set the MGF1 digest |
+| AES-256-CBC / PKCS#7 | `OpenSSL::Cipher.new("aes-256-cbc")`, padding on by default; `#random_key` / `#random_iv` give the 32 and 16 bytes of §10.1 |
+
+`openssl` is a **default gem** on both Rubies (3.1.0 on 3.2.11, 4.0.2 on 4.0.6), so
+requiring it is not a new runtime dependency and needs no gemspec entry — the same status
+as `date`, and unlike `bigdecimal`, which had to be declared because it became a *bundled*
+gem in Ruby 3.4.
+
+`ksef-client-csharp`'s `CertTestApp` (§4.6) is held in reserve as a debugging aid, not a
+build-time input: if TEST rejects a signature with a message that does not say why, its
+`--output file` signed XML gives something concrete to diff against. Installing a .NET SDK
+is therefore optional, and deliberately not a prerequisite for this work.
+
 For ECDSA, `SignatureValue` is `R || S` fixed-field concatenation per XMLDSIG 1.1 /
 RFC 4050 §3.3 — **not** DER, which is what OpenSSL emits by default. Only relevant if
 ECDSA support is added; RSA avoids the issue.
