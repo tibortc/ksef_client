@@ -6,7 +6,9 @@ Precedence when sources disagree: **pinned artifacts** (OpenAPI spec, FA(3) XSD)
 
 ## Status
 
-- Current milestone: **Phase 1** (DESIGN.md §11). Transport track done. Builder track: XSD codegen done and reproducible; **models, serializer and VAT golden files remain**. Of the three "Done when" gates, codegen-reproducible and CI-green pass; XSD-valid golden files do not. Update this line only when the phase's acceptance criteria pass.
+- Current milestone: **Phase 2** (DESIGN.md §11). Phase 1 is complete — all three "Done when" gates pass: codegen reproducible, VAT golden file XSD-valid, CI matrix green.
+- Phase 2, in order: **certificate/XAdES auth first** (it is what lets the gem mint its own KSeF token, and it unblocks §12.4), then the crypto module with golden vectors, then online sessions, then the remaining six invoice types starting with KOR (§7.4).
+- Known gaps carried into Phase 2: `Ksef::FA3.build` — the DSL in DESIGN.md §8 — is not implemented; only keyword-arg constructors exist. §8 must run verbatim before 0.1.0 ships (§0.4). `docs/field_mapping.md` is deferred (see DESIGN.md §7.2).
 
 ## Commands
 

@@ -208,13 +208,17 @@ lib/
     ├── invoices/             # send, status, upo, download; query/export in 0.2
     ├── models/               # Data.define response objects (SessionRef, SendResult, Upo, …)
     └── fa3/
-        ├── invoice.rb, subject.rb, line.rb, annotations.rb, payment.rb, correction.rb
+        ├── invoice.rb, subject.rb, line.rb, address.rb   # models — Phase 1
+        ├── annotations.rb, payment.rb, correction.rb     # models — Phase 2
+        ├── formatting.rb     # BigDecimal/date/flag rules, centralised (§7.5)
+        ├── nip.rb            # NIP checksum (§7.2)
+        ├── vat_rate.rb       # rate code → percentage + summary bucket (§7.3)
         ├── generated/        # FROM XSD CODEGEN — never hand-edited
-        ├── builder.rb        # the DSL (§7.2)
-        ├── serializer.rb     # Nokogiri; strict element ordering; formatting rules
-        ├── parser.rb         # XML → models; retains raw Nokogiri doc
-        ├── validator.rb      # three tiers (§7.7)
-        └── schema/           # pinned FA(3) XSD (+ license/redistribution note) [VERIFY]
+        ├── builder.rb        # the DSL (§7.2) — NOT YET WRITTEN, required for 0.1.0
+        ├── serializer.rb     # Nokogiri; ordering read from generated/, never hand-listed
+        ├── parser.rb         # XML → models; retains raw Nokogiri doc — Phase 2
+        ├── validator.rb      # three tiers (§7.7); tier 2 (XSD) done, tiers 1 and 3 Phase 2
+        └── schema/           # pinned FA(3) XSD + upstream MIT licence
 ```
 
 ### 5.2 Thread-safety requirement
@@ -326,6 +330,8 @@ Hand-written models/DSL sit **on top of** generated metadata; they consume it (f
 ### 7.2 Models & DSL
 
 - English-friendly attribute names; the full English↔Polish mapping (e.g. `issue_date ↔ P_1`, `number ↔ P_2`, `gross_total ↔ P_15`, seller `↔ Podmiot1`, buyer `↔ Podmiot2`, line `↔ FaWiersz`) generated into `docs/field_mapping.md` — accountants and auditors will demand it. Field-name truth comes from the XSD, not from this document.
+
+  **Deferred as of 2026-08-22.** `docs/field_mapping.md` is not written yet. Generating it from the current model set would produce a table covering one invoice type out of seven, which for an audience checking whether *their* field is supported is worse than no table — an absent row would read as "not supported" rather than "not documented yet". It lands once the models cover all seven types (§7.4). At that point it must be generated from a declared mapping rather than hand-written, or it will drift.
 - Builder DSL as in §8; additionally plain keyword-arg constructors on every model (DSL is sugar, not the only door).
 - `Subject` covers NIP + name + address (+ VAT-UE and other identifier variants per schema); include NIP checksum validation (weights 6,5,7,2,3,4,5,6,7; weighted sum mod 11 must equal digit 10 and must not be 10).
 
@@ -422,6 +428,8 @@ A threaded smoke spec for §5.2. A spec asserting no committed cassette contains
 ### Phase 1 — Foundations (two parallel tracks)
 Transport: repo scaffold, gemspec, CI matrix green on empty suite, `configuration`/`environments`/`http`/`errors` with unit tests. Builder: XSD + OpenAPI pinned and ledgered in `docs/REFERENCE.md`, codegen task producing committed `generated/`, core models + serializer, golden files for plain VAT invoices validating against XSD.
 **Done when:** codegen is reproducible (`rake fa3:generate` → empty diff), VAT golden files XSD-valid, CI matrix green.
+
+**✅ Complete 2026-08-22.** All three gates pass. Two things landed beyond the stated scope because they turned out to be prerequisites: offline XSD validation (the schema cannot be compiled as shipped — see `docs/REFERENCE.md` §8.3) and the auth schema pinning. Two things in §7.2's scope did not: the `Ksef::FA3.build` DSL, and `docs/field_mapping.md`. Both are required before 0.1.0 and are tracked in Phase 2.
 
 ### Phase 2 — Make it real
 Transport: **both auth flows** — KSeF token *and* certificate/XAdES (§6.3) — crypto module **with golden vectors passing**, online session end-to-end against TEST (recorded + live), send/status/UPO/download. Builder: validator tiers 1–3, computed summaries with both rounding strategies, remaining invoice types (order per §7.4), parser + round-trip law green on Ministry samples.

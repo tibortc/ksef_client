@@ -17,11 +17,18 @@ XML yourself, it may be all you need. `ksef_client` aims at the other half of th
 invoice types, the FA(3) XSD bundled, and three tiers of validation before anything is
 submitted.
 
-> **Status: pre-release, under active development.** The transport foundations
-> (configuration, environments, error model, HTTP layer) are in place, and the FA(3)
-> schema metadata is generated and queryable. Authentication, encryption, sessions and the
-> invoice builder itself are not implemented yet — see [Roadmap](#roadmap). The quickstart
-> below is the **target** API for 0.1.0 and does not run today.
+> **Status: pre-release, under active development.**
+>
+> **Working:** the transport foundations (configuration, environments, error model, HTTP
+> layer), the FA(3) schema metadata, offline XSD validation, and building a plain `VAT`
+> invoice from Ruby objects to schema-valid XML.
+>
+> **Not yet:** authentication, encryption, sessions — so nothing can actually be *sent* to
+> KSeF yet — the `Ksef::FA3.build` DSL, and the other six invoice types. See
+> [Roadmap](#roadmap).
+>
+> The quickstart below is the **target** API for 0.1.0 and does not run today; the
+> [working example](#building-an-invoice-today) further down does.
 
 ## Installation
 
@@ -87,6 +94,49 @@ rescue Ksef::ApiError => e
   e.trace_id         # quote this to Ministry support
 end
 ```
+
+### Building an invoice today
+
+This runs. It produces schema-valid FA(3) XML — you just cannot submit it yet.
+
+```ruby
+require "ksef_client"
+
+seller = Ksef::FA3::Subject.new(
+  nip: "9999999999", name: "ACME sp. z o.o.",
+  address: Ksef::FA3::Address.new(street: "Prosta 1", city: "Warszawa", postal_code: "00-001")
+)
+buyer = Ksef::FA3::Subject.new(
+  nip: "1111111111", name: "Klient S.A.",
+  address: Ksef::FA3::Address.new(street: "Długa 2", city: "Kraków", postal_code: "30-001")
+)
+
+invoice = Ksef::FA3::Invoice.new(
+  seller: seller, buyer: buyer,
+  number: "FV/2026/08/001",
+  issue_date: Date.new(2026, 8, 22),
+  lines: [
+    Ksef::FA3::Line.new(name: "Consulting", quantity: 10, unit: "godz.",
+                        net_unit_price: BigDecimal("150"), vat_rate: "23")
+  ]
+)
+
+invoice.net_total    # => 1500
+invoice.vat_total    # => 345
+invoice.gross_total  # => 1845
+
+invoice.validate!    # against the bundled XSD, no network
+invoice.to_xml       # => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>..."
+```
+
+Three things it does for you that the schema requires but you would not think to supply:
+the buyer's mandatory `JST` and `GV` flags, the five mandatory `Adnotacje` flags, and one
+branch of each mandatory choice wrapper. Omitting any of them is a schema error.
+
+Rounding is explicit, because Polish VAT law permits two approaches and they can differ by
+a grosz — pass `rounding: :per_line` (the default) or `:per_summary`.
+
+### Querying the schema
 
 The FA(3) schema metadata is generated from the bundled XSD, so element ordering and
 enum membership are queryable without parsing anything yourself:

@@ -21,6 +21,16 @@ gem version for which API state".
   generator or a stale `generated/` breaks the build. Runs in the default task and on every
   CI matrix leg.
 - Pinned `AuthTokenRequest` schemas (auth v2-0 and v2-1) ahead of the certificate auth flow.
+- **FA(3) models and serializer.** A plain `VAT` invoice can be described with English
+  keyword arguments and serialised to schema-valid XML. `Ksef::FA3::Invoice`,
+  `Subject`, `Line`, `Address`, plus `NIP` checksum validation, `VatRate` bucket mapping and
+  centralised `Formatting`. Both rounding strategies from DESIGN.md §7.3 are implemented.
+- **`Ksef::FA3::Validator`** — offline XSD validation against the bundled schema. The
+  schema's one remote `xsd:import` is redirected in memory, so validation needs no network
+  and the pinned file stays byte-identical.
+- The serializer reads element order from the generated metadata rather than hand-listing
+  it, and raises on element names the schema does not define at that position instead of
+  dropping them silently.
 - Coverage is now gated on three criteria rather than one — **line 95, branch 90,
   method 100**. Branch coverage was 83% behind 99% line coverage, so seventeen conditional
   paths were untested; closing the real gaps brought it to 96%. Fixes uncovered on the way:
