@@ -10,8 +10,16 @@ gem version for which API state".
 
 ## [Unreleased]
 
+## [0.1.0.rc1] — 2026-08-22
+
 **Targets:** KSeF API 2.0 · FA(3) `1-0E` (`kodSystemowy` `FA (3)`, variant 3)
 · upstream `CIRFMF/ksef-api@1c34fe27` (2026-07-21)
+
+> **Prerelease. Not usable for invoicing.** This release exists to verify the trusted
+> publishing pipeline and to claim the gem name. It contains the transport foundations
+> only — authentication, encryption, sessions and the FA(3) builder are not implemented,
+> so no invoice can be sent yet. Prereleases are not installed by `gem install
+> ksef_client`; you would have to ask for this version explicitly.
 
 ### Added
 
