@@ -7,8 +7,15 @@ Precedence when sources disagree: **pinned artifacts** (OpenAPI spec, FA(3) XSD)
 ## Status
 
 - Current milestone: **Phase 2** (DESIGN.md §11). Phase 1 is complete — all three "Done when" gates pass: codegen reproducible, VAT golden file XSD-valid, CI matrix green.
-- Phase 2, in order: **certificate/XAdES auth first** (it is what lets the gem mint its own KSeF token, and it unblocks §12.4), then the crypto module with golden vectors, then online sessions, then the remaining six invoice types starting with KOR (§7.4).
-- Known gaps carried into Phase 2: `Ksef::FA3.build` — the DSL in DESIGN.md §8 — is not implemented; only keyword-arg constructors exist. §8 must run verbatim before 0.1.0 ships (§0.4). `docs/field_mapping.md` is deferred (see DESIGN.md §7.2).
+- **Phase 2 order:**
+  1. `Ksef::FA3.build` — the DSL in DESIGN.md §8. Small now that the models exist, its shape is fixed by §8, and needs no unverified facts, so it is unblocked work. Until it exists the README's headline example is aspirational.
+  2. **Certificate/XAdES auth.** Build before token auth: a KSeF token can only be issued *after* a one-time XAdES authentication, so this is the only flow that bootstraps a credential from nothing. It unblocks §12.4 and makes nightly CI self-sufficient.
+  3. Crypto module, with golden vectors ported from `ksef-client-csharp`.
+  4. Online sessions, send/status/UPO/download.
+  5. Validator tiers 1 and 3; then the remaining six invoice types, starting with KOR (§7.4).
+- **Steps 2–4 are blocked on unverified facts** — crypto parameters and XAdES signature specifics. See `docs/REFERENCE.md` §9. Resolve and ledger them *before* writing that code (§0.2); do not infer them from the C# client's behaviour without recording the source.
+- What is built: transport config/environments/errors/HTTP, FA(3) codegen, offline XSD validation, and models covering the plain `VAT` type. Nothing can be *sent* yet — there is no auth.
+- Also deferred: `docs/field_mapping.md` (see DESIGN.md §7.2 for why).
 
 ## Commands
 

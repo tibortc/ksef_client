@@ -523,20 +523,35 @@ identical so the §1 digests keep verifying.
 ## 9. Still unverified
 
 Carried forward; must be resolved before the code that depends on them is written
-(DESIGN.md §0.2).
+(DESIGN.md §0.2). Reviewed 2026-08-22.
 
 - **Crypto parameters** (DESIGN.md §6.4): symmetric cipher mode/padding/IV convention,
   RSA-OAEP digest and MGF1 parameters for both key wrapping and token encryption, and
   which published certificate serves which purpose. Sources to mine:
   `bezpieczenstwo/klucze-publiczne-do-szyfrowania.md`, `tokeny-ksef.md`, and the
   `ksef-client-csharp` reference implementation for golden vectors.
+  **Blocks the whole of Phase 2's transport work.**
 - **Session semantics**: whether one online session may carry multiple invoices, and
   session lifetime. Source: `sesja-interaktywna.md`.
-- **JWT lifetime and refresh mechanics**. Source: `uwierzytelnianie.md` plus the
-  `/auth/token/refresh` response model.
-- **Challenge 10-minute validity** — asserted in DESIGN.md, not found in the spec (§4).
-- **P_13_x / P_14_x rate-bucket ↔ VAT-rate mapping** (DESIGN.md §7.3). Source: the pinned
-  XSD plus `faktury/` guidance.
+- **XAdES signature specifics**: the exact enveloped/enveloping form the API accepts, the
+  canonicalisation and digest algorithms, and what makes it reject a signature. DESIGN.md
+  §6.3 asserts detached is rejected; the enveloped requirements are not yet pinned.
+  Sources: `uwierzytelnianie.md` §2.1.2, `auth/testowe-certyfikaty-i-podpisy-xades.md`.
+  **Blocks the certificate auth flow, which Phase 2 builds first.**
 - **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7).
 - **UPO document format** — schema pinned upstream at `faktury/upo/schemy/upo-v4-3.xsd`
   with worked examples under `faktury/upo/przyklady/v4-3/`; not yet pulled in.
+
+### 9.1 Resolved since this list was written
+
+Kept as a record so they are not re-investigated.
+
+| Item | Where it now lives |
+|---|---|
+| Challenge 10-minute validity | §4 — verified from `uwierzytelnianie.md`, no longer hearsay |
+| JWT lifetime and refresh mechanics | §4.2 — access token to its `exp`, refresh token up to 7 days |
+| `P_13_x` / `P_14_x` rate-bucket mapping | §8.1a — read from the XSD's own documentation |
+| Base URLs for all three environments | §2 — read from each environment's own OpenAPI document |
+| Error model and `Retry-After` semantics | §5 |
+| XSD redistribution terms | §1.2 — MIT, so the schemas are bundled |
+| TEST credential provisioning | §6a |
