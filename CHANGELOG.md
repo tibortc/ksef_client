@@ -31,6 +31,22 @@ gem version for which API state".
 - The serializer reads element order from the generated metadata rather than hand-listing
   it, and raises on element names the schema does not define at that position instead of
   dropping them silently.
+- **`Ksef::Auth::TokenRequest`** — the `AuthTokenRequest` document, step 2 of the
+  authentication flow. Targets schema **v2.1**, validates the challenge format locally
+  before a signature is spent on it, and emits the `ContextIdentifier` choice and the
+  optional `AuthorizationPolicy` in schema order regardless of the caller's argument
+  order. A spec compares the generated document against upstream's own pinned example,
+  canonicalised, so the implementation is tied to an artifact rather than to a reading of
+  one.
+- **`Ksef::Auth::AuthorizationPolicy`** — the client-IP whitelist as its own value object,
+  since the schema treats it as a distinct structure with its own rules (three list kinds,
+  each capped at ten, fixed order, mandatory `AllowedIps` wrapper). IP *values* are left
+  to the schema rather than re-validated in Ruby, which would mean maintaining a second
+  and divergent source of truth.
+- **`Ksef::Auth::Validator`** — offline XSD validation for auth documents, mirroring
+  `Ksef::FA3::Validator`. Simpler in one way (the auth schema is self-contained, so no
+  `schemaLocation` rewrite is needed) and constrained in another: only v2.1 can be used at
+  all, see the note below.
 - **`Ksef::FA3.build` — the keyword DSL of DESIGN.md §8.** That section's snippet now runs
   verbatim and produces schema-valid FA(3) XML, so the README's headline example is no
   longer aspirational. The DSL accepts the English shorthand from the spec (`qty:`,
@@ -56,9 +72,9 @@ gem version for which API state".
 - `docs/REFERENCE.md` §14 — a new section for **contradictions within upstream's own
   sources**, kept separate from §7's divergences from this project's design document.
   Three are recorded, each with the resolution and the evidence for it.
-- Coverage is now gated on three criteria rather than one — **line 95, branch 90,
+- Coverage is now gated on three criteria rather than one, at **line 99, branch 95,
   method 100**. Branch coverage was 83% behind 99% line coverage, so seventeen conditional
-  paths were untested; closing the real gaps brought it to 96%. Fixes uncovered on the way:
+  paths were untested; closing the real gaps brought it to 97%, and line coverage to 100%. Fixes uncovered on the way:
   proxy configuration was entirely unexercised, and the `Retry-After` parser's past-date
   and unparseable-value fallbacks had no tests.
 
@@ -80,6 +96,22 @@ gem version for which API state".
   `lib/` would not have shipped — a failure that would appear only in the packaged gem.
 
 ### Notes
+
+Two further upstream defects found while implementing authentication, both recorded with
+evidence in `docs/REFERENCE.md` §14.4. The root cause is shared: **XML Schema regular
+expressions are implicitly anchored, and `^` / `$` are literal characters, not anchors.**
+
+- **`schemat_auth_v2-0.xsd` does not compile as a schema at all.** Its IP patterns use
+  `\b`, which XSD regex has no concept of, so libxml2 rejects the whole file rather than
+  those facets. Anyone validating against v2.0 gets a compilation failure, not a
+  validation result. Only v2.1 is usable, and it rewrote all three patterns correctly.
+- **Two of v2.1's four context identifiers cannot hold their real values.** `TPeppolId`'s
+  pattern is written `^P[A-Z]{2}[0-9]{6}$`, so it matches only a value that literally
+  starts with `^` and ends with `$`; `TNipVatUE`'s ends with a stray `$`. Upstream's own
+  documented example value for `NipVatUe` fails the schema that defines it. The natural
+  value is emitted regardless and local validation is reported as advisory for those two
+  types — a KSeF token can only be issued in a `Nip` or `InternalId` context anyway, and
+  both of those validate cleanly.
 
 Three upstream inconsistencies found while pinning the documentation, each of which would
 have produced a working-looking client that fails in practice. All are recorded with

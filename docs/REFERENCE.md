@@ -205,19 +205,45 @@ Source: `uwierzytelnianie.md` (10.07.2025) plus the pinned spec. Retrieved 2026-
 ### 4.1 The `AuthTokenRequest` document
 
 Pinned at `lib/ksef/auth/schema/schemat_auth_v2-{0,1}.xsd` (§1). Both versions are
-accepted by the API; v2.1 is current.
+accepted by the API; **v2.1 is current and is the only one usable for validation** — v2.0
+does not compile as a schema at all (§14.4).
 
 | Fact | Value |
 |---|---|
 | Target namespace (v2.1) | `http://ksef.mf.gov.pl/auth/token/2.1` |
-| `elementFormDefault` | `qualified` |
-| Root element | `AuthTokenRequest` |
-| Required children | `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` |
+| `elementFormDefault` | `qualified`; `attributeFormDefault` `unqualified` |
+| Root element | `AuthTokenRequest` (no namespace prefix in upstream's examples — default namespace) |
+| Required children, in order | `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` |
 | `SubjectIdentifierType` values | `certificateSubject`, `certificateFingerprint` |
-| Optional | `AuthorizationPolicy` → `AllowedIps` (`Ip4Address`, `Ip4Range`) |
+| Optional | `AuthorizationPolicy` → `AllowedIps` → `Ip4Address` / `Ip4Range` / `Ip4Mask`, each 0–**10** |
 
-`ContextIdentifier` may be a NIP, an internal identifier, or a composite VAT-UE
-identifier. Signature form: enveloped or enveloping; **detached is rejected**.
+`AllowedIps` is itself mandatory *inside* `AuthorizationPolicy`, so the policy element
+cannot be present but empty.
+
+**`Challenge` is strictly formatted** — `xsd:token`, length exactly **36**, pattern
+`\d{8}-CR-[A-F0-9]{10}-[A-F0-9]{10}-[A-F0-9]{2}`. Verified 2026-08-22 that upstream's own
+example `20250604-CR-461EA5B000-537A6BA15D-D7` satisfies it, that lowercase hex is
+rejected, and that the literal `CR` is required. Worth validating client-side before
+spending a signature on it. Note the shape matches §12's reference numbers, `CR` being the
+kind tag for a challenge.
+
+`ContextIdentifier` is a **choice of four** in v2.1 — not three:
+
+| Element | Pattern | Usable? |
+|---|---|---|
+| `Nip` | `[1-9]((\d[1-9])\|([1-9]\d))\d{7}` | yes |
+| `InternalId` | the NIP pattern, then `-\d{5}` | yes |
+| `NipVatUe` | NIP, `-`, then an EU VAT number by member state | **no — see §14.4** |
+| `PeppolId` | `^P[A-Z]{2}[0-9]{6}$` | **no — see §14.4** |
+
+Note the NIP pattern here is *structural* (first digit non-zero, positions 2–3 not both
+zero), not a checksum. It is weaker than `Ksef::FA3::NIP`'s check-digit validation, so
+both are worth applying.
+
+Per `tokeny-ksef.md`, a KSeF token can only be issued in a **`Nip` or `InternalId`**
+context, which is fortunate given the state of the other two.
+
+Signature form: enveloped or enveloping; **detached is rejected**.
 
 Self-signed certificates are accepted on **TEST only**. `srodowiska.md` is explicit that
 this is why TEST contexts are not isolated between integrators.
@@ -1061,3 +1087,56 @@ Not treated as a §9 open item: the facts are measured and unambiguous. What is 
 verified is whether DEMO uses a third spelling and whether PROD matches the `fixed` value
 exactly — neither can be checked without access to those environments, and neither changes
 the resolution above.
+
+### 14.4 Both auth schemas carry broken regular expressions
+
+Measured 2026-08-22 against the pinned `schemat_auth_v2-{0,1}.xsd`. The root cause is the
+same in both: **XML Schema regular expressions are implicitly anchored, and `^` / `$` are
+*literal characters*, not anchors** (XSD Part 2, Appendix F — the metacharacters are
+`. \ ? * + { } ( ) [ ] |`). Patterns written as if they were Perl regexes therefore mean
+something quite different from what their author intended.
+
+#### v2.0 does not compile at all
+
+Its three IP patterns use `\b`, which XSD regex has no concept of. libxml2 rejects the
+whole file rather than just those facets:
+
+```
+FATAL: failed to compile: Wrong escape sequence, misuse of character '\'
+ERROR: Element 'pattern': The value '^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$'
+       of the facet 'pattern' is not a valid regular expression.
+```
+
+So `schemat_auth_v2-0.xsd` cannot be used to validate anything — you get a schema
+compilation failure, not a validation result. (The same patterns also make dots optional
+via `\.?`, so even parsed loosely they would match `1111`.) **Resolution: validate against
+v2.1 only.** v2.1 rewrote all three patterns correctly.
+
+#### Two of v2.1's four context identifiers cannot hold their real values
+
+Because `^` and `$` are literal, `TPeppolId`'s pattern `^P[A-Z]{2}[0-9]{6}$` matches only
+a value that literally begins with `^` and ends with `$`; and `TNipVatUE`'s pattern ends
+with a stray `$`, so it demands a trailing dollar sign. Measured:
+
+| Element | Value | Against v2.1 |
+|---|---|---|
+| `Nip` | `5265877635` | valid |
+| `InternalId` | `5265877635-12345` | valid |
+| `NipVatUe` | `5265877635-ATU12345678` — **upstream's own documented example** | **invalid** |
+| `NipVatUe` | `5265877635-ATU12345678$` | valid |
+| `PeppolId` | `PPL123456` | **invalid** |
+| `PeppolId` | `^PPL123456$` | valid |
+
+That upstream's own example value for `NipVatUe` fails the schema that defines it is the
+clearest evidence this is an upstream defect and not a misreading.
+
+**Resolution: emit the natural value and treat offline validation of those two context
+types as advisory.** Emitting `^PPL123456$` to satisfy a broken facet would be absurd and
+would certainly be rejected server-side, where the real identifier is what gets looked up.
+Nothing is lost in practice: a KSeF token can only be issued in a `Nip` or `InternalId`
+context anyway (§4.1), and both of those validate cleanly.
+
+Whether the API enforces this XSD server-side is **unverified** and needs a live TEST call
+to settle. If it does, `NipVatUe` and `PeppolId` authentication are simply unusable until
+upstream fixes the patterns — which would be their bug to fix, not something a client can
+work around.
