@@ -69,6 +69,7 @@ Even so, when reaching for any core or stdlib method, confirm it exists in 3.2 r
 - `# frozen_string_literal: true` in every file. `Data.define` for value objects. `pack("m0")` / `unpack1("m0")` for base64.
 - Always pass `encoding: "UTF-8"` to `File.read`. The ambient locale is not UTF-8, and every KSeF artifact contains Polish characters.
 - Every behavior change lands with specs. FA(3) serializer changes land with golden-file updates, and goldens must validate against the pinned XSD.
+- Coverage is gated on **line 95, branch 90, method 100** (`generated/` excluded). The floors ratchet — raise them when the real numbers improve, never lower one to make a change pass. `method: 100` is the one that bites: a method nothing exercises fails the build. Branch coverage is where real gaps hide, so a change that adds a conditional needs a test per path, not just per line. Filtered runs (single file, `--tag`) skip the gate by design.
 - Thread safety of `Ksef::Client` is a requirement (DESIGN.md §5.2), not an optimization. (`Ksef::Client` is not written yet.)
 
 ## Workflow

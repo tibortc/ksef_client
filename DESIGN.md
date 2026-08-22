@@ -149,7 +149,7 @@ Deliberately **excluded** — do not add:
 - `activesupport`, `dry-*`, `rexml` → not needed; keep the tree minimal.
 - `rubyzip` → deferred to 0.2 (batch packaging needs a real ZIP container; stdlib `zlib` is insufficient).
 
-Development: `rspec`, `webmock`, `vcr`, `rubocop` (+plugins), `simplecov`, `yard`, `rake`.
+Development: `rspec`, `webmock`, `vcr`, `rubocop` (+plugins), `simplecov` (>= 1.0, for the branch and method criteria in §9), `simplecov-lcov` (LCOV output for Coveralls — SimpleCov ships HTML and JSON but no LCOV), `yard`, `rake`.
 
 ### 4.4 Idioms (enforced by RuboCop where possible)
 
@@ -395,7 +395,15 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors vs official C# client (§6.4) | every push |
 | Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning | **nightly** CI + pre-release, never per-PR |
 
-Coverage gate: 90% lines (SimpleCov), excluding `generated/`. A threaded smoke spec for §5.2. A spec asserting no committed cassette contains unscrubbed secrets.
+**Coverage gate (revised 2026-08-22):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 95, branch 90, method 100**.
+
+Originally this said "90% lines". That turned out to be a weak gate: the suite sat at 99% line coverage while branch coverage was 83%, i.e. seventeen conditional paths were untested behind fully-covered lines. Branch coverage is the one that finds real gaps; line coverage mostly confirms files are loaded.
+
+Floors sit just under the achieved numbers so they ratchet. Raise them as the real figures move up; do not lower one to make a change pass. Branch is 90 rather than 100 because a handful of `&.` guards defend against states that cannot occur, and contorting tests to reach them proves nothing. Requires SimpleCov >= 1.0, where the supported criteria are `[:line, :branch, :method, :oneshot_line]`; 0.x supports only line and branch.
+
+A filtered run — one file, one example, or a tag selector — legitimately exercises less of the library, so the gate applies to full runs only. Otherwise the nightly `--tag integration` job would fail on coverage rather than on tests.
+
+A threaded smoke spec for §5.2. A spec asserting no committed cassette contains unscrubbed secrets.
 
 ---
 

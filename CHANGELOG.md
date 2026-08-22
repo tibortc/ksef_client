@@ -21,6 +21,11 @@ gem version for which API state".
   generator or a stale `generated/` breaks the build. Runs in the default task and on every
   CI matrix leg.
 - Pinned `AuthTokenRequest` schemas (auth v2-0 and v2-1) ahead of the certificate auth flow.
+- Coverage is now gated on three criteria rather than one — **line 95, branch 90,
+  method 100**. Branch coverage was 83% behind 99% line coverage, so seventeen conditional
+  paths were untested; closing the real gaps brought it to 96%. Fixes uncovered on the way:
+  proxy configuration was entirely unexercised, and the `Retry-After` parser's past-date
+  and unparseable-value fallbacks had no tests.
 
 ### Changed
 
