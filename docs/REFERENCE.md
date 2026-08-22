@@ -441,7 +441,30 @@ Two consequences the generator has to honour:
 `zw`, `oo`, `np I`, `np II`). Any numeric coercion in the VAT path corrupts the latter,
 so rate codes are carried as strings throughout and only the *amounts* are `BigDecimal`.
 
-### 8.2 Import chain and offline validation
+### 8.2 Non-obvious mandatory elements
+
+Discovered by validating against the schema rather than by reading it, and asserted in
+`spec/ksef/fa3/validator_spec.rb`.
+
+**`Podmiot2` (the buyer) requires both `JST` and `GV`** — `minOccurs="1"` on each, typed
+`etd:TWybor1_2` so the only permitted values are `"1"` and `"2"`:
+
+| Element | Meaning | `"1"` |
+|---|---|---|
+| `JST` | Buyer is a subordinate unit of a local-government body | yes |
+| `GV` | Buyer is a member of a VAT group | yes |
+
+Every invoice must therefore state these two facts about its buyer, even for an ordinary
+domestic B2B sale where both answers are "no" (`"2"`). Omitting either makes the document
+schema-invalid, and no prose in the integrator documentation flags it — the builder must
+default them rather than leave them to the caller to discover.
+
+Also mandatory and easy to miss, all inside `Fa/Adnotacje`: `P_16`, `P_17`, `P_18`,
+`P_18A`, `P_23`, plus the three wrapper elements `Zwolnienie`, `NoweSrodkiTransportu` and
+`PMarzy` — each of which is one of the four types whose root compositor is a choice
+(§8.1), so exactly one branch of each must be present.
+
+### 8.3 Import chain and offline validation
 
 ```
 schemat_FA(3)_v1-0E.xsd
