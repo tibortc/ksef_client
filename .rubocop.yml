@@ -35,8 +35,18 @@ Metrics/BlockLength:
 # Much of this gem maps external wire formats onto immutable value objects. That is
 # inherently linear keyword-argument construction, where splitting a method would hurt
 # readability rather than help it.
+#
+# tasks/ is excluded outright: the codegen classes there are dominated by heredocs of
+# emitted Ruby source, which line-count cops measure badly — splitting a template across
+# methods to satisfy them makes the generated output harder to read, not easier.
 Metrics/MethodLength:
   Max: 20
+  Exclude:
+    - "tasks/**/*"
+
+Metrics/ClassLength:
+  Exclude:
+    - "tasks/**/*"
 
 # The cop guards against callers mixing up positional arguments. Keyword arguments are
 # self-labelling, so the risk it protects against does not apply.

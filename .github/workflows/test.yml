@@ -37,6 +37,11 @@ jobs:
       - name: Verify pinned upstream artifacts
         run: bundle exec rake verify:artifacts
 
+      - name: Verify codegen is reproducible
+        # DESIGN.md §11: `rake fa3:generate` must produce an empty diff. Catches both a
+        # non-deterministic generator and a stale committed generated/.
+        run: bundle exec rake fa3:verify
+
       - name: Run specs
         run: bundle exec rspec
 
