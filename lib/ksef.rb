@@ -2,6 +2,12 @@
 
 require "zeitwerk"
 
+# Required centrally rather than per-file. BigDecimal is a declared runtime dependency
+# used across the FA(3) models, and relying on whichever autoloaded file happens to
+# require it first makes the constant's availability depend on call order.
+require "bigdecimal"
+require "date"
+
 # Ruby client for KSeF 2.0, the Polish National e-Invoice System.
 #
 # Two decoupled subsystems live under this namespace (DESIGN.md §5):
@@ -23,6 +29,7 @@ module Ksef
     loader.inflector.inflect(
       "fa3" => "FA3",
       "http" => "HTTP",
+      "nip" => "NIP",
       "version" => "VERSION"
     )
     loader.setup

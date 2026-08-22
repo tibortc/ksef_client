@@ -441,6 +441,41 @@ Two consequences the generator has to honour:
 `zw`, `oo`, `np I`, `np II`). Any numeric coercion in the VAT path corrupts the latter,
 so rate codes are carried as strings throughout and only the *amounts* are `BigDecimal`.
 
+### 8.1a Rate buckets — resolves DESIGN.md §7.3 [VERIFY]
+
+Read from the `xsd:documentation` on each element in the pinned schema, which is the only
+authoritative statement of the mapping. Getting this wrong misreports VAT.
+
+| Net | Tax | Covers | Rate codes |
+|---|---|---|---|
+| `P_13_1` | `P_14_1` | Standard rate ("stawka podstawowa") | `23`, `22` |
+| `P_13_2` | `P_14_2` | First reduced rate | `8`, `7` |
+| `P_13_3` | `P_14_3` | Second reduced rate | `5` |
+| `P_13_4` | `P_14_4` | Flat rate for passenger taxis | `4` |
+| `P_13_5` | `P_14_5` | Special procedure, Act ch. XII s. 6a | `3` |
+| `P_13_6_1` | — | 0% excluding intra-EU supply and export | `0 KR` |
+| `P_13_6_2` | — | 0% intra-EU supply of goods (WDT) | `0 WDT` |
+| `P_13_6_3` | — | 0% export | `0 EX` |
+| `P_13_7` | — | Exempt from tax | `zw` |
+| `P_13_8` | — | Supply outside the country | `np I` / `np II` |
+| `P_13_9` | — | Services under Act art. 100(1)(4) | — |
+| `P_13_10` | — | Reverse charge, buyer is the taxpayer (art. 17) | `oo` |
+| `P_13_11` | — | Margin scheme (art. 119, 120) | — |
+| `P_15` | | **Total amount due** (gross) | |
+
+Two things that fall out of this and matter for the builder:
+
+- **The zero-rated and exempt buckets have no `P_14_*` counterpart.** There is no tax
+  amount to report, so a summary builder must not emit a paired tax field for them —
+  the schema has no element to put it in.
+- **`P_14_1W`, `P_14_2W`, `P_14_3W`, `P_14_4W`** are the foreign-currency variants,
+  carrying the tax amount converted per the Act when the invoice is issued in a currency
+  other than PLN. They sit alongside their base field in the same sequence, so a
+  non-PLN invoice populates both.
+
+`P_15Z` and `P_15ZK` relate to advance-payment invoices and their corrections, which are
+0.1 scope but not Phase 1 (DESIGN.md §7.4 puts ZAL after VAT and KOR).
+
 ### 8.2 Non-obvious mandatory elements
 
 Discovered by validating against the schema rather than by reading it, and asserted in

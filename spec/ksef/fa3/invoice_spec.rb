@@ -1,0 +1,188 @@
+# frozen_string_literal: true
+
+RSpec.describe Ksef::FA3::Invoice do
+  def seller
+    Ksef::FA3::Subject.new(
+      nip: "9999999999", name: "ACME sp. z o.o.",
+      address: Ksef::FA3::Address.new(street: "Prosta 1", city: "Warszawa", postal_code: "00-001")
+    )
+  end
+
+  def buyer
+    Ksef::FA3::Subject.new(
+      nip: "1111111111", name: "Klient S.A.",
+      address: Ksef::FA3::Address.new(street: "Długa 2", city: "Kraków", postal_code: "30-001")
+    )
+  end
+
+  def line(rate: "23", quantity: 10, price: "150", **rest)
+    Ksef::FA3::Line.new(name: "Consulting", quantity: quantity, unit: "godz.",
+                        net_unit_price: BigDecimal(price), vat_rate: rate, **rest)
+  end
+
+  def invoice(**overrides)
+    described_class.new(
+      seller: seller, buyer: buyer, number: "FV/2026/08/001",
+      issue_date: Date.new(2026, 8, 22), issued_at: Time.utc(2026, 8, 22, 10, 0, 0),
+      lines: [line], **overrides
+    )
+  end
+
+  describe "the golden file" do
+    let(:golden) do
+      File.read(File.expand_path("../../fixtures/fa3/golden/vat_single_line.xml", __dir__), encoding: "UTF-8")
+    end
+
+    # If this fails, either the serializer changed or the schema did. Regenerate
+    # deliberately and read the diff — do not update the fixture to make it pass.
+    it "reproduces the approved output byte for byte" do
+      expect(invoice.to_xml).to eq(golden)
+    end
+
+    it "is XSD-valid" do
+      expect(Ksef::FA3::Validator.errors_for(golden)).to be_empty
+    end
+  end
+
+  describe "totals" do
+    it "computes net, VAT and gross from the lines" do
+      expect(invoice).to have_attributes(
+        net_total: BigDecimal("1500"),
+        vat_total: BigDecimal("345"),
+        gross_total: BigDecimal("1845")
+      )
+    end
+
+    it "sums across several rates into their own buckets" do
+      multi = invoice(lines: [line(rate: "23", price: "100", quantity: 1),
+                              line(rate: "8", price: "200", quantity: 1),
+                              line(rate: "zw", price: "50", quantity: 1)])
+
+      expect(multi.net_by_rate).to eq("23" => BigDecimal("100"), "8" => BigDecimal("200"),
+                                      "zw" => BigDecimal("50"))
+      expect(multi.vat_total).to eq(BigDecimal("39")) # 23 + 16 + 0
+    end
+
+    it "charges no VAT on a non-numeric rate code" do
+      expect(invoice(lines: [line(rate: "zw")]).vat_total).to eq(0)
+    end
+
+    it "honours an overridden line net, for ERP-as-source-of-truth callers" do
+      overridden = invoice(lines: [line(net_amount: BigDecimal("1234.56"))])
+      expect(overridden.net_total).to eq(BigDecimal("1234.56"))
+    end
+
+    it "exposes a per-line gross for callers displaying line totals" do
+      expect(line.gross).to eq(BigDecimal("1845"))
+      expect(line(rate: "zw").gross).to eq(BigDecimal("1500"))
+    end
+  end
+
+  # A zero-rated or exempt bucket has no P_14_* element at all — the schema provides
+  # nowhere to put a tax amount (docs/REFERENCE.md §8.1a), so the serializer must not
+  # invent one.
+  describe "buckets without a tax element" do
+    let(:doc) { Nokogiri::XML(invoice(lines: [line(rate: "zw")]).to_xml).remove_namespaces! }
+
+    it "emits the net bucket" do
+      expect(doc.at_xpath("//Fa/P_13_7")&.text).to eq("1500.00")
+    end
+
+    it "emits no paired tax element" do
+      expect(doc.at_xpath("//Fa/P_14_7")).to be_nil
+    end
+
+    it "still validates" do
+      expect(Ksef::FA3::Validator.valid?(invoice(lines: [line(rate: "zw")]).to_xml)).to be(true)
+    end
+
+    it "gives each zero rate its own distinct bucket" do
+      mixed = invoice(lines: [line(rate: "0 WDT", price: "10", quantity: 1),
+                              line(rate: "0 EX", price: "20", quantity: 1)])
+      rendered = Nokogiri::XML(mixed.to_xml).remove_namespaces!
+
+      expect(rendered.at_xpath("//Fa/P_13_6_2")&.text).to eq("10.00")
+      expect(rendered.at_xpath("//Fa/P_13_6_3")&.text).to eq("20.00")
+    end
+  end
+
+  # Both strategies are legal under Polish VAT law, and the difference is a real grosz
+  # (DESIGN.md §7.3) — which is why the choice is explicit rather than silent.
+  describe "rounding strategies" do
+    # Three lines whose per-line VAT each round up, but whose summed net rounds down.
+    let(:lines) { Array.new(3) { line(quantity: 1, price: "0.07", rate: "23") } }
+
+    it "rounds per line by default" do
+      # 0.07 * 23% = 0.0161 -> 0.02 each, three times = 0.06
+      expect(invoice(lines: lines).vat_total).to eq(BigDecimal("0.06"))
+    end
+
+    it "rounds once per summary when asked" do
+      # 0.21 * 23% = 0.0483 -> 0.05
+      expect(invoice(lines: lines, rounding: :per_summary).vat_total).to eq(BigDecimal("0.05"))
+    end
+
+    it "rejects an unknown strategy rather than silently picking one" do
+      expect { invoice(rounding: :bankers) }
+        .to raise_error(Ksef::ValidationError, /Unknown rounding strategy/)
+    end
+
+    it "still produces a valid document under either strategy" do
+      expect(Ksef::FA3::Validator.valid?(invoice(lines: lines, rounding: :per_summary).to_xml)).to be(true)
+    end
+
+    it "charges no VAT on an exempt line under summary rounding either" do
+      exempt = invoice(lines: [line(rate: "zw")], rounding: :per_summary)
+      expect(exempt.vat_by_rate).to eq("zw" => BigDecimal(0))
+      expect(exempt.vat_total).to eq(0)
+    end
+  end
+
+  describe "validation" do
+    it "requires at least one line" do
+      expect { invoice(lines: []) }.to raise_error(Ksef::ValidationError, /at least one line/)
+    end
+
+    it "rejects a seller NIP that fails its checksum" do
+      bad = Ksef::FA3::Subject.new(nip: "9999999998", name: "X",
+                                   address: Ksef::FA3::Address.new(line1: "Prosta 1"))
+      expect { invoice(seller: bad).to_xml }
+        .to raise_error(Ksef::ValidationError, /seller NIP.*invalid check digit/)
+    end
+
+    it "exposes validate! and valid? against the schema" do
+      expect(invoice.valid?).to be(true)
+      expect(invoice.validate!).to be(true)
+    end
+  end
+
+  # These are mandatory in the schema but would be invisible to a caller writing an
+  # ordinary domestic invoice (docs/REFERENCE.md §8.2).
+  describe "defaults a caller should not have to know about" do
+    let(:doc) { Nokogiri::XML(invoice.to_xml).remove_namespaces! }
+
+    it "declares the buyer is not a local-government unit and not in a VAT group" do
+      expect(doc.at_xpath("//Podmiot2/JST").text).to eq("2")
+      expect(doc.at_xpath("//Podmiot2/GV").text).to eq("2")
+    end
+
+    it "emits all five mandatory annotation flags" do
+      %w[P_16 P_17 P_18 P_18A P_23].each do |flag|
+        expect(doc.at_xpath("//Adnotacje/#{flag}")&.text).to eq("2"), "expected #{flag} to be present"
+      end
+    end
+
+    it "emits one branch of each mandatory root-choice wrapper" do
+      expect(doc.at_xpath("//Adnotacje/Zwolnienie/P_19N").text).to eq("1")
+      expect(doc.at_xpath("//Adnotacje/NoweSrodkiTransportu/P_22N").text).to eq("1")
+      expect(doc.at_xpath("//Adnotacje/PMarzy/P_PMarzyN").text).to eq("1")
+    end
+
+    it "reads the fixed header attributes from the generated metadata" do
+      node = doc.at_xpath("//Naglowek/KodFormularza")
+      expect(node.text).to eq("FA")
+      expect(node["kodSystemowy"]).to eq("FA (3)")
+      expect(node["wersjaSchemy"]).to eq("1-0E")
+    end
+  end
+end
