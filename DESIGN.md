@@ -432,7 +432,9 @@ Transport: repo scaffold, gemspec, CI matrix green on empty suite, `configuratio
 **✅ Complete 2026-08-22.** All three gates pass. Two things landed beyond the stated scope because they turned out to be prerequisites: offline XSD validation (the schema cannot be compiled as shipped — see `docs/REFERENCE.md` §8.3) and the auth schema pinning. Two things in §7.2's scope did not: the `Ksef::FA3.build` DSL, and `docs/field_mapping.md`. Both are required before 0.1.0 and are tracked in Phase 2.
 
 ### Phase 2 — Make it real
-Transport: **both auth flows** — KSeF token *and* certificate/XAdES (§6.3) — crypto module **with golden vectors passing**, online session end-to-end against TEST (recorded + live), send/status/UPO/download. Builder: validator tiers 1–3, computed summaries with both rounding strategies, remaining invoice types (order per §7.4), parser + round-trip law green on Ministry samples.
+Transport: **both auth flows** — KSeF token *and* certificate/XAdES (§6.3) — crypto module **with golden vectors passing**, online session end-to-end against TEST (recorded + live), send/status/UPO/download. Builder: **the `Ksef::FA3.build` DSL (§8)**, validator tiers 1–3, computed summaries with both rounding strategies, remaining invoice types (order per §7.4), parser + round-trip law green on Ministry samples.
+
+The DSL is listed explicitly because it was previously implied only by the "Done when" gate below — §8's snippet opens with `Ksef::FA3.build`, so the gate could not pass without it, but no scope list named it. Build it **first** in this phase: it is small now that the models exist, its shape is fixed by §8, and until it exists the README's headline example is aspirational.
 
 Build the **certificate flow first**: it is the only one that can bootstrap a credential from nothing, so it is what makes the nightly TEST suite self-sufficient and unblocks §12.4. The token flow then has something to authenticate with when minting its first token.
 
