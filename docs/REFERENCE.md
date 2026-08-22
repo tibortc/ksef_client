@@ -494,6 +494,42 @@ Revocation invalidates the associated **`refreshToken` only** — already-issued
 `accessToken`s stay valid to their `exp`. Consistent with §4.2: there is no way to kill a
 live access token.
 
+
+### 4.8 Authentication status codes
+
+`GET /auth/{referenceNumber}` returns **HTTP 200** carrying a `StatusInfo` whose `code` is
+*not* an HTTP status — it describes the asynchronous operation. The Ministry's prose names
+only "in progress" and "succeeded", and says outright that the full list "will be available
+in the endpoint's technical documentation".
+
+Source: `KSeF.Client.Core/Models/ApiResponses/AuthenticationStatusCodeResponse.cs` in
+`ksef-client-csharp`, retrieved 2026-08-22. Recorded with that provenance: this is a
+reference-implementation constant, not something the contract states.
+
+| Code | Meaning | Terminal? |
+|---|---|---|
+| 100 | authentication in progress | no — the only code that means keep polling |
+| 200 | succeeded | yes |
+| 400 | bad request | yes |
+| 401 | unauthorized | yes |
+| 415 | failed — subject holds no permissions in this context | yes |
+| 425 | authentication and its refresh tokens revoked by the user | yes |
+| 450 | token invalid, expired, revoked or inactive | yes |
+| 460 | certificate invalid, chain error, untrusted, revoked, suspended or malformed | yes |
+| 470 | authorisation methods of a deceased person | yes |
+| 500 | unknown error | yes |
+| 550 | cancelled by the system; retry later | yes, but retryable |
+
+Two of these collapse several distinct causes into one number: **450** covers four token
+problems and **460** covers six certificate ones. The distinction arrives only in
+`StatusInfo.description`, so surface the server's wording rather than a code-to-string
+table of our own.
+
+**Treat any unrecognised code as terminal.** Assuming otherwise polls a dead operation for
+ever, and the docs already warn that on DEMO and PROD a legitimate 100 can persist for as
+long as the certificate issuer's OCSP/CRL response takes (§4.2) — so "still 100" cannot be
+distinguished from "stuck" by elapsed time alone.
+
 ---
 
 ## 5. Error model — resolves DESIGN.md §6.7 [VERIFY]
@@ -883,10 +919,13 @@ Carried forward; must be resolved before the code that depends on them is writte
 - **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7). The only genuinely
   open blocker of the original set. `faktury/weryfikacja-faktury.md` is the next place to
   look; not yet pinned.
-- **Error-code catalogue.** Discrete codes are documented per endpoint rather than
-  centrally, and `uwierzytelnianie.md` says outright that the auth failure codes "will be
-  available in the endpoint's technical documentation". `21470` (§10.2) and `21405` are
-  known; the rest must be collected from the spec per operation, or observed.
+- **Error-code catalogue.** Still open, but **narrowed**: the eleven *authentication
+  operation* status codes are now recorded at §4.8, from the reference implementation.
+  What remains is the per-endpoint `ExceptionResponse` codes — `21470` (§10.2) and `21405`
+  are known; the rest must be collected from the spec per operation, or observed. The C#
+  client has sibling files (`CertificateStatusCodeResponse`, `InvoiceInSessionStatusCodeResponse`,
+  `OperationStatusCodeResponse`, `InvoiceExportStatusCodeResponse`) that will likely close
+  the corresponding areas the same way when those subsystems are built.
 - **Nightly higher rate limits** (§6.1) — the 20:00–06:00 values are explicitly
   unpublished pending production tuning. Do not hard-code a nightly multiplier.
 - **`upo.pages[].downloadUrl` path prefix** — see §14.2. Recorded as a divergence rather
