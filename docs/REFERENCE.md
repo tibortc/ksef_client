@@ -769,6 +769,36 @@ Confirmed the way §6a.1 confirmed the NIP algorithm — it validates every PESE
 documentation ships (`15062788702`, `30112206276`, `38092277125`, `88102341294`) and
 rejects those values with the check digit altered.
 
+**PESEL is a structured identifier, and KSeF enforces it.** Learned from the API itself,
+2026-08-23 — `POST /testdata/person` rejected a checksum-perfect PESEL with:
+
+```
+400 [21405] Żądanie jest nieprawidłowe. Invalid PESEL format.
+```
+
+The first six digits encode a **birth date**, with the century folded into the month field:
+
+| Month field | Century |
+|---|---|
+| 01–12 | 1900s |
+| 21–32 | 2000s |
+| 41–52 | 2100s |
+| 61–72 | 2200s |
+| 81–92 | 1800s |
+
+Confirmed by decoding every PESEL the upstream docs ship: `15062788702` → 1915-06-27,
+`30112206276` → 1930-11-22, `38092277125` → 1938-09-22, `88102341294` → 1988-10-23. All
+four are plain 1900s dates.
+
+Nothing upstream *states* this. `dane-testowe-scenariusze.md` shows PESELs in examples but
+never describes their structure, and the OpenAPI schema types the field as `string`. **This
+is the first fact in this ledger whose source is the API's own behaviour** rather than a
+document or a reference implementation — a strictly more reliable tier than anything above
+it, and the only one that cannot be obtained offline.
+
+The generator draws births from 1950–1999; the validator accepts the full scheme range,
+because 1800s and 2000s PESELs are legitimate even if implausible for a test person.
+
 **NIP checksum, stated precisely** because it is easy to get backwards: the check digit
 *is* the weighted sum `mod 11`, **not** `11 - (sum mod 11)`. Confirmed against four NIPs
 from the upstream docs. A sum of 10 is unrepresentable, so that draw is discarded.
@@ -781,6 +811,52 @@ Tokens are minted in a `Nip` or `InternalId` context with a fixed permission set
 creation — changing permissions requires a new token. For this gem's integration suite,
 `InvoiceRead` and `InvoiceWrite` are the relevant ones. Treat the token as a confidential
 secret (`tokeny-ksef.md` says so explicitly).
+
+### 6a.4 Verified against live TEST, 2026-08-23
+
+`rake auth:bootstrap` completed against the TEST environment and produced a usable KSeF
+token. Because a token can only be minted with an `accessToken`, which requires a redeemed
+authentication, which requires status `200`, that single outcome establishes several things
+that no amount of offline testing could:
+
+- **KSeF accepts the XAdES-BES signature this gem produces.** The combination chosen in
+  §4.3 — enveloped, exclusive c14n, `rsa-sha256`, `xmlenc#sha256`, with the ETSI `Type` URI
+  on the `SignedProperties` reference — is accepted in practice, not merely permitted by
+  the allow-list.
+- **The 2.0 namespace is correct** (§14.4). The document was sent with
+  `xmlns="http://ksef.mf.gov.pl/auth/token/2.0"` and was not rejected. Whether 2.1 would
+  also be accepted remains unverified; there is now no reason to find out.
+- **`/testdata/person` really is unauthenticated**, as §6a.1 read from the contract.
+- **A self-signed certificate is accepted on TEST** (§4.6), carrying the PESEL as
+  `serialNumber=PNOPL-<pesel>` (§4.4).
+- **The whole §4.2 flow works as ledgered**, including polling on `StatusInfo.code` and
+  single-use redemption.
+
+Two failures on the way there, both bugs on this side rather than upstream: a local OpenSSL
+trust store with no CA bundle (see §6a.5), and the PESEL structure above.
+
+### 6a.5 A missing CA bundle looks like a broken server certificate
+
+Also learned the hard way, 2026-08-23. On a machine where Homebrew's `openssl@3` is
+installed but `/usr/local/etc/openssl@3/cert.pem` is absent, Ruby has **no trust store at
+all**, and the failure reads:
+
+```
+certificate verify failed (self-signed certificate in certificate chain)
+```
+
+which points at the wrong thing entirely. KSeF's chain is genuine —
+`*.ksef.mf.gov.pl` → `GeoTrust TLS RSA CA G1` → `DigiCert Global Root G2` — and the "self-signed
+certificate" being complained about is that DigiCert root, self-signed as every root is.
+With no store to chain to, OpenSSL reports the last certificate it saw.
+
+`curl` succeeds throughout, because it uses Apple's store rather than OpenSSL's, so a
+reachability check proves nothing about what Ruby will do.
+
+Fix without weakening anything: point OpenSSL at a real bundle,
+`SSL_CERT_FILE=/usr/local/etc/ca-certificates/cert.pem`, or reinstall Homebrew's
+`ca-certificates` to restore the symlink. **Never by disabling verification** — that is a
+hard rule, and the misleading error message makes it a tempting one to break.
 
 ---
 

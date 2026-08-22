@@ -72,6 +72,21 @@ RSpec.configure do |config|
   # Release gates are noise during development and blocking at release. `release.yml`
   # sets KSEF_RELEASE_CHECK=1.
   config.filter_run_excluding(:release_check) unless ENV["KSEF_RELEASE_CHECK"] == "1"
+
+  # Live integration specs reach the network and consume shared TEST-environment state, so
+  # they are opt-in by an explicit variable rather than by tag alone. RSpec ANDs exclusion
+  # filters with CLI inclusions, so `--tag integration` on its own would match nothing if
+  # this exclusion were unconditional — the env var is what actually lifts it.
+  config.filter_run_excluding(:integration) unless ENV["KSEF_INTEGRATION"] == "1"
+
+  # WebMock is disabled suite-wide above. Integration specs opt back in for their own
+  # duration only, so a failure cannot leave the network open for whatever runs next.
+  config.around(:each, :integration) do |example|
+    WebMock.allow_net_connect!
+    example.run
+  ensure
+    WebMock.disable_net_connect!(allow_localhost: false)
+  end
   config.example_status_persistence_file_path = ".rspec_status"
   config.disable_monkey_patching!
   config.warnings = true

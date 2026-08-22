@@ -253,7 +253,7 @@ KSeF 2.0 offers exactly two authentication methods (`uwierzytelnianie.md`, verif
 **Scope change, 2026-08-22.** XAdES was originally deferred to 0.3. It moves into **0.1**, for three reasons:
 
 1. **The token flow cannot be bootstrapped without it.** A KSeF token can only be generated after a one-time XAdES authentication (`tokeny-ksef.md`; `POST /tokens` requires `Bearer`, `/auth/xades-signature` requires nothing). Shipping token-only auth means every new user must first obtain a token using somebody else's client. See `docs/REFERENCE.md` §6a.2.
-2. It is what unblocks §12.4 — the nightly TEST integration currently cannot mint its own credentials.
+2. It is what unblocks §12.4 — the nightly TEST integration cannot otherwise mint its own credentials. (Done: §12.4 resolved 2026-08-23.)
 3. `ksef-rb` already ships certificate auth (§1). Token-only is not a viable 0.1.
 
 **Shared prologue.** `POST /auth/challenge` → `{challenge, timestamp, timestampMs, clientIp}`. Challenge lifetime is **10 minutes** *(verified: `uwierzytelnianie.md`)*.
@@ -464,5 +464,5 @@ After sustained production use; API stability promise begins.
 1. Repo/org placement and gem author metadata (name, email, homepage).
 2. XSD redistribution outcome (§7.7 tier 2) — bundle vs fetch-and-cache.
 3. Default rounding strategy confirmation (`:per_line` proposed) once real accounting examples are in fixtures.
-4. Whether TEST-env credentials for nightly CI come from a dedicated test NIP (recommended) — needs human to provision via the TEST self-service tools.
+4. ~~Whether TEST-env credentials for nightly CI come from a dedicated test NIP (recommended) — needs human to provision via the TEST self-service tools.~~ **Resolved 2026-08-23.** A dedicated invented NIP, provisioned by `rake auth:bootstrap` (docs/REFERENCE.md §6a.3) rather than by hand. `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN` are stored in the `ksef-test` environment and the nightly schedule is enabled. The run also confirmed that KSeF accepts this gem's XAdES signature (§6a.4).
 5. Any trademark/naming sensitivities around "KSeF" in the gem description (likely none — official SDKs use it — but confirm before publishing).

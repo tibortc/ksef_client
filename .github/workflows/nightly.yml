@@ -3,16 +3,13 @@ name: nightly
 # Live integration against the KSeF TEST environment. Never runs per-PR (DESIGN.md §9):
 # it consumes shared TEST-environment state and is subject to the API's rate limits.
 on:
-  # The schedule is deliberately disabled until the `ksef-test` environment has
-  # KSEF_TEST_NIP / KSEF_TEST_TOKEN — that needs a provisioned TEST NIP (DESIGN.md §12.4).
-  # Restore this line once the secrets exist; without them the job can only fail, and a
-  # permanently-red nightly teaches everyone to ignore CI.
+  # Enabled 2026-08-23, once `rake auth:bootstrap` had provisioned KSEF_TEST_NIP and
+  # KSEF_TEST_TOKEN in the `ksef-test` environment (DESIGN.md §12.4, resolved).
   #
   # 02:30 UTC is deliberately outside 16:00-18:00 local, when the Ministry runs scheduled
-  # maintenance on the test environments (docs/REFERENCE.md §2).
-  #
-  # schedule:
-  #   - cron: "30 2 * * *"
+  # maintenance on the test environments (docs/REFERENCE.md §11.3).
+  schedule:
+    - cron: "30 2 * * *"
   workflow_dispatch:
 
 jobs:
@@ -43,8 +40,11 @@ jobs:
         run: bundle exec rake verify:artifacts
 
       - name: Run live integration specs
+        # KSEF_INTEGRATION lifts the exclusion filter; --tag then selects only these specs.
+        # Both are needed: RSpec ANDs exclusion filters with CLI inclusions.
         run: bundle exec rspec --tag integration
         env:
           KSEF_ENV: test
+          KSEF_INTEGRATION: "1"
           KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
           KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}

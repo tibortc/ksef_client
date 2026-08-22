@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "date"
 require "openssl"
 require "securerandom"
 
@@ -30,6 +31,16 @@ module KsefBootstrap
     # `(10 - sum % 10) % 10`. Verified against `15062788702`, `30112206276`,
     # `38092277125` and `88102341294` — every PESEL appearing in the upstream docs.
     PESEL_WEIGHTS = [1, 3, 7, 9, 1, 3, 7, 9, 1, 3].freeze
+
+    # A PESEL is **not** eleven arbitrary digits with a check digit: the first six encode a
+    # birth date, with the century folded into the month field by these offsets. KSeF
+    # enforces this — a checksum-valid PESEL with a nonsense date is rejected with
+    # `400 [21405] Invalid PESEL format` (docs/REFERENCE.md §6a.3).
+    PESEL_CENTURY_OFFSETS = { 80 => 1800, 0 => 1900, 20 => 2000, 40 => 2100, 60 => 2200 }.freeze
+
+    # Births are drawn from the 1900s, which needs no offset and matches every upstream
+    # example. Adults, and comfortably in the past.
+    PESEL_BIRTH_YEARS = (1950..1999)
 
     class << self
       # Digit 1 must be non-zero and digits 2–3 must not both be zero, per the auth
@@ -62,19 +73,51 @@ module KsefBootstrap
       end
 
       def pesel(random = Random.new)
-        body = Array.new(10) { random.rand(0..9) }
+        birth = random_birth(random)
+        body = format(
+          "%<yy>02d%<mm>02d%<dd>02d%<serial>04d",
+          yy: birth.year % 100, mm: birth.month, dd: birth.day, serial: random.rand(0..9999)
+        ).chars.map(&:to_i)
         (body + [pesel_check_digit(body)]).join
+      end
+
+      def random_birth(random)
+        year = random.rand(PESEL_BIRTH_YEARS)
+        month = random.rand(1..12)
+        Date.new(year, month, random.rand(1..Date.new(year, month, -1).day))
+      end
+
+      # @return [Date, nil] nil when the first six digits do not encode a real date
+      def pesel_birth_date(value)
+        parts = pesel_date_parts(value)
+        return nil unless parts && Date.valid_date?(*parts)
+
+        Date.new(*parts)
+      end
+
+      # @return [Array(Integer, Integer, Integer), nil] year, month, day — nil when the
+      #   month field decodes to no known century
+      def pesel_date_parts(value)
+        month_field = value[2, 2].to_i
+        offset = (month_field - 1) / 20 * 20
+        century = PESEL_CENTURY_OFFSETS[offset]
+        return nil if century.nil?
+
+        [century + value[0, 2].to_i, month_field - offset, value[4, 2].to_i]
       end
 
       def pesel_check_digit(digits)
         (10 - (PESEL_WEIGHTS.each_with_index.sum { |w, i| w * digits[i] } % 10)) % 10
       end
 
+      # Checks the encoded date as well as the checksum. Checking only the checksum is what
+      # let the generator emit `44812176391` (1844) and `98681059372` (year 2298) — both
+      # checksum-perfect, both rejected by KSeF.
       def pesel_valid?(value)
         return false unless value.to_s.match?(/\A\d{11}\z/)
 
         digits = value.to_s.chars.map(&:to_i)
-        pesel_check_digit(digits.first(10)) == digits[10]
+        pesel_check_digit(digits.first(10)) == digits[10] && !pesel_birth_date(value.to_s).nil?
       end
     end
   end

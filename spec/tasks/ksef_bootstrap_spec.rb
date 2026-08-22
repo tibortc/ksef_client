@@ -25,6 +25,33 @@ RSpec.describe KsefBootstrap do
       expect(described_class.pesel_valid?("15062788703")).to be(false)
     end
 
+    # KSeF rejected a checksum-perfect PESEL with `400 [21405] Invalid PESEL format`, which
+    # is how we learned the first six digits must encode a real date (§6a.3). Checking only
+    # the checksum is what let the generator emit these.
+    it "rejects a checksum-valid PESEL whose date does not exist" do
+      expect(described_class.pesel_valid?("53689347973")).to be(false)
+      expect(described_class.pesel_valid?("80675734790")).to be(false)
+    end
+
+    it "decodes the birth date, century included" do
+      expect(described_class.pesel_birth_date("88102341294")).to eq(Date.new(1988, 10, 23))
+      expect(described_class.pesel_birth_date("44812176391")).to eq(Date.new(1844, 1, 21))
+    end
+
+    it "returns no date when the month field decodes to no century" do
+      expect(described_class.pesel_birth_date("80675734790")).to be_nil
+    end
+
+    # The validator follows the scheme, which permits 1800s through 2200s. The generator is
+    # deliberately narrower.
+    it "generates only plausible adult birth dates, though the scheme allows more" do
+      random = Random.new(11)
+      dates = Array.new(40) { described_class.pesel_birth_date(described_class.pesel(random)) }
+
+      expect(dates).to all(be_a(Date))
+      expect(dates.map(&:year)).to all(be_between(1950, 1999))
+    end
+
     it "rejects anything that is not eleven digits" do
       expect(described_class.pesel_valid?("1506278870")).to be(false)
       expect(described_class.pesel_valid?(nil)).to be(false)
