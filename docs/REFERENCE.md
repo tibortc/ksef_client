@@ -44,6 +44,23 @@ The schemas are published under the repository's MIT licence, which permits
 redistribution. **Decision: bundle the XSD in the gem.** The first-run
 fetch-and-cache fallback contemplated by DESIGN.md §7.7 tier 2 is not needed.
 
+**This reasoning does not generalise to every schema in the repository, and the
+distinction is load-bearing.** It holds for the FA(3), auth and UPO schemas, which are the
+Ministry's own work and therefore covered by its MIT licence. It does *not* hold for the
+W3C, OASIS and ETSI schemas that upstream redistributes inside its PEF bundle — the
+Ministry's licence cannot relicense someone else's document. Those are pinned to
+`spec/fixtures/xades/` and deliberately **not** packaged; see §4.3. Two questions decide
+where a pinned schema goes:
+
+1. **Is it needed at runtime, or only by the tests?** Test-only artifacts belong in
+   `spec/fixtures/` regardless of licence, because shipping them is dead weight.
+2. **Whose document is it?** If the answer is not "Ministerstwo Finansów", this section's
+   MIT reasoning does not apply and bundling needs its own justification.
+
+Anything that would move a third-party schema into `lib/` — for instance offering runtime
+signature validation — is a licensing decision, not a refactor, and belongs with the human
+(DESIGN.md §12).
+
 ### 1.3 Pinned prose documentation
 
 `ksef-api` holds **77 files**; the four schemas and the OpenAPI document above were
