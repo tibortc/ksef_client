@@ -19,6 +19,8 @@ RSpec.describe "pinned upstream artifacts" do
       "lib/ksef/fa3/schema/bazowe/ElementarneTypyDanych_v10-0E.xsd",
       "lib/ksef/fa3/schema/bazowe/KodyKrajow_v10-0E.xsd",
       "lib/ksef/fa3/schema/bazowe/StrukturyDanych_v10-0E.xsd",
+      "lib/ksef/auth/schema/schemat_auth_v2-0.xsd",
+      "lib/ksef/auth/schema/schemat_auth_v2-1.xsd",
       "spec/fixtures/openapi/open-api.json"
     )
   end
@@ -64,6 +66,26 @@ RSpec.describe "pinned upstream artifacts" do
 
     it "qualifies elements, so the serializer must namespace every child" do
       expect(xsd).to include('elementFormDefault="qualified"')
+    end
+  end
+
+  describe "the AuthTokenRequest schema" do
+    let(:xsd) do
+      File.read(File.join(root, "lib/ksef/auth/schema/schemat_auth_v2-1.xsd"), encoding: "UTF-8")
+    end
+
+    # Recorded in docs/REFERENCE.md §4.1.
+    it "targets the verified auth namespace" do
+      expect(xsd).to include('targetNamespace="http://ksef.mf.gov.pl/auth/token/2.1"')
+    end
+
+    it "declares the AuthTokenRequest root" do
+      expect(xsd).to include('<xsd:element name="AuthTokenRequest"')
+    end
+
+    it "offers exactly the two documented subject identifier types" do
+      expect(xsd.scan(/enumeration value="(certificate\w+)"/).flatten)
+        .to contain_exactly("certificateSubject", "certificateFingerprint")
     end
   end
 end

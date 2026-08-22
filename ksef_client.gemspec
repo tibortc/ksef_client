@@ -34,10 +34,13 @@ Gem::Specification.new do |spec|
   spec.metadata["bug_tracker_uri"]       = "#{spec.homepage}/issues"
   spec.metadata["documentation_uri"]     = "https://rubydoc.info/gems/ksef_client/#{Ksef::VERSION}"
 
+  # Globbed across all of lib/ rather than per-subsystem: the FA(3) and auth schemas are
+  # both loaded at runtime, and a path-specific glob silently omits any schema added
+  # later. `spec/release_readiness_spec.rb` asserts both sets are present.
   spec.files = Dir[
     "lib/**/*.rb",
-    "lib/ksef/fa3/schema/**/*.xsd",
-    "lib/ksef/fa3/schema/LICENSE.upstream.txt",
+    "lib/**/*.xsd",
+    "lib/**/LICENSE.upstream.txt",
     "docs/*.md",
     "*.md",
     "LICENSE"

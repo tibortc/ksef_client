@@ -34,7 +34,14 @@ Key API 2.0 characteristics *(verified 2026-08)*:
 - Three environments: **TEST** (public, includes a helper API for generating test data), **DEMO** (pre-production), **PROD**.
 - The Ministry of Finance maintains official open-source SDKs in **C#** and **Java** (GitHub org `CIRFMF`); the C# client is actively released (2.7.x as of 2026-08). There is **no Ruby SDK** — that is the gap this gem fills.
 
-The only `ksef`-named gem on RubyGems is an abandoned 0.1.0 skeleton (June 2025), hence our name choice.
+**Prior art in Ruby (revised 2026-08-22).** An earlier draft of this section claimed there was no Ruby SDK. That is false and the claim is withdrawn. RubyGems carries:
+
+- `ksef` — abandoned 0.1.0 skeleton (June 2025), hence our name choice.
+- **`ksef-rb`** — Michał Siwek, MIT, 0.1.3 as of 2026-07-13, ~626 downloads. A genuine KSeF 2.0 client built against the same OpenAPI spec and the same CIRFMF reference clients, supporting **both** KSeF-token and certificate authentication.
+
+`ksef-rb` is ahead of us on authentication and on shipping. Where it stops is FA(3) *authoring*: it carries an `invoice_header` and invoice transport, but no schema-backed builder, no bundled XSD and no validation — the caller supplies the XML.
+
+**The gap this gem fills is therefore narrower and more specific than "there is no Ruby SDK":** it is the only Ruby client that can *author and validate* an FA(3) document rather than only transport one. That is also the larger half of the work, and the half where getting it wrong produces rejected or silently malformed invoices. `ksef-rb` is MIT-licensed and worth reading before implementing the crypto and session layers — it has solved the same problems.
 
 ---
 
@@ -174,8 +181,9 @@ lib/
     │   ├── challenge.rb
     │   ├── token.rb          # credential object (context NIP + KSeF token)
     │   ├── token_flow.rb     # challenge → RSA-OAEP → JWT
-    │   ├── xades_flow.rb     # 0.3; depends on signer interface below
-    │   ├── signer.rb         # pluggable signer interface (defined in 0.1, used in 0.3)
+    │   ├── xades_flow.rb     # 0.1; AuthTokenRequest → sign → submit → redeem
+    │   ├── signer.rb         # pluggable signer interface + built-in XAdES-BES signer
+    │   ├── schema/           # pinned AuthTokenRequest XSD v2-0 / v2-1
     │   └── access_token.rb   # JWT storage, expiry, refresh
     ├── crypto/
     │   ├── public_keys.rb    # fetch + cache KSeF certificates, select by usage
@@ -222,17 +230,35 @@ Ksef::Client.new(env: :test, auth: ..., logger: nil, timeout: {open: 10, read: 6
 
 One Faraday connection per client (thread-safe with net_http). Middleware stack: JSON encode/decode, auth header injection (skipped for auth endpoints), instrumentation hook (`config.logger` duck, redacted), error raising mapped through §6.7. Timeouts and proxy honored from config.
 
-### 6.3 Authentication (0.1: KSeF token flow)
+### 6.3 Authentication (0.1: **both** KSeF token and certificate/XAdES)
 
-Flow (names indicative; pin against OpenAPI **[VERIFY]**):
+KSeF 2.0 offers exactly two authentication methods (`uwierzytelnianie.md`, verified 2026-08): a qualified electronic signature over an `AuthTokenRequest` XML document, and a KSeF token. Both begin with the same challenge and end at the same token-redemption endpoint.
 
-1. `GET` public-key certificates → select the token-encryption certificate by its declared usage; cache with TTL.
-2. `POST` auth challenge → `{challenge, timestampMs}`; challenge valid 10 min *(verified)*.
-3. Build plaintext `"#{token}|#{timestampMs}"`, encrypt with RSA-OAEP (digest/MGF per docs **[VERIFY]**) using OpenSSL `PKey#encrypt` with explicit `rsa_padding_mode: "oaep"`, `rsa_oaep_md`, `rsa_mgf1_md` options.
-4. Submit → receive access token (JWT) (+ refresh token if the API provides one **[VERIFY]**).
-5. `Auth::AccessToken` tracks expiry (from response), refreshes proactively at ~80% lifetime under mutex; on 401, one refresh-and-replay for **idempotent** requests only.
+**Scope change, 2026-08-22.** XAdES was originally deferred to 0.3. It moves into **0.1**, for three reasons:
 
-**XAdES (0.3):** define `Ksef::Auth::Signer` interface **now** — `#sign(xml_string) -> signed_xml_string` — so 0.1 users with external signing services aren't blocked later. 0.3 ships a built-in XAdES-BES enveloped signer (Nokogiri C14N + OpenSSL) accepting keypair/cert; detached form must be rejected with a clear error *(verified: API rejects detached)*.
+1. **The token flow cannot be bootstrapped without it.** A KSeF token can only be generated after a one-time XAdES authentication (`tokeny-ksef.md`; `POST /tokens` requires `Bearer`, `/auth/xades-signature` requires nothing). Shipping token-only auth means every new user must first obtain a token using somebody else's client. See `docs/REFERENCE.md` §6a.2.
+2. It is what unblocks DESIGN.md §12.4 — the nightly TEST integration currently cannot mint its own credentials.
+3. `ksef-rb` already ships certificate auth (§1). Token-only is not a viable 0.1.
+
+**Shared prologue.** `POST /auth/challenge` → `{challenge, timestamp, timestampMs, clientIp}`. Challenge lifetime is **10 minutes** *(verified: `uwierzytelnianie.md`)*.
+
+**Token flow:**
+
+1. `GET /security/public-key-certificates` → select the token-encryption certificate by declared usage; cache with TTL.
+2. Build plaintext `"#{token}|#{timestampMs}"`, encrypt with RSA-OAEP (digest/MGF per docs **[VERIFY]**) using OpenSSL `PKey#encrypt` with explicit `rsa_padding_mode: "oaep"`, `rsa_oaep_md`, `rsa_mgf1_md` options.
+3. `POST /auth/ksef-token`.
+
+**Certificate / XAdES flow:**
+
+1. Build an `AuthTokenRequest` XML against the pinned auth XSD (`lib/ksef/auth/schema/`, namespace `http://ksef.mf.gov.pl/auth/token/2.1`): `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` (`certificateSubject` or `certificateFingerprint`), optional `AuthorizationPolicy` restricting client IPs.
+2. Sign it as XAdES via `Ksef::Auth::Signer` — `#sign(xml_string) -> signed_xml_string`. The interface stays, so users with an external signing service or HSM can supply their own; 0.1 additionally ships a built-in enveloped XAdES-BES signer (Nokogiri C14N + OpenSSL) taking a keypair and certificate. Detached form must be rejected with a clear error *(verified: API rejects detached)*.
+3. `POST /auth/xades-signature` with `Content-Type: application/xml`.
+
+**Shared epilogue.** Poll the operation, then `POST /auth/token/redeem` → `accessToken` (JWT, short-lived, expiry in `exp`) and `refreshToken` (valid up to **7 days**, reusable) *(verified)*. `Auth::AccessToken` tracks expiry from `exp`, refreshes proactively at ~80% lifetime under mutex; on 401, one refresh-and-replay for **idempotent** requests only.
+
+Note an asymmetry worth honouring: an `accessToken` stays valid until `exp` **even if the user's permissions change**, so revocation is not immediate. Do not treat a live token as proof of current authorisation.
+
+Self-signed certificates are accepted on **TEST only** — never DEMO or PROD.
 
 ### 6.4 Crypto module
 
@@ -378,8 +404,11 @@ Transport: repo scaffold, gemspec, CI matrix green on empty suite, `configuratio
 **Done when:** codegen is reproducible (`rake fa3:generate` → empty diff), VAT golden files XSD-valid, CI matrix green.
 
 ### Phase 2 — Make it real
-Transport: token auth flow, crypto module **with golden vectors passing**, online session end-to-end against TEST (recorded + live), send/status/UPO/download. Builder: validator tiers 1–3, computed summaries with both rounding strategies, remaining invoice types (order per §7.4), parser + round-trip law green on Ministry samples.
-**Done when:** §8 contract runs against TEST; all seven types build, validate, round-trip.
+Transport: **both auth flows** — KSeF token *and* certificate/XAdES (§6.3) — crypto module **with golden vectors passing**, online session end-to-end against TEST (recorded + live), send/status/UPO/download. Builder: validator tiers 1–3, computed summaries with both rounding strategies, remaining invoice types (order per §7.4), parser + round-trip law green on Ministry samples.
+
+Build the **certificate flow first**: it is the only one that can bootstrap a credential from nothing, so it is what makes the nightly TEST suite self-sufficient and unblocks §12.4. The token flow then has something to authenticate with when minting its first token.
+
+**Done when:** §8 contract runs against TEST; a KSeF token can be minted end-to-end by this gem with no external client; all seven types build, validate, round-trip.
 
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.
@@ -389,7 +418,9 @@ Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publi
 Batch sessions (ZIP/parts/storage upload, per-invoice results; adds `rubyzip`), invoice query/search + pagination, package export, complete error-code catalog + retry semantics hardened.
 
 ### 0.3
-XAdES auth (built-in signer behind the §6.3 interface), KSeF certificate lifecycle endpoints, permissions API, QR code generation for offline modes.
+KSeF certificate lifecycle endpoints (`/certificates/*` — enrolling and managing KSeF-issued certificates, distinct from the qualified signature used to authenticate), permissions API, QR code generation for offline modes.
+
+*(XAdES auth moved out of 0.3 and into 0.1 on 2026-08-22 — see §6.3.)*
 
 ### 1.0
 After sustained production use; API stability promise begins.

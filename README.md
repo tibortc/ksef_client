@@ -8,7 +8,14 @@ e-Faktur), with a standalone **FA(3)** invoice builder.
 
 Invoicing through KSeF has been a legal obligation since 2026-02-01 for taxpayers with
 2024 gross sales above 200M PLN, and since 2026-04-01 for essentially everyone else. The
-Ministry of Finance publishes official SDKs in C# and Java; this gem fills the Ruby gap.
+Ministry of Finance publishes official SDKs in C# and Java, but none for Ruby.
+
+**How this differs from [`ksef-rb`](https://github.com/skycocker/ksef-rb).** That gem is a
+working KSeF 2.0 client and is further along on transport; if you already generate FA(3)
+XML yourself, it may be all you need. `ksef_client` aims at the other half of the problem:
+**authoring and validating** the invoice document — a schema-backed builder for all seven
+invoice types, the FA(3) XSD bundled, and three tiers of validation before anything is
+submitted.
 
 > **Status: pre-release, under active development.** The transport foundations
 > (configuration, environments, error model, HTTP layer) are in place. Authentication,
@@ -129,10 +136,14 @@ integrators.
 
 | Version | Scope |
 |---|---|
-| 0.1.0 | KSeF-token auth, crypto, online sessions, send/status/UPO/download, full FA(3) builder for all seven invoice types |
+| 0.1.0 | **Both auth methods** — certificate/XAdES *and* KSeF token — crypto, online sessions, send/status/UPO/download, full FA(3) builder for all seven invoice types |
 | 0.2 | Batch sessions, invoice query/search, package export, hardened error catalogue |
-| 0.3 | XAdES authentication, certificate lifecycle, permissions API, offline QR codes |
+| 0.3 | KSeF certificate lifecycle endpoints, permissions API, offline QR codes |
 | 1.0 | After sustained production use; API stability promise begins |
+
+Certificate authentication is in 0.1 rather than deferred, because a KSeF token can only
+be issued *after* a one-time authentication with a qualified signature — so a token-only
+client cannot get you started from nothing.
 
 ## Development
 

@@ -55,6 +55,14 @@ RSpec.describe "release readiness", :release_check do
       expect(gemspec.files).to include("lib/ksef/fa3/schema/schemat_FA(3)_v1-0E.xsd")
     end
 
+    # Every XSD under lib/ is loaded at runtime, so a missing one is a runtime failure in
+    # the packaged gem that no local run would catch.
+    it "ships every pinned schema, not just the FA(3) ones" do
+      on_disk = Dir[File.expand_path("../lib/**/*.xsd", __dir__)]
+                .map { |f| f.sub("#{File.expand_path("..", __dir__)}/", "") }
+      expect(gemspec.files).to include(*on_disk)
+    end
+
     it "does not ship the design or agent-instruction documents" do
       expect(gemspec.files).not_to include("DESIGN.md", "CLAUDE.md")
     end

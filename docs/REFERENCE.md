@@ -25,6 +25,8 @@ retained here as `LICENSE.upstream.txt`).
 | `lib/ksef/fa3/schema/bazowe/ElementarneTypyDanych_v10-0E.xsd` | `faktury/schemy/FA/bazowe/…` | `8daf4d3771de200b26b697294cc906a2add3de9acfbbd97f4b1bd4fc0e5ecb2f` |
 | `lib/ksef/fa3/schema/bazowe/KodyKrajow_v10-0E.xsd` | `faktury/schemy/FA/bazowe/…` | `48be2a9f181d7ff80f185c62491ba12604c5cacbbe21af8e2aaaf2c585bbd214` |
 | `lib/ksef/fa3/schema/bazowe/StrukturyDanych_v10-0E.xsd` | `faktury/schemy/FA/bazowe/…` | `cb08348374598e1e716e086c40d740390fb9e1bfa3aba1f4ec4cba0e1ef6d60f` |
+| `lib/ksef/auth/schema/schemat_auth_v2-0.xsd` | `auth/schemy/schemat_auth_v2-0.xsd` | see `docs/artifacts.sha256` |
+| `lib/ksef/auth/schema/schemat_auth_v2-1.xsd` | `auth/schemy/schemat_auth_v2-1.xsd` | see `docs/artifacts.sha256` |
 
 `rake verify:artifacts` re-checks these digests; treat a mismatch as an upstream change,
 not as a local bug.
@@ -141,19 +143,61 @@ reference number or the KSeF number.
 
 ## 4. Authentication
 
+Source: `uwierzytelnianie.md` (10.07.2025) plus the pinned spec. Retrieved 2026-08-22.
+
 - Security scheme: a single HTTP **`Bearer`** scheme, `bearerFormat: JWT`
   (`components.securitySchemes.Bearer`).
+- **Exactly two authentication methods exist**, and both share the same challenge
+  prologue and the same token-redemption epilogue:
+  1. **Qualified electronic signature (XAdES)** — an `AuthTokenRequest` XML document
+     signed with a certificate. The authenticating subject is read *from the signing
+     certificate*. `POST /auth/xades-signature`, `Content-Type: application/xml`.
+  2. **KSeF token** — a JSON document carrying a previously issued token.
+     `POST /auth/ksef-token`.
 - `POST /auth/challenge` returns `AuthenticationChallengeResponse`, required fields:
   `challenge`, `timestamp` (date-time), `timestampMs` (int64, Unix ms), `clientIp`.
+- **Challenge lifetime is 10 minutes** — now *verified* from `uwierzytelnianie.md`
+  ("Czas życia challenge'a wynosi 10 minut"), superseding the earlier note in this
+  section that it was documentation-hearsay and unconfirmed.
 - `clientIp` in the challenge response ties into the `ip-not-allowed` authorisation
   failure (§5.3): the API pins the session to the IP seen at authentication.
-- Challenge validity of 10 minutes is asserted by DESIGN.md §1 as verified; **not**
-  re-confirmed from the pinned spec — the spec does not encode it. Treat as
-  documentation-sourced, and do not build a hard timer on it without re-verification.
+- The authenticating subject must already hold at least one active permission in the
+  requested context, or no access token is issued.
 
-Token redemption and refresh exist as distinct endpoints (`/auth/token/redeem`,
-`/auth/token/refresh`), which confirms the DESIGN.md §6.3 step 4 [VERIFY]: the API does
-issue a refresh token alongside the access token.
+### 4.1 The `AuthTokenRequest` document
+
+Pinned at `lib/ksef/auth/schema/schemat_auth_v2-{0,1}.xsd` (§1). Both versions are
+accepted by the API; v2.1 is current.
+
+| Fact | Value |
+|---|---|
+| Target namespace (v2.1) | `http://ksef.mf.gov.pl/auth/token/2.1` |
+| `elementFormDefault` | `qualified` |
+| Root element | `AuthTokenRequest` |
+| Required children | `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` |
+| `SubjectIdentifierType` values | `certificateSubject`, `certificateFingerprint` |
+| Optional | `AuthorizationPolicy` → `AllowedIps` (`Ip4Address`, `Ip4Range`) |
+
+`ContextIdentifier` may be a NIP, an internal identifier, or a composite VAT-UE
+identifier. Signature form: enveloped or enveloping; **detached is rejected**.
+
+Self-signed certificates are accepted on **TEST only**. `srodowiska.md` is explicit that
+this is why TEST contexts are not isolated between integrators.
+
+### 4.2 Tokens
+
+`/auth/token/redeem` exchanges a completed authentication for the token pair;
+`/auth/token/refresh` renews. This confirms the DESIGN.md §6.3 step 4 [VERIFY] — the API
+does issue a refresh token alongside the access token.
+
+| Token | Lifetime | Notes |
+|---|---|---|
+| `accessToken` | short, expiry in the JWT `exp` claim (docs say "kilkanaście minut") | sent as `Authorization: Bearer` |
+| `refreshToken` | **up to 7 days**, reusable | renews the access token without re-authenticating |
+
+**Revocation is not immediate.** An `accessToken` stays valid until its `exp` even if the
+user's permissions change in the meantime. Never treat possession of a live token as
+proof of current authorisation.
 
 ---
 
@@ -299,12 +343,15 @@ The pinned spec corroborates it: `POST /tokens` declares `security: [{Bearer: []
 needs an existing session, while `/auth/xades-signature` needs none. There is no
 unauthenticated path to a first token.
 
-**Consequence for this gem:** 0.1 implements KSeF-token auth only; XAdES is roadmapped for
-0.3. So `KSEF_TEST_TOKEN` cannot be minted by this gem at its current stage. The token must
-be obtained out of band once — via the official `ksef-client-csharp`, which has a working
-XAdES flow, using a self-signed certificate (permitted on TEST; see
-`auth/testowe-certyfikaty-i-podpisy-xades.md`). After that one-time bootstrap the token is
-long-lived and this gem's token auth works normally.
+**Consequence for this gem — and why the roadmap changed.** This finding is what moved
+XAdES from 0.3 into 0.1 (DESIGN.md §6.3, decided 2026-08-22). A token-only client cannot
+issue its own first credential, which would have forced every user — and our own nightly
+CI — to bootstrap via somebody else's client.
+
+Until the certificate flow is implemented, the interim workaround is a one-time
+out-of-band mint via the official `ksef-client-csharp`, using a self-signed certificate
+(permitted on TEST; see `auth/testowe-certyfikaty-i-podpisy-xades.md`). Once §6.3's
+certificate flow lands, this gem mints its own and the workaround is retired.
 
 Tokens are minted in a `Nip` or `InternalId` context with a fixed permission set chosen at
 creation — changing permissions requires a new token. For this gem's integration suite,
