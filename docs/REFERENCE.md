@@ -204,9 +204,29 @@ Source: `uwierzytelnianie.md` (10.07.2025) plus the pinned spec. Retrieved 2026-
 
 ### 4.1 The `AuthTokenRequest` document
 
-Pinned at `lib/ksef/auth/schema/schemat_auth_v2-{0,1}.xsd` (§1). Both versions are
-accepted by the API; **v2.1 is current and is the only one usable for validation** — v2.0
-does not compile as a schema at all (§14.4).
+Pinned at `lib/ksef/auth/schema/schemat_auth_v2-{0,1}.xsd` (§1).
+
+**Send the 2.0 namespace.** An earlier revision of this section said "both versions are
+accepted by the API; v2.1 is current" and this gem was built against 2.1 on that basis.
+That was an inference, not a verified fact, and checking the reference implementations
+(2026-08-22) contradicted it — see §14.4. Every piece of available evidence points at 2.0:
+
+| Source | Namespace |
+|---|---|
+| `ksef-client-csharp`, `AuthenticationTokenRequest.cs` | `[XmlRoot(Namespace = "…/auth/token/2.0")]` |
+| `ksef-client-java`, JAXB-generated `TContextIdentifier` etc. | generated against `…/2.0` |
+| `ksef-client-java`, its own bundled `AuthTokenRequest.xsd` | `targetNamespace="…/2.0"` |
+| all five worked examples in `CIRFMF/ksef-api` | `xmlns="…/2.0"` |
+
+Nothing observed emits 2.1. **Whether the API accepts 2.1 at all is unverified** and needs
+a live TEST call; until then 2.0 is the only defensible default.
+
+Validation is a separate question from what to send, because **v2.0's file does not compile
+as a schema** (§14.4). The rules therefore come from v2.1's file with its target namespace
+rewritten in memory to match the document — the same technique `Ksef::FA3::Validator` uses
+for its remote `schemaLocation`, and legitimate here because the two files are structurally
+identical: diffing them shows only the namespace and the three IP patterns differ, and
+v2.1's are the correct ones.
 
 | Fact | Value |
 |---|---|
@@ -1111,6 +1131,26 @@ So `schemat_auth_v2-0.xsd` cannot be used to validate anything — you get a sch
 compilation failure, not a validation result. (The same patterns also make dots optional
 via `\.?`, so even parsed loosely they would match `1111`.) **Resolution: validate against
 v2.1 only.** v2.1 rewrote all three patterns correctly.
+
+#### Neither reference client validates locally, and both send 2.0
+
+Checked 2026-08-22, and this is what settles how to respond to the defects below.
+
+- **C#** serialises via `XmlSerializer` in `AuthenticationTokenRequestSerializer` with no
+  schema attached, and writes the context value straight through
+  (`writer.WriteString(Value)`).
+- **Java** marshals via JAXB without ever calling `marshaller.setSchema(...)`.
+
+So the bundled XSD is a **codegen input, not a runtime check** in both clients, and the
+broken patterns below never fire for them: they emit the natural identifier and let the
+server decide. Notably the Java client ships its *own* edited copy of the 2.0 schema
+(`ksef-client/src/main/resources/xsd/AuthTokenRequest.xsd`) in which the IP patterns are
+repaired — just loosely, `([0-9]{1,3}\.){3}[0-9]{1,3}` would admit `999.999.999.999` —
+**but `TNipVatUE` and `TPeppolId` are left broken**, which is independent confirmation that
+those two are genuinely defective rather than misread.
+
+This gem does the same thing for those two types (emit the real value, treat local
+validation as advisory) and additionally sends the 2.0 namespace both clients use.
 
 #### Two of v2.1's four context identifiers cannot hold their real values
 

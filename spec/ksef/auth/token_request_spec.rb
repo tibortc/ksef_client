@@ -26,11 +26,25 @@ RSpec.describe Ksef::Auth::TokenRequest do
       expect(names).to eq(%w[Challenge ContextIdentifier SubjectIdentifierType])
     end
 
-    it "puts every element in the v2.1 namespace via a default declaration" do
+    # 2.0 by default: both official clients bind to it and every upstream example uses it
+    # (docs/REFERENCE.md §14.4). Getting this wrong would fail only against the live API.
+    it "declares the 2.0 namespace by default, as a default declaration with no prefix" do
       namespaces = parsed(request.to_xml).xpath("//*").map { |n| n.namespace&.href }.uniq
 
-      expect(namespaces).to eq([described_class::NAMESPACE])
+      expect(namespaces).to eq([Ksef::Auth::NAMESPACES.fetch("2.0")])
       expect(parsed(request.to_xml).root.namespace.prefix).to be_nil
+    end
+
+    it "can opt into 2.1" do
+      xml = request(schema_version: "2.1")
+
+      expect(xml.namespace).to eq(Ksef::Auth::NAMESPACES.fetch("2.1"))
+      expect(xml.validate!).to be(true)
+    end
+
+    it "rejects an unknown schema version" do
+      expect { request(schema_version: "3.0") }
+        .to raise_error(Ksef::ValidationError, /Unknown schema version "3.0".*"2.0", "2.1"/m)
     end
 
     it "declares UTF-8" do
@@ -60,11 +74,10 @@ RSpec.describe Ksef::Auth::TokenRequest do
       expect(upstream).to include("AuthTokenRequest", "5265877635")
     end
 
+    # No namespace fudging: upstream's example declares 2.0 and so does our default, so
+    # this is an exact canonical match against a pinned artifact.
     it "generates a canonically identical document" do
-      # The example declares the 2.0 namespace; ours targets 2.1, which is the only
-      # difference that should remain after canonicalisation.
-      theirs = parsed(upstream.sub("/auth/token/2.0", "/auth/token/2.1")).canonicalize
-      expect(parsed(request.to_xml).canonicalize).to eq(theirs)
+      expect(parsed(request.to_xml).canonicalize).to eq(parsed(upstream).canonicalize)
     end
   end
 

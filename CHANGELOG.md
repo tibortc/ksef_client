@@ -32,7 +32,8 @@ gem version for which API state".
   it, and raises on element names the schema does not define at that position instead of
   dropping them silently.
 - **`Ksef::Auth::TokenRequest`** — the `AuthTokenRequest` document, step 2 of the
-  authentication flow. Targets schema **v2.1**, validates the challenge format locally
+  authentication flow. Sends the **2.0** namespace by default, validates the challenge
+  format locally
   before a signature is spent on it, and emits the `ContextIdentifier` choice and the
   optional `AuthorizationPolicy` in schema order regardless of the caller's argument
   order. A spec compares the generated document against upstream's own pinned example,
@@ -44,9 +45,10 @@ gem version for which API state".
   to the schema rather than re-validated in Ruby, which would mean maintaining a second
   and divergent source of truth.
 - **`Ksef::Auth::Validator`** — offline XSD validation for auth documents, mirroring
-  `Ksef::FA3::Validator`. Simpler in one way (the auth schema is self-contained, so no
-  `schemaLocation` rewrite is needed) and constrained in another: only v2.1 can be used at
-  all, see the note below.
+  `Ksef::FA3::Validator`. Validates a document in either namespace, taking the rules from
+  v2.1's file with its target namespace rewritten in memory, because v2.0's file cannot be
+  compiled at all. A namespace that is not a known schema version is refused rather than
+  validated against itself.
 - **`Ksef::FA3.build` — the keyword DSL of DESIGN.md §8.** That section's snippet now runs
   verbatim and produces schema-valid FA(3) XML, so the README's headline example is no
   longer aspirational. The DSL accepts the English shorthand from the spec (`qty:`,
@@ -101,6 +103,13 @@ Two further upstream defects found while implementing authentication, both recor
 evidence in `docs/REFERENCE.md` §14.4. The root cause is shared: **XML Schema regular
 expressions are implicitly anchored, and `^` / `$` are literal characters, not anchors.**
 
+- **Neither official client validates the request locally, and both send the 2.0
+  namespace.** C# serialises with `XmlSerializer` and no schema; Java marshals with JAXB
+  and never calls `setSchema`. The bundled XSD is a codegen input, not a runtime check, so
+  the defects below never fire for them — they emit the real identifier and let the server
+  decide. This gem now does the same, and sends 2.0. The Java client even ships its own
+  edited copy of the 2.0 schema with the IP patterns repaired but `TNipVatUE` and
+  `TPeppolId` left broken, which independently confirms those two are defective.
 - **`schemat_auth_v2-0.xsd` does not compile as a schema at all.** Its IP patterns use
   `\b`, which XSD regex has no concept of, so libxml2 rejects the whole file rather than
   those facets. Anyone validating against v2.0 gets a compilation failure, not a

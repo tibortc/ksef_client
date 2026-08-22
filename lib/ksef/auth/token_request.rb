@@ -10,11 +10,10 @@ module Ksef
     # {#document} exposes the mutable tree: an enveloped signature has to be inserted into
     # the document, so a signed request cannot be assembled from a string afterwards.
     #
-    # Targets **schema v2.1 only**. v2.0 is pinned for reference but cannot be used: its IP
-    # patterns contain `\b`, which XSD regex does not support, so libxml2 refuses to
-    # compile the file at all (§14.4).
+    # Defaults to the **2.0** namespace, matching both official clients and every upstream
+    # example; `schema_version:` selects 2.1. See {Ksef::Auth::NAMESPACES} for why, and
+    # §14.4 for why validation nonetheless uses v2.1's rules.
     class TokenRequest
-      NAMESPACE = "http://ksef.mf.gov.pl/auth/token/2.1"
       ROOT = "AuthTokenRequest"
 
       SUBJECT_IDENTIFIER_TYPES = %w[certificateSubject certificateFingerprint].freeze
@@ -38,7 +37,8 @@ module Ksef
       # cheapest failure to catch locally.
       CHALLENGE_FORMAT = /\A\d{8}-CR-[A-F0-9]{10}-[A-F0-9]{10}-[A-F0-9]{2}\z/
 
-      attr_reader :challenge, :context_type, :context_value, :subject_identifier_type, :allowed_ips
+      attr_reader :challenge, :context_type, :context_value, :subject_identifier_type, :allowed_ips,
+                  :namespace, :schema_version
 
       # @param challenge [String] verbatim from `POST /auth/challenge`
       # @param context_type [Symbol] one of {CONTEXT_TYPES}
@@ -48,8 +48,16 @@ module Ksef
       #   the signing certificate (§4.4)
       # @param allowed_ips [Hash, AuthorizationPolicy, nil] optional client-IP whitelist,
       #   with any of `:addresses`, `:ranges`, `:masks`
+      # @param schema_version [String] `"2.0"` (default) or `"2.1"`
       def initialize(challenge:, context_type:, context_value:,
-                     subject_identifier_type: "certificateSubject", allowed_ips: nil)
+                     subject_identifier_type: "certificateSubject", allowed_ips: nil,
+                     schema_version: DEFAULT_SCHEMA_VERSION)
+        @namespace = NAMESPACES.fetch(schema_version) do
+          raise ValidationError,
+                "Unknown schema version #{schema_version.inspect}. " \
+                "Expected one of #{NAMESPACES.keys.map(&:inspect).join(", ")}."
+        end
+        @schema_version = schema_version
         @challenge = validate_challenge(challenge)
         @context_type = validate_context_type(context_type)
         @context_value = context_value
@@ -68,7 +76,7 @@ module Ksef
         Nokogiri::XML::Document.new.tap do |doc|
           doc.encoding = "UTF-8"
           root = doc.create_element(ROOT)
-          root.default_namespace = NAMESPACE
+          root.default_namespace = namespace
           doc.root = root
 
           add_text(doc, root, "Challenge", challenge)
