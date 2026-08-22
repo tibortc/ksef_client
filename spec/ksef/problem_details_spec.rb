@@ -165,6 +165,47 @@ RSpec.describe Ksef::ProblemDetails do
     end
   end
 
+  # A well-formed envelope can still carry junk inside its collections. These guards keep
+  # one malformed entry from taking down the parse of an otherwise usable error.
+  describe "malformed entries inside a valid envelope" do
+    it "skips non-Hash members of problem+json errors[]" do
+      problem = described_class.parse(
+        status: 400,
+        body: { "title" => "Bad Request", "detail" => "Nieprawidłowe.",
+                "errors" => ["just a string", { "code" => 21_405, "description" => "Błąd." }, nil] }
+      )
+
+      expect(problem.entries.map(&:code)).to eq([21_405])
+      expect(problem.detail).to eq("Nieprawidłowe.")
+    end
+
+    it "skips non-Hash members of the legacy exceptionDetailList" do
+      detail_list = ["oops", { "exceptionCode" => 99, "exceptionDescription" => "Opis." }]
+      problem = described_class.parse(status: 400, body: { "exception" => { "exceptionDetailList" => detail_list } })
+
+      expect(problem.entries.map(&:code)).to eq([99])
+    end
+
+    it "survives a legacy exception envelope carrying no detail list at all" do
+      problem = described_class.parse(status: 400, body: { "exception" => { "serviceName" => "Undefined" } })
+
+      expect(problem.entries).to be_empty
+      expect(problem.detail).to be_nil
+      expect(problem.title).to eq("Undefined")
+      expect(problem.summary).to eq("Undefined")
+    end
+
+    it "falls back to the first entry's description when detail and title are absent" do
+      problem = described_class.parse(
+        status: 400,
+        body: { "errors" => [{ "code" => 21_157, "description" => "Nieprawidłowy rozmiar." }] }
+      )
+
+      expect(problem.detail).to be_nil
+      expect(problem.summary).to eq("[21157] Nieprawidłowy rozmiar.")
+    end
+  end
+
   describe "bodies that are neither" do
     it "degrades gracefully for an HTML block page from the WAF" do
       html = "<html><body>Request blocked</body></html>"

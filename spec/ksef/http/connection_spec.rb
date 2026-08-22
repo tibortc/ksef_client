@@ -45,6 +45,17 @@ RSpec.describe Ksef::HTTP::Connection do
       expect(connection.builder.adapter).to eq(Faraday::Adapter::NetHttp)
     end
 
+    # Proxy support is configurable but was entirely unexercised — a corporate-proxy user
+    # would have been the first to find out whether it worked.
+    it "applies a configured proxy" do
+      proxied = described_class.build(Ksef::Configuration.new(env: :test, proxy: "http://proxy.example:3128"))
+      expect(proxied.proxy.uri.to_s).to eq("http://proxy.example:3128")
+    end
+
+    it "leaves the proxy unset when none is configured" do
+      expect(connection.proxy).to be_nil
+    end
+
     # Faraday runs on_complete callbacks innermost-first, so the JSON parser has to be
     # registered after the error handler for the handler to see a decoded body. This is
     # easy to break by "tidying" the middleware order, so it is pinned here.
@@ -138,6 +149,17 @@ RSpec.describe Ksef::HTTP::Connection do
       end
     end
 
+    # A 4xx the contract never declares — an intermediary or WAF can produce one. It must
+    # surface as a plain ApiError rather than being misfiled as a server fault.
+    it "raises ApiError for an undeclared 4xx status" do
+      stub_request(:get, "#{base}/sessions").to_return(status: 404, body: "nope")
+
+      expect { connection.get("sessions") }.to raise_error(Ksef::ApiError) do |error|
+        expect(error).not_to be_a(Ksef::ServerError)
+        expect(error.status).to eq(404)
+      end
+    end
+
     describe "429" do
       it "raises RateLimitedError carrying Retry-After in seconds" do
         stub_error(429, { "title" => "Too Many Requests", "status" => 429, "detail" => "Limit." },
@@ -154,6 +176,25 @@ RSpec.describe Ksef::HTTP::Connection do
 
         expect { connection.get("sessions") }.to raise_error(Ksef::RateLimitedError) do |error|
           expect(error.retry_after).to be_within(2).of(45)
+        end
+      end
+
+      # A date already in the past means "retry now", not "wait a negative time".
+      it "clamps a past HTTP-date Retry-After to zero" do
+        stub_error(429, { "title" => "Too Many Requests", "status" => 429, "detail" => "Limit." },
+                   headers: { "Retry-After" => (Time.now - 120).httpdate })
+
+        expect { connection.get("sessions") }.to raise_error(Ksef::RateLimitedError) do |error|
+          expect(error.retry_after).to eq(0)
+        end
+      end
+
+      it "leaves retry_after nil for an unparseable Retry-After" do
+        stub_error(429, { "title" => "Too Many Requests", "status" => 429, "detail" => "Limit." },
+                   headers: { "Retry-After" => "soon-ish" })
+
+        expect { connection.get("sessions") }.to raise_error(Ksef::RateLimitedError) do |error|
+          expect(error.retry_after).to be_nil
         end
       end
 

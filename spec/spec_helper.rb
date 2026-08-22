@@ -25,8 +25,25 @@ SimpleCov.start do
   add_filter "/spec/"
   # Codegen output is excluded from the coverage gate (DESIGN.md §9).
   add_filter "lib/ksef/fa3/generated/"
+
   enable_coverage :line
-  minimum_coverage line: 90 unless FILTERED_RUN
+  # Line coverage alone was 99% while branch coverage was 83% — conditional paths were
+  # going untested behind fully-covered lines. Method coverage is a cheap regression
+  # guard on top: it catches a method nothing calls at all.
+  enable_coverage :branch
+  enable_coverage :method
+
+  next if FILTERED_RUN
+
+  # Floors sit just under what the suite actually achieves, so they ratchet rather than
+  # aspire. Raise them when the real numbers move up; do not lower them to make a change
+  # pass. Current: line 99.6%, branch 96.0%, method 100%.
+  #
+  # Branch is not 100% because four `&.` guards defend against states that cannot occur —
+  # a completed Faraday response always carries headers, and the pinned XSD always has
+  # exactly one import with an http location. Contorting tests to reach them would prove
+  # nothing.
+  minimum_coverage line: 95, branch: 90, method: 100
 end
 
 require "ksef_client"

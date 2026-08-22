@@ -42,8 +42,21 @@ RSpec.describe Ksef do
       expect(Ksef::ConfigurationError.new("bad").problem).to be_nil
     end
 
-    it "returns empty details rather than nil when there is no problem body" do
-      expect(Ksef::ApiError.new("boom").details).to eq([])
+    # Every accessor delegates through `problem&.`, so all of them must be nil-safe for an
+    # error raised locally rather than from a response. Asserted together because a caller
+    # rescuing Ksef::ApiError cannot know which kind it got.
+    it "keeps every ApiError accessor nil-safe without a problem body" do
+      error = Ksef::ApiError.new("boom")
+
+      expect(error).to have_attributes(status: nil, code: nil, trace_id: nil, raw: nil)
+      expect(error.details).to eq([])
+    end
+
+    it "keeps AuthorizationError's 403-specific accessors nil-safe too" do
+      error = Ksef::AuthorizationError.new("boom")
+
+      expect(error.reason_code).to be_nil
+      expect(error.security).to eq({})
     end
   end
 end
