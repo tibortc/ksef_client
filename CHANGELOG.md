@@ -31,6 +31,22 @@ gem version for which API state".
 - The serializer reads element order from the generated metadata rather than hand-listing
   it, and raises on element names the schema does not define at that position instead of
   dropping them silently.
+- **`Ksef::Auth::Signer`** — the XAdES-BES enveloped signature for
+  `POST /auth/xades-signature`, built on Nokogiri and stdlib `openssl` with no new
+  dependency. Every algorithm is from the Ministry's published allow-list, and the shape is
+  corroborated against both official clients. Its specs recompute each digest and verify
+  the `SignatureValue` **without reusing any of the signer's own code**, so a test cannot
+  pass by agreeing with a bug; they also assert that tampering with the payload, the
+  signing time, or the signature itself is detected, and that the result validates against
+  the pinned xmldsig schema.
+
+  It signs a String and returns a String on purpose. A digest over "the document" has to
+  match what the verifier computes after parsing the bytes sent, and Nokogiri pretty-prints
+  on output without adding text nodes to the tree — so an in-memory tree and its serialised
+  form can canonicalise differently. Output is emitted with `FORMAT` off; re-indenting after
+  signing would invalidate every signature while leaving it internally consistent.
+- **`Ksef::Auth::SignatureTemplate`** and **`Ksef::Auth::Xades`** — the signature XML and
+  the algorithm vocabulary, split out so that rendering and cryptography are separable.
 - **`Ksef::Auth::TokenRequest`** — the `AuthTokenRequest` document, step 2 of the
   authentication flow. Sends the **2.0** namespace by default, validates the challenge
   format locally
@@ -122,6 +138,11 @@ expressions are implicitly anchored, and `^` / `$` are literal characters, not a
   decide. This gem now does the same, and sends 2.0. The Java client even ships its own
   edited copy of the 2.0 schema with the IP patterns repaired but `TNipVatUE` and
   `TPeppolId` left broken, which independently confirms those two are defective.
+- **A signed `AuthTokenRequest` can never be schema-valid.** The API requires an enveloped
+  signature; the schema defining the document declares a closed sequence with no
+  `xsd:any`, so that signature is an unexpected element. Both requirements are upstream's
+  and they contradict each other. `Signer#sign` therefore validates *before* signing by
+  default, which also catches a malformed document before a signature is spent on it.
 - **`schemat_auth_v2-0.xsd` does not compile as a schema at all.** Its IP patterns use
   `\b`, which XSD regex has no concept of, so libxml2 rejects the whole file rather than
   those facets. Anyone validating against v2.0 gets a compilation failure, not a

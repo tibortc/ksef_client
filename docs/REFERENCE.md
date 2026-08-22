@@ -343,10 +343,42 @@ reverse-engineer, only a permitted set to choose from.
 `DigestMethod` governs both `SignedInfo/Reference/DigestMethod` and the qualifying
 properties, notably `SigningCertificate/CertDigest/DigestMethod`.
 
-**Implementation choice for this gem:** enveloped, XAdES-BES,
-`#enveloped-signature` transform, exclusive c14n, `rsa-sha256`, `xmlenc#sha256` digest.
-Every one of those is explicitly listed above; the combination needs no further
-verification, only a test that the emitted document validates.
+**Implementation choice for this gem:** enveloped, XAdES-BES, `#enveloped-signature`
+transform, exclusive c14n, `rsa-sha256`, `xmlenc#sha256` digest. Every one of those is
+explicitly listed above, so the combination needs no further verification. Corroborated
+2026-08-22 against both clients: C# builds exactly this shape in `SignatureService`, and
+Java asks DSS for `SignaturePackaging.ENVELOPED` with `DigestAlgorithm.SHA256` and
+`SignatureAlgorithm.RSA_SHA256`.
+
+Neither client states its `SignedInfo` `CanonicalizationMethod` — C# leaves .NET's
+`SignedXml` default in place and Java leaves it to DSS — so exclusive c14n is *this gem's*
+choice rather than a copied one. It is safe because the allow-list above permits both c14n
+1.0 and exclusive c14n, and exclusive avoids namespace-inheritance surprises when the
+signature is lifted between documents.
+
+#### Two facts the allow-list does not state
+
+Both taken from `ksef-client-csharp`'s `KSeF.Client/Api/Services/SignatureService.cs`
+(retrieved 2026-08-22) and recorded with that provenance rather than treated as common
+knowledge:
+
+| Fact | Value | Why it matters |
+|---|---|---|
+| `Type` on the `SignedProperties` reference | `http://uri.etsi.org/01903#SignedProperties` | Fixed by ETSI TS 101 903, absent from the Ministry's allow-list, and appears in no pinned artifact |
+| `SigningTime` is **backdated one minute** | `CertificateTimeBuffer = TimeSpan.FromMinutes(-1)` | Unexplained upstream, but plainly a clock-skew guard: a signing time fractionally in the future relative to the server's clock invites rejection, and being a minute early costs nothing |
+
+The remaining structural details, all mirrored: `Id="Signature"` and
+`Id="SignedProperties"` as literal identifiers; the document reference is `URI=""` with the
+enveloped transform *then* c14n; the `SignedProperties` reference carries only the c14n
+transform; `KeyInfo` holds `X509Data/X509Certificate`; `IssuerSerial` uses the issuer name
+in RFC 2253 order and the serial in decimal.
+
+**One namespace subtlety worth stating explicitly**, because getting it wrong produces a
+document that looks correct and verifies nowhere: inside `xades:QualifyingProperties` the
+reference implementation declares `xmlns` = the **xmldsig** namespace, so `DigestMethod`,
+`DigestValue`, `X509IssuerName` and `X509SerialNumber` are written *unprefixed* yet belong
+to xmldsig, not to XAdES — even though they sit inside `xades:CertDigest` and
+`xades:IssuerSerial`.
 
 **Built directly on Nokogiri and stdlib `openssl`, adding no dependency.** Decided
 2026-08-22 after confirming every primitive the signature and §10 need is already
@@ -656,7 +688,7 @@ needs no prior credentials. (They exist on TEST only; see §2.)
 `createdDate` caveat: when re-creating test data under the same identifier, the date must
 be **later** than the previous one — not equal, not earlier.
 
-### 6a.2 The token needs a one-time XAdES authentication — this blocks §12.4 for 0.1
+### 6a.2 The token needs a one-time XAdES authentication — this blocks DESIGN.md §12.4 for 0.1
 
 `tokeny-ksef.md`: *"Wygenerowanie tokena KSeF jest możliwe wyłącznie po jednorazowym
 uwierzytelnieniu się podpisem elektronicznym (XAdES)."* — a KSeF token can be generated
@@ -673,7 +705,7 @@ CI — to bootstrap via somebody else's client.
 
 Until the certificate flow is implemented, the interim workaround is a one-time
 out-of-band mint via the official `ksef-client-csharp`, using a self-signed certificate
-(permitted on TEST; see `auth/testowe-certyfikaty-i-podpisy-xades.md`). Once §6.3's
+(permitted on TEST; see `auth/testowe-certyfikaty-i-podpisy-xades.md`). Once DESIGN.md §6.3's
 certificate flow lands, this gem mints its own and the workaround is retired.
 
 Tokens are minted in a `Nip` or `InternalId` context with a fixed permission set chosen at
@@ -885,8 +917,9 @@ marked as blocking Phase 2.
 
 ## 10. Cryptography — resolves DESIGN.md §6.4 [VERIFY]
 
-Primary source: `sesja-interaktywna.md` "Wymagania wstępne" and `uwierzytelnianie.md`
-§2.2 — **both first-tier documentation, not inferred from client behaviour.**
+Primary source: `sesja-interaktywna.md` "Wymagania wstępne" and `uwierzytelnianie.md` §2.2
+(upstream's own numbering) — **both first-tier documentation, not inferred from client
+behaviour.**
 Independently corroborated against `KSeF.Client/Api/Services/CryptographyService.cs`
 (`ksef-client-csharp`) and `DefaultCryptographyService.java` (`ksef-client-java`), both
 retrieved 2026-08-22. Where a line number is cited below it is from the C# file.
@@ -1245,3 +1278,27 @@ Whether the API enforces this XSD server-side is **unverified** and needs a live
 to settle. If it does, `NipVatUe` and `PeppolId` authentication are simply unusable until
 upstream fixes the patterns — which would be their bug to fix, not something a client can
 work around.
+
+### 14.5 A signed `AuthTokenRequest` can never be schema-valid
+
+Measured 2026-08-22. The API **requires** an enveloped XAdES signature on this document
+(§4.3: detached is rejected). The schema that defines the document declares a closed
+sequence — `Challenge`, `ContextIdentifier`, `SubjectIdentifierType`, optional
+`AuthorizationPolicy` — with **no `xsd:any`**. So the signature the API demands is, to the
+schema, an unexpected element:
+
+```
+ERROR: Element '{http://www.w3.org/2000/09/xmldsig#}Signature': This element is not
+expected. Expected is ( {http://ksef.mf.gov.pl/auth/token/2.0}AuthorizationPolicy ).
+```
+
+The same document validates cleanly before signing. This is not a defect a client can work
+around — both requirements come from upstream and they contradict each other.
+
+**Resolution: validate before signing, never after.** `Signer#sign` does this by default,
+which also means a malformed document is caught before a signature is spent on it. Anyone
+reaching for "validate the thing we are about to send" will find it always fails; that is
+this, not a bug in the document.
+
+Consistent with §14.4's finding that neither reference client validates locally at all —
+had they tried, they would have hit this immediately.

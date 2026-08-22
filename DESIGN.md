@@ -253,7 +253,7 @@ KSeF 2.0 offers exactly two authentication methods (`uwierzytelnianie.md`, verif
 **Scope change, 2026-08-22.** XAdES was originally deferred to 0.3. It moves into **0.1**, for three reasons:
 
 1. **The token flow cannot be bootstrapped without it.** A KSeF token can only be generated after a one-time XAdES authentication (`tokeny-ksef.md`; `POST /tokens` requires `Bearer`, `/auth/xades-signature` requires nothing). Shipping token-only auth means every new user must first obtain a token using somebody else's client. See `docs/REFERENCE.md` §6a.2.
-2. It is what unblocks DESIGN.md §12.4 — the nightly TEST integration currently cannot mint its own credentials.
+2. It is what unblocks §12.4 — the nightly TEST integration currently cannot mint its own credentials.
 3. `ksef-rb` already ships certificate auth (§1). Token-only is not a viable 0.1.
 
 **Shared prologue.** `POST /auth/challenge` → `{challenge, timestamp, timestampMs, clientIp}`. Challenge lifetime is **10 minutes** *(verified: `uwierzytelnianie.md`)*.
@@ -401,11 +401,11 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors vs official C# client (§6.4) | every push |
 | Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning | **nightly** CI + pre-release, never per-PR |
 
-**Coverage gate (revised 2026-08-22):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 95, branch 90, method 100**.
+**Coverage gate (ratcheted 2026-08-22):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 99, branch 95, method 100**.
 
 Originally this said "90% lines". That turned out to be a weak gate: the suite sat at 99% line coverage while branch coverage was 83%, i.e. seventeen conditional paths were untested behind fully-covered lines. Branch coverage is the one that finds real gaps; line coverage mostly confirms files are loaded.
 
-Floors sit just under the achieved numbers so they ratchet. Raise them as the real figures move up; do not lower one to make a change pass. Branch is 90 rather than 100 because a handful of `&.` guards defend against states that cannot occur, and contorting tests to reach them proves nothing. Requires SimpleCov >= 1.0, where the supported criteria are `[:line, :branch, :method, :oneshot_line]`; 0.x supports only line and branch.
+Floors sit just under the achieved numbers so they ratchet. Raise them as the real figures move up; do not lower one to make a change pass. Branch is 95 rather than 100 because a handful of `&.` guards defend against states that cannot occur, and contorting tests to reach them proves nothing. Deliberate margin, not a knife edge at the actuals: a floor pinned to the exact current figure fails on refactors that change nothing about test quality. Because these are percentages, the absolute number of untested branches they permit grows with the codebase — **re-ratchet at each phase boundary**, not once. Requires SimpleCov >= 1.0, where the supported criteria are `[:line, :branch, :method, :oneshot_line]`; 0.x supports only line and branch.
 
 A filtered run — one file, one example, or a tag selector — legitimately exercises less of the library, so the gate applies to full runs only. Otherwise the nightly `--tag integration` job would fail on coverage rather than on tests.
 
@@ -439,6 +439,8 @@ The DSL is listed explicitly because it was previously implied only by the "Done
 Build the **certificate flow first**: it is the only one that can bootstrap a credential from nothing, so it is what makes the nightly TEST suite self-sufficient and unblocks §12.4. The token flow then has something to authenticate with when minting its first token.
 
 **Done when:** §8 contract runs against TEST; a KSeF token can be minted end-to-end by this gem with no external client; all seven types build, validate, round-trip.
+
+**In progress, 2026-08-22.** The DSL is done — §8's snippet runs verbatim and validates. Of the certificate flow, the `AuthTokenRequest` document and the XAdES-BES signer are done and independently verified offline; the four HTTP calls of `docs/REFERENCE.md` §4.2 are not. Nothing has yet been sent to TEST, so none of the "Done when" gates is met.
 
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.
