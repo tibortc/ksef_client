@@ -48,6 +48,11 @@ module Ksef
         def default_headers(config)
           {
             "Accept" => "application/json",
+            # Opts into RFC7807 error bodies. Every one of the 83 operations documents
+            # this header, and the modern envelope is opt-in: without it the API returns
+            # the deprecated shapes, which carry no traceId, no structured `errors[]`
+            # codes on 400 and no reasonCode on 403 (docs/REFERENCE.md §5.1).
+            "X-Error-Format" => "problem-details",
             "User-Agent" => config.user_agent
           }
         end

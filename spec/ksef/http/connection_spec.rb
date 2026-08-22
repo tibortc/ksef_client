@@ -29,6 +29,12 @@ RSpec.describe Ksef::HTTP::Connection do
       expect(connection.headers["User-Agent"]).to eq(config.user_agent)
     end
 
+    # Without this the API returns the deprecated error envelopes, losing traceId, the
+    # structured error codes on 400 and reasonCode on 403 (docs/REFERENCE.md §5.1).
+    it "opts into RFC7807 error bodies" do
+      expect(connection.headers["X-Error-Format"]).to eq("problem-details")
+    end
+
     # DESIGN.md §4.5: no code path may weaken TLS.
     it "verifies TLS and floors the version at 1.2" do
       expect(connection.ssl.verify).to be(true)

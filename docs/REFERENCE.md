@@ -159,9 +159,22 @@ issue a refresh token alongside the access token.
 
 ## 5. Error model — resolves DESIGN.md §6.7 [VERIFY]
 
-### 5.1 Two envelopes; content type decides
+### 5.1 Two envelopes; the *request* opts in
 
-Error bodies come in two shapes and the **`Content-Type` selects between them**:
+Error bodies come in two shapes. The modern one is **opt-in via a request header**:
+
+```
+X-Error-Format: problem-details
+```
+
+All **83** operations in the pinned spec document this header, with the wording
+"ustawienie tego nagłówka powoduje zwracanie błędów w formacie Problem Details" —
+*setting this header causes errors to be returned in Problem Details format*. Without it
+the API returns the deprecated `application/json` shapes, which carry no `traceId`, no
+structured `errors[]` codes on 400 and no `reasonCode` on 403. `Ksef::HTTP::Connection`
+therefore sends it on every request.
+
+The response `Content-Type` then reflects which envelope you got:
 
 | Content type | 400 | 429 | Status |
 |---|---|---|---|
@@ -242,6 +255,61 @@ Source: `limity/limity-api.md` (dated 22.11.2025), retrieved 2026-08-21.
 
 Live budgets are introspectable at runtime via `GET /rate-limits`, `GET /limits/context`
 and `GET /limits/subject`.
+
+---
+
+## 6a. Provisioning TEST credentials (DESIGN.md §12.4)
+
+Sources: `dane-testowe-scenariusze.md` (05.08.2025), `tokeny-ksef.md` (29.06.2025),
+`srodowiska.md`, and the pinned spec. Retrieved 2026-08-22.
+
+### 6a.1 There is no NIP to "obtain" — you invent one
+
+`srodowiska.md` is explicit: use **random** NIPs on TEST and avoid any real data. TEST
+permits self-signed certificates, so many integrators authenticate in the same company
+context and **TEST data is not isolated between them**.
+
+A test NIP must still pass the standard checksum: digits 1–9 weighted by
+`6,5,7,2,3,4,5,6,7`, summed, `mod 11`, which must equal digit 10 (and must not be 10).
+Verified against every NIP appearing in the upstream docs — `7762811692`, `7980332920`,
+`3755747347` — and against the two in DESIGN.md §8, `9999999999` and `1111111111`. All
+six are checksum-valid, which independently confirms the §7.2 algorithm.
+
+You then register the NIP on TEST:
+
+| Endpoint | Use |
+|---|---|
+| `POST /testdata/subject` | Legal entities. Body: `subjectNip`, `subjectType`, `description` (5–256 chars), optional `subunits`. Supports VAT-group and JST hierarchies. |
+| `POST /testdata/person` | Natural persons. Body: `nip`, `pesel`, `description`, `isBailiff`. Grants **Owner** (plus `EnforcementOperations` when `isBailiff: true`). |
+
+**These `/testdata/*` endpoints require no authentication.** The spec declares no global
+`security` and these operations declare none of their own — so bootstrapping a context
+needs no prior credentials. (They exist on TEST only; see §2.)
+
+`createdDate` caveat: when re-creating test data under the same identifier, the date must
+be **later** than the previous one — not equal, not earlier.
+
+### 6a.2 The token needs a one-time XAdES authentication — this blocks §12.4 for 0.1
+
+`tokeny-ksef.md`: *"Wygenerowanie tokena KSeF jest możliwe wyłącznie po jednorazowym
+uwierzytelnieniu się podpisem elektronicznym (XAdES)."* — a KSeF token can be generated
+**only** after a one-time authentication with a qualified electronic signature.
+
+The pinned spec corroborates it: `POST /tokens` declares `security: [{Bearer: []}]`, so it
+needs an existing session, while `/auth/xades-signature` needs none. There is no
+unauthenticated path to a first token.
+
+**Consequence for this gem:** 0.1 implements KSeF-token auth only; XAdES is roadmapped for
+0.3. So `KSEF_TEST_TOKEN` cannot be minted by this gem at its current stage. The token must
+be obtained out of band once — via the official `ksef-client-csharp`, which has a working
+XAdES flow, using a self-signed certificate (permitted on TEST; see
+`auth/testowe-certyfikaty-i-podpisy-xades.md`). After that one-time bootstrap the token is
+long-lived and this gem's token auth works normally.
+
+Tokens are minted in a `Nip` or `InternalId` context with a fixed permission set chosen at
+creation — changing permissions requires a new token. For this gem's integration suite,
+`InvoiceRead` and `InvoiceWrite` are the relevant ones. Treat the token as a confidential
+secret (`tokeny-ksef.md` says so explicitly).
 
 ---
 
