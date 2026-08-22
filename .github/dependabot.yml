@@ -1,0 +1,30 @@
+version: 2
+
+updates:
+  # Keeps the SHA-pinned actions in .github/workflows/ current. Without this, pinning
+  # trades a supply-chain risk for a staleness one: the pins stop receiving upstream
+  # security fixes and nobody notices. Dependabot rewrites both the SHA and the trailing
+  # `# vX.Y.Z` comment, so the pins stay reviewable.
+  #
+  # This also covers ruby/setup-ruby specifically, where a stale pin eventually fails to
+  # resolve newly released interpreters for the `head` matrix leg.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    groups:
+      # One PR for all actions rather than four. These move together and are reviewed
+      # the same way; separate PRs would be noise.
+      actions:
+        patterns:
+          - "*"
+    labels:
+      - dependencies
+
+# Deliberately no `bundler` entry. Gemfile.lock is gitignored by library convention
+# (DESIGN.md §4.1) and CI resolves fresh per matrix Ruby, so there is no lockfile for
+# Dependabot to bump. Runtime constraints are pessimistic at current majors by policy
+# (§4.3), and widening them is a decision to be made deliberately, not by a bot.
