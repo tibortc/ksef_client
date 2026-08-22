@@ -31,6 +31,31 @@ gem version for which API state".
 - The serializer reads element order from the generated metadata rather than hand-listing
   it, and raises on element names the schema does not define at that position instead of
   dropping them silently.
+- **`Ksef::Auth::TokenRequest`** — the `AuthTokenRequest` document, step 2 of the
+  authentication flow. Sends the **2.0** namespace by default, validates the challenge
+  format locally
+  before a signature is spent on it, and emits the `ContextIdentifier` choice and the
+  optional `AuthorizationPolicy` in schema order regardless of the caller's argument
+  order. A spec compares the generated document against upstream's own pinned example,
+  canonicalised, so the implementation is tied to an artifact rather than to a reading of
+  one.
+- **`Ksef::Auth::AuthorizationPolicy`** — the client-IP whitelist as its own value object,
+  since the schema treats it as a distinct structure with its own rules (three list kinds,
+  each capped at ten, fixed order, mandatory `AllowedIps` wrapper). IP *values* are left
+  to the schema rather than re-validated in Ruby, which would mean maintaining a second
+  and divergent source of truth.
+- Pinned the **W3C xmldsig and ETSI XAdES v1.3.2/v1.4.1 schemas** that upstream
+  redistributes in its PEF bundle, so the signature namespaces come from an artifact
+  rather than from memory. All three compile offline — their imports are relative, so
+  unlike the FA(3) schema they need no `schemaLocation` rewrite — which means the signer
+  will get real structural validation. Kept under `spec/fixtures/`, not `lib/`: validating
+  a signature is a test-time concern, and these are W3C/ETSI documents whose terms are not
+  the repository's MIT licence that §1.2 relied on for bundling the FA schemas.
+- **`Ksef::Auth::Validator`** — offline XSD validation for auth documents, mirroring
+  `Ksef::FA3::Validator`. Validates a document in either namespace, taking the rules from
+  v2.1's file with its target namespace rewritten in memory, because v2.0's file cannot be
+  compiled at all. A namespace that is not a known schema version is refused rather than
+  validated against itself.
 - **`Ksef::FA3.build` — the keyword DSL of DESIGN.md §8.** That section's snippet now runs
   verbatim and produces schema-valid FA(3) XML, so the README's headline example is no
   longer aspirational. The DSL accepts the English shorthand from the spec (`qty:`,
@@ -54,11 +79,16 @@ gem version for which API state".
   structure. Four of the five open items in `docs/REFERENCE.md` §9 are now closed,
   including both that were marked as blocking.
 - `docs/REFERENCE.md` §14 — a new section for **contradictions within upstream's own
-  sources**, kept separate from §7's divergences from this project's design document.
-  Three are recorded, each with the resolution and the evidence for it.
-- Coverage is now gated on three criteria rather than one — **line 95, branch 90,
+  sources**, kept separate from §7's divergences from this project's design document. Four
+  are recorded, each with the resolution and the evidence for it.
+- `spec/openapi_contract_spec.rb` — asserts the ledger's claims against the pinned
+  contract, rather than only that the contract has not changed. It covers the two findings
+  that have **no code yet** (§14.1's discrete IV field, §14.2's pre-signed link), because
+  those are the ones that would otherwise rot unnoticed until someone implemented crypto
+  or session handling from a stale conclusion.
+- Coverage is now gated on three criteria rather than one, at **line 99, branch 95,
   method 100**. Branch coverage was 83% behind 99% line coverage, so seventeen conditional
-  paths were untested; closing the real gaps brought it to 96%. Fixes uncovered on the way:
+  paths were untested; closing the real gaps brought it to 97%, and line coverage to 100%. Fixes uncovered on the way:
   proxy configuration was entirely unexercised, and the `Retry-After` parser's past-date
   and unparseable-value fallbacks had no tests.
 
@@ -81,6 +111,29 @@ gem version for which API state".
 
 ### Notes
 
+Two further upstream defects found while implementing authentication, both recorded with
+evidence in `docs/REFERENCE.md` §14.4. The root cause is shared: **XML Schema regular
+expressions are implicitly anchored, and `^` / `$` are literal characters, not anchors.**
+
+- **Neither official client validates the request locally, and both send the 2.0
+  namespace.** C# serialises with `XmlSerializer` and no schema; Java marshals with JAXB
+  and never calls `setSchema`. The bundled XSD is a codegen input, not a runtime check, so
+  the defects below never fire for them — they emit the real identifier and let the server
+  decide. This gem now does the same, and sends 2.0. The Java client even ships its own
+  edited copy of the 2.0 schema with the IP patterns repaired but `TNipVatUE` and
+  `TPeppolId` left broken, which independently confirms those two are defective.
+- **`schemat_auth_v2-0.xsd` does not compile as a schema at all.** Its IP patterns use
+  `\b`, which XSD regex has no concept of, so libxml2 rejects the whole file rather than
+  those facets. Anyone validating against v2.0 gets a compilation failure, not a
+  validation result. Only v2.1 is usable, and it rewrote all three patterns correctly.
+- **Two of v2.1's four context identifiers cannot hold their real values.** `TPeppolId`'s
+  pattern is written `^P[A-Z]{2}[0-9]{6}$`, so it matches only a value that literally
+  starts with `^` and ends with `$`; `TNipVatUE`'s ends with a stray `$`. Upstream's own
+  documented example value for `NipVatUe` fails the schema that defines it. The natural
+  value is emitted regardless and local validation is reported as advisory for those two
+  types — a KSeF token can only be issued in a `Nip` or `InternalId` context anyway, and
+  both of those validate cleanly.
+
 Three upstream inconsistencies found while pinning the documentation, each of which would
 have produced a working-looking client that fails in practice. All are recorded with
 evidence in `docs/REFERENCE.md` §14.
@@ -93,8 +146,13 @@ evidence in `docs/REFERENCE.md` §14.
   single error: `NazwaPodmiotuPrzyjmujacego` is `fixed="Ministerstwo Finansów"` in the XSD,
   but TEST issues `"Ministerstwo Finansów - środowisko testowe (TE)"`. A client that
   strictly validates a received UPO would reject every UPO that TEST issues.
-- **`upo.pages[].downloadUrl` carries an `/api/v2` prefix** that the verified base URL does
-  not use; joining the two 404s.
+- **`upo.pages[].downloadUrl` is a pre-signed storage link, not a path to join.** The
+  contract declares it `format: uri`, generated per status query, expiring at
+  `downloadUrlExpirationDate`, **exempt from API rate limits**, and served with an
+  `x-ms-meta-hash` SHA-256 integrity header — and says the access token must *not* be sent
+  to it. Both reference clients implement it that way; C# passes `token: null` explicitly.
+  Given how tight the session budgets are, this unmetered path is the better default, with
+  `GET /sessions/{ref}/upo/{upoRef}` as the fallback once a link expires.
 
 ## [0.1.0.rc1] — 2026-08-22
 

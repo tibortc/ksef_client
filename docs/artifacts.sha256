@@ -30,3 +30,6 @@ ab42d4090c3e453935e48ffb450f6fd10911110da99eb9500a75e296a4c1fdbb  spec/fixtures/
 c1f84b60bf54697537ba23abdbd52b7789acb7df940652519aa302e7079ef245  spec/fixtures/upo/upo-sesja-internal-id.xml
 2e06ed937100bcae820646662992222e3c14d69ba6077f6b65cde49a303b21b7  spec/fixtures/upo/upo-faktura-id-zlozony-vat-ue.xml
 d259ff94deb36a6729c5cc13b974539532e6a1abb808b76d4680d6de991ddf1a  spec/fixtures/upo/upo-sesja-id-zlozony-vat-ue.xml
+a4f726bcf8cc3f7d9ffa4dab99e005535a8e8b60dced1e5d94578d2e05afa96e  spec/fixtures/xades/UBL-XAdESv132-2.1.xsd
+1fa4625e9cefcb7a9abb5ac1b64315547450031eece8a55bd584e4ba4b79dbc1  spec/fixtures/xades/UBL-XAdESv141-2.1.xsd
+93a98c8bab035b6841df1106bd70f963531d91cb4bad483d53eb4e4d24104ca3  spec/fixtures/xades/UBL-xmldsig-core-schema-2.1.xsd

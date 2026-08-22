@@ -22,6 +22,7 @@ RSpec.describe "pinned upstream artifacts" do
       Dir[File.join(root, "lib/**/*.xsd")],
       Dir[File.join(root, "docs/upstream/**/*.md")],
       Dir[File.join(root, "spec/fixtures/upo/*.xml")],
+      Dir[File.join(root, "spec/fixtures/xades/*.xsd")],
       File.join(root, "spec/fixtures/openapi/open-api.json")
     ].flatten.map { |f| f.sub("#{root}/", "") }
 

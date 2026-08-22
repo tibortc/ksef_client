@@ -44,6 +44,23 @@ The schemas are published under the repository's MIT licence, which permits
 redistribution. **Decision: bundle the XSD in the gem.** The first-run
 fetch-and-cache fallback contemplated by DESIGN.md §7.7 tier 2 is not needed.
 
+**This reasoning does not generalise to every schema in the repository, and the
+distinction is load-bearing.** It holds for the FA(3), auth and UPO schemas, which are the
+Ministry's own work and therefore covered by its MIT licence. It does *not* hold for the
+W3C, OASIS and ETSI schemas that upstream redistributes inside its PEF bundle — the
+Ministry's licence cannot relicense someone else's document. Those are pinned to
+`spec/fixtures/xades/` and deliberately **not** packaged; see §4.3. Two questions decide
+where a pinned schema goes:
+
+1. **Is it needed at runtime, or only by the tests?** Test-only artifacts belong in
+   `spec/fixtures/` regardless of licence, because shipping them is dead weight.
+2. **Whose document is it?** If the answer is not "Ministerstwo Finansów", this section's
+   MIT reasoning does not apply and bundling needs its own justification.
+
+Anything that would move a third-party schema into `lib/` — for instance offering runtime
+signature validation — is a licensing decision, not a refactor, and belongs with the human
+(DESIGN.md §12).
+
 ### 1.3 Pinned prose documentation
 
 `ksef-api` holds **77 files**; the four schemas and the OpenAPI document above were
@@ -204,20 +221,66 @@ Source: `uwierzytelnianie.md` (10.07.2025) plus the pinned spec. Retrieved 2026-
 
 ### 4.1 The `AuthTokenRequest` document
 
-Pinned at `lib/ksef/auth/schema/schemat_auth_v2-{0,1}.xsd` (§1). Both versions are
-accepted by the API; v2.1 is current.
+Pinned at `lib/ksef/auth/schema/schemat_auth_v2-{0,1}.xsd` (§1).
+
+**Send the 2.0 namespace.** An earlier revision of this section said "both versions are
+accepted by the API; v2.1 is current" and this gem was built against 2.1 on that basis.
+That was an inference, not a verified fact, and checking the reference implementations
+(2026-08-22) contradicted it — see §14.4. Every piece of available evidence points at 2.0:
+
+| Source | Namespace |
+|---|---|
+| `ksef-client-csharp`, `AuthenticationTokenRequest.cs` | `[XmlRoot(Namespace = "…/auth/token/2.0")]` |
+| `ksef-client-java`, JAXB-generated `TContextIdentifier` etc. | generated against `…/2.0` |
+| `ksef-client-java`, its own bundled `AuthTokenRequest.xsd` | `targetNamespace="…/2.0"` |
+| all five worked examples in `CIRFMF/ksef-api` | `xmlns="…/2.0"` |
+
+Nothing observed emits 2.1. **Whether the API accepts 2.1 at all is unverified** and needs
+a live TEST call; until then 2.0 is the only defensible default.
+
+Validation is a separate question from what to send, because **v2.0's file does not compile
+as a schema** (§14.4). The rules therefore come from v2.1's file with its target namespace
+rewritten in memory to match the document — the same technique `Ksef::FA3::Validator` uses
+for its remote `schemaLocation`, and legitimate here because the two files are structurally
+identical: diffing them shows only the namespace and the three IP patterns differ, and
+v2.1's are the correct ones.
 
 | Fact | Value |
 |---|---|
 | Target namespace (v2.1) | `http://ksef.mf.gov.pl/auth/token/2.1` |
-| `elementFormDefault` | `qualified` |
-| Root element | `AuthTokenRequest` |
-| Required children | `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` |
+| `elementFormDefault` | `qualified`; `attributeFormDefault` `unqualified` |
+| Root element | `AuthTokenRequest` (no namespace prefix in upstream's examples — default namespace) |
+| Required children, in order | `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` |
 | `SubjectIdentifierType` values | `certificateSubject`, `certificateFingerprint` |
-| Optional | `AuthorizationPolicy` → `AllowedIps` (`Ip4Address`, `Ip4Range`) |
+| Optional | `AuthorizationPolicy` → `AllowedIps` → `Ip4Address` / `Ip4Range` / `Ip4Mask`, each 0–**10** |
 
-`ContextIdentifier` may be a NIP, an internal identifier, or a composite VAT-UE
-identifier. Signature form: enveloped or enveloping; **detached is rejected**.
+`AllowedIps` is itself mandatory *inside* `AuthorizationPolicy`, so the policy element
+cannot be present but empty.
+
+**`Challenge` is strictly formatted** — `xsd:token`, length exactly **36**, pattern
+`\d{8}-CR-[A-F0-9]{10}-[A-F0-9]{10}-[A-F0-9]{2}`. Verified 2026-08-22 that upstream's own
+example `20250604-CR-461EA5B000-537A6BA15D-D7` satisfies it, that lowercase hex is
+rejected, and that the literal `CR` is required. Worth validating client-side before
+spending a signature on it. Note the shape matches §12's reference numbers, `CR` being the
+kind tag for a challenge.
+
+`ContextIdentifier` is a **choice of four** in v2.1 — not three:
+
+| Element | Pattern | Usable? |
+|---|---|---|
+| `Nip` | `[1-9]((\d[1-9])\|([1-9]\d))\d{7}` | yes |
+| `InternalId` | the NIP pattern, then `-\d{5}` | yes |
+| `NipVatUe` | NIP, `-`, then an EU VAT number by member state | **no — see §14.4** |
+| `PeppolId` | `^P[A-Z]{2}[0-9]{6}$` | **no — see §14.4** |
+
+Note the NIP pattern here is *structural* (first digit non-zero, positions 2–3 not both
+zero), not a checksum. It is weaker than `Ksef::FA3::NIP`'s check-digit validation, so
+both are worth applying.
+
+Per `tokeny-ksef.md`, a KSeF token can only be issued in a **`Nip` or `InternalId`**
+context, which is fortunate given the state of the other two.
+
+Signature form: enveloped or enveloping; **detached is rejected**.
 
 Self-signed certificates are accepted on **TEST only**. `srodowiska.md` is explicit that
 this is why TEST contexts are not isolated between integrators.
@@ -300,6 +363,32 @@ available (measured, both on 3.2.11 and 4.0.6):
 requiring it is not a new runtime dependency and needs no gemspec entry — the same status
 as `date`, and unlike `bigdecimal`, which had to be declared because it became a *bundled*
 gem in Ruby 3.4.
+
+#### Signature namespaces, and where they are pinned
+
+Read from pinned artifacts rather than recalled, per the never-invent-a-namespace-URI rule.
+Upstream redistributes the W3C and ETSI schemas inside its PEF bundle, so they are
+available at the same commit as everything else:
+
+| Namespace | Pinned as |
+|---|---|
+| `http://www.w3.org/2000/09/xmldsig#` | `spec/fixtures/xades/UBL-xmldsig-core-schema-2.1.xsd` |
+| `http://uri.etsi.org/01903/v1.3.2#` | `spec/fixtures/xades/UBL-XAdESv132-2.1.xsd` |
+| `http://uri.etsi.org/01903/v1.4.1#` | `spec/fixtures/xades/UBL-XAdESv141-2.1.xsd` |
+
+Measured 2026-08-22: all three **compile offline**. Their `xsd:import` locations are
+*relative* (`UBL-xmldsig-core-schema-2.1.xsd`), so unlike the FA(3) schema they need no
+in-memory `schemaLocation` rewrite, and `xmldsig-core` imports nothing at all. A minimal
+enveloped `ds:Signature` using exclusive c14n, `rsa-sha256` and `xmlenc#sha256` validates
+against the xmldsig schema, and the same document with `SignatureValue` removed is
+rejected — so this gives the signer real structural validation, not a rubber stamp.
+
+**Placed under `spec/fixtures/`, not `lib/`, on purpose.** Two reasons. Validating a
+signature is a test-time concern — the client signs, and KSeF verifies — so nothing at
+runtime needs these files. And they are W3C and ETSI documents redistributed by OASIS and
+then by the Ministry; their terms are not the repository's MIT licence that §1.2 relied on
+for bundling the FA(3) schemas. Keeping them out of the gem sidesteps a redistribution
+question we do not need to answer.
 
 `ksef-client-csharp`'s `CertTestApp` (§4.6) is held in reserve as a debugging aid, not a
 build-time input: if TEST rejects a signature with a message that does not say why, its
@@ -1001,25 +1090,47 @@ bare.** The prose's "prefix" phrasing may describe the separate ECDH/AES-GCM pat
 *does* concatenate — `subjectPublicKeyInfo || nonce || tag || ciphertext`
 (`CryptographyService.cs:446`) — but that path is not used for online-session invoices.
 
-### 14.2 `downloadUrl` carries an `/api/v2` prefix the base URL does not
+### 14.2 `downloadUrl` is a pre-signed link, not a path to join
 
-The worked example in `sesja-sprawdzenie-stanu-i-pobranie-upo.md` returns:
+**Corrected 2026-08-22.** An earlier revision of this section said the field carried a
+stray `/api/v2` prefix and concluded "treat `downloadUrl` as advisory and construct the
+path yourself". That conclusion was drawn from the *prose example* without checking the
+OpenAPI contract, which is the higher-precedence artifact and describes the field
+explicitly. The conclusion was wrong, and following it would have discarded something
+worth having.
 
-```json
-"downloadUrl": "/api/v2/sessions/20250901-SB-…/upo/20250901-EU-…"
-```
+`UpoPageResponse.downloadUrl` is `format: uri`, and the contract's own description says:
 
-But the verified base URL is `https://api-test.ksef.mf.gov.pl/v2` (§2), and §7 item 2
-records that endpoint paths carry **no** `/api` prefix. Joining the base URL with this
-field yields `…/v2/api/v2/…`, which will 404.
+- the link is **generated on every status query**, so it is not a stable identifier;
+- access is by `HTTP GET` and the access token **must not be sent** ("*nie należy* wysyłać
+  tokenu dostępowego");
+- it is **not subject to API rate limits**, and expires at `downloadUrlExpirationDate`;
+- the response carries **`x-ms-meta-hash`** — the SHA-256 of the UPO document, Base64.
 
-`srodowiska.md` states only that a returned URL's **host** matches the environment called;
-it says nothing about the path prefix. So the field's prefix is unexplained.
+The `x-ms-meta-hash` header is Azure Blob Storage's, so this is a pre-signed storage URL
+rather than an API route. That also explains the prefix that prompted the original
+misreading: the field is not meant to be concatenated with the base URL at all, so whether
+the documented example looks host-relative is beside the point.
 
-**Resolution: treat `downloadUrl` as advisory and construct the path from
-`GET /sessions/{ref}/upo/{upoRef}` using `referenceNumber`, which is documented and
-consistent.** Revisit if a live TEST response is observed to differ from the doc's example
-— the example may simply be stale.
+Both reference clients implement it that way. `ksef-client-csharp` exposes two distinct
+paths — `GetSessionUpoAsync(sessionRef, upoRef, accessToken)` for the metered API route,
+and `GetUpoAsync(Uri)` / `GetUpoWithHashAsync(restClient, uri)` for the link, the latter
+passing **`token: null`** explicitly.
+
+**Resolution: follow `downloadUrl` as an opaque absolute URI, without the bearer token,
+and verify `x-ms-meta-hash` against the bytes received.** Given how tight the session
+budgets are (§6.1 — `GET /sessions` allows 10/min), an unmetered path with a built-in
+integrity check is the better default; `GET /sessions/{ref}/upo/{upoRef}` remains the
+fallback when the link has expired.
+
+Two consequences for the client design. The URL must never be logged or persisted as a
+durable reference — it expires, and it is credential-bearing. And the token-suppression is
+not optional politeness: sending a bearer token to third-party storage leaks it.
+
+**Unverified:** whether the live API returns this field absolute or host-relative.
+`srodowiska.md` says only that a returned URL's *host* matches the environment called. Code
+should therefore resolve it against the environment's base host if it arrives relative, and
+use it as-is if absolute.
 
 ### 14.3 Every upstream UPO example fails upstream's own UPO schema
 
@@ -1061,3 +1172,76 @@ Not treated as a §9 open item: the facts are measured and unambiguous. What is 
 verified is whether DEMO uses a third spelling and whether PROD matches the `fixed` value
 exactly — neither can be checked without access to those environments, and neither changes
 the resolution above.
+
+### 14.4 Both auth schemas carry broken regular expressions
+
+Measured 2026-08-22 against the pinned `schemat_auth_v2-{0,1}.xsd`. The root cause is the
+same in both: **XML Schema regular expressions are implicitly anchored, and `^` / `$` are
+*literal characters*, not anchors** (XSD Part 2, Appendix F — the metacharacters are
+`. \ ? * + { } ( ) [ ] |`). Patterns written as if they were Perl regexes therefore mean
+something quite different from what their author intended.
+
+#### v2.0 does not compile at all
+
+Its three IP patterns use `\b`, which XSD regex has no concept of. libxml2 rejects the
+whole file rather than just those facets:
+
+```
+FATAL: failed to compile: Wrong escape sequence, misuse of character '\'
+ERROR: Element 'pattern': The value '^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$'
+       of the facet 'pattern' is not a valid regular expression.
+```
+
+So `schemat_auth_v2-0.xsd` cannot be used to validate anything — you get a schema
+compilation failure, not a validation result. (The same patterns also make dots optional
+via `\.?`, so even parsed loosely they would match `1111`.) **Resolution: validate against
+v2.1 only.** v2.1 rewrote all three patterns correctly.
+
+#### Neither reference client validates locally, and both send 2.0
+
+Checked 2026-08-22, and this is what settles how to respond to the defects below.
+
+- **C#** serialises via `XmlSerializer` in `AuthenticationTokenRequestSerializer` with no
+  schema attached, and writes the context value straight through
+  (`writer.WriteString(Value)`).
+- **Java** marshals via JAXB without ever calling `marshaller.setSchema(...)`.
+
+So the bundled XSD is a **codegen input, not a runtime check** in both clients, and the
+broken patterns below never fire for them: they emit the natural identifier and let the
+server decide. Notably the Java client ships its *own* edited copy of the 2.0 schema
+(`ksef-client/src/main/resources/xsd/AuthTokenRequest.xsd`) in which the IP patterns are
+repaired — just loosely, `([0-9]{1,3}\.){3}[0-9]{1,3}` would admit `999.999.999.999` —
+**but `TNipVatUE` and `TPeppolId` are left broken**, which is independent confirmation that
+those two are genuinely defective rather than misread.
+
+This gem does the same thing for those two types (emit the real value, treat local
+validation as advisory) and additionally sends the 2.0 namespace both clients use.
+
+#### Two of v2.1's four context identifiers cannot hold their real values
+
+Because `^` and `$` are literal, `TPeppolId`'s pattern `^P[A-Z]{2}[0-9]{6}$` matches only
+a value that literally begins with `^` and ends with `$`; and `TNipVatUE`'s pattern ends
+with a stray `$`, so it demands a trailing dollar sign. Measured:
+
+| Element | Value | Against v2.1 |
+|---|---|---|
+| `Nip` | `5265877635` | valid |
+| `InternalId` | `5265877635-12345` | valid |
+| `NipVatUe` | `5265877635-ATU12345678` — **upstream's own documented example** | **invalid** |
+| `NipVatUe` | `5265877635-ATU12345678$` | valid |
+| `PeppolId` | `PPL123456` | **invalid** |
+| `PeppolId` | `^PPL123456$` | valid |
+
+That upstream's own example value for `NipVatUe` fails the schema that defines it is the
+clearest evidence this is an upstream defect and not a misreading.
+
+**Resolution: emit the natural value and treat offline validation of those two context
+types as advisory.** Emitting `^PPL123456$` to satisfy a broken facet would be absurd and
+would certainly be rejected server-side, where the real identifier is what gets looked up.
+Nothing is lost in practice: a KSeF token can only be issued in a `Nip` or `InternalId`
+context anyway (§4.1), and both of those validate cleanly.
+
+Whether the API enforces this XSD server-side is **unverified** and needs a live TEST call
+to settle. If it does, `NipVatUe` and `PeppolId` authentication are simply unusable until
+upstream fixes the patterns — which would be their bug to fix, not something a client can
+work around.

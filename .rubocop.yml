@@ -71,4 +71,5 @@ RSpec/NestedGroups:
 RSpec/DescribeClass:
   Exclude:
     - "spec/artifacts_spec.rb"
+    - "spec/openapi_contract_spec.rb"  # asserts facts about a pinned artifact, not a class
     - "spec/release_readiness_spec.rb"
