@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "time"
+
 module Ksef
   # Authentication against KSeF (docs/REFERENCE.md §4).
   module Auth
@@ -18,5 +20,24 @@ module Ksef
     }.freeze
 
     DEFAULT_SCHEMA_VERSION = "2.0"
+
+    class << self
+      # Parses the contract's `date-time` fields.
+      #
+      # Returns `nil` rather than raising on an unparseable value: these timestamps are
+      # informational — expiry hints, start times — and a malformed one is no reason to
+      # fail an authentication that otherwise succeeded. The fields that actually matter
+      # are the tokens themselves.
+      #
+      # @return [Time, nil]
+      def time(value)
+        return value if value.is_a?(Time)
+        return nil if value.nil? || value.to_s.empty?
+
+        Time.iso8601(value.to_s)
+      rescue ArgumentError
+        nil
+      end
+    end
   end
 end

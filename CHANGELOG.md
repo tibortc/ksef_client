@@ -31,6 +31,20 @@ gem version for which API state".
 - The serializer reads element order from the generated metadata rather than hand-listing
   it, and raises on element names the schema does not define at that position instead of
   dropping them silently.
+- **`Ksef::Auth::Client`** — the six HTTP calls of the authentication flow, with typed
+  responses (`Challenge`, `Initiation`, `OperationStatus`, `Tokens`, `TokenInfo`) and a
+  poller. Deliberately thin: it maps requests and responses and nothing else. Only
+  `wait_until_complete` has policy, and it has **no timeout by default** — on DEMO and PROD
+  the operation legitimately stays "in progress" while the certificate's status is checked
+  with its issuer over OCSP/CRL, so a fixed deadline would report failure for
+  authentications that were about to succeed.
+- **`Ksef::Auth::Status`** — the eleven authentication status codes. These are not HTTP
+  statuses; they arrive inside a 200 response. An unrecognised code is treated as
+  **terminal**, because assuming otherwise polls a dead operation for ever, and elapsed
+  time cannot distinguish "still legitimately 100" from "stuck".
+- `TokenInfo` redacts **both `#inspect` and `#to_s`**. Redacting only `#inspect` leaves the
+  leak that actually happens — interpolating a token into a log line. Extracting the value
+  is an explicit `#token` call, and `Auth::Client` does that when setting the header.
 - **`Ksef::Auth::Signer`** — the XAdES-BES enveloped signature for
   `POST /auth/xades-signature`, built on Nokogiri and stdlib `openssl` with no new
   dependency. Every algorithm is from the Ministry's published allow-list, and the shape is
@@ -138,6 +152,10 @@ expressions are implicitly anchored, and `^` / `$` are literal characters, not a
   decide. This gem now does the same, and sends 2.0. The Java client even ships its own
   edited copy of the 2.0 schema with the IP patterns repaired but `TNipVatUE` and
   `TPeppolId` left broken, which independently confirms those two are defective.
+- **The authentication status codes are now recorded** at `docs/REFERENCE.md` §4.8, from
+  the reference implementation — the Ministry's prose names only two of the eleven and says
+  the rest "will be available in the endpoint's technical documentation". This narrows, but
+  does not close, the open error-code catalogue in §9.
 - **A signed `AuthTokenRequest` can never be schema-valid.** The API requires an enveloped
   signature; the schema defining the document declares a closed sequence with no
   `xsd:any`, so that signature is an unexpected element. Both requirements are upstream's
