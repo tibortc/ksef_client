@@ -64,4 +64,5 @@ namespace :fa3 do
   end
 end
 
-task default: %i[verify:artifacts spec rubocop]
+# Mirrors what CI runs, so `rake` locally means the same thing as a green matrix leg.
+task default: %i[verify:artifacts fa3:verify spec rubocop]

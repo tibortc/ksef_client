@@ -407,7 +407,41 @@ Source: pinned `schemat_FA(3)_v1-0E.xsd` (§1).
 `elementFormDefault="qualified"` means **every** element must be namespace-qualified in
 the instance document — the serializer cannot emit unprefixed children.
 
-### 8.1 Import chain and offline validation
+### 8.1 Structural shape (measured 2026-08-22, drives the codegen)
+
+The schema is not a flat set of named types, which is what a reader might reasonably
+expect. Counts below are from the pinned file and are asserted by
+`spec/ksef/fa3/generated_spec.rb`.
+
+| Fact | Value |
+|---|---|
+| Global elements | 1 (`Faktura`) |
+| Named complexTypes | 7 |
+| Anonymous complexTypes reachable from the root | 51 |
+| Max nesting depth | 7 |
+| `xsd:sequence` | 86 |
+| `xsd:choice` | 19 |
+| `xsd:all` / `xsd:group` / `xsd:any` | 0 |
+| Named simpleTypes with enumerations | 21 across all pinned schemas |
+| `xsd:simpleContent` extensions | 2 |
+
+Two consequences the generator has to honour:
+
+1. **Leaf element names are not unique.** `DaneKontaktowe` appears under all four subject
+   elements, so generated metadata is keyed by element *path*
+   (`Faktura/Podmiot1/DaneKontaktowe`), which also stays stable if upstream adds a fifth.
+2. **Four types have a top-level `xsd:choice`** — `Zwolnienie`, `NoweSrodkiTransportu`,
+   `PMarzy` and `FakturaZaliczkowa` (all reached via `Faktura/Fa/...`). Anything that
+   flattens a type's root compositor converts their "exactly one of" into "all of these,
+   in order", which a validator would then accept. Choice structure must be preserved,
+   not flattened.
+
+`TStawkaPodatku` has 14 values and **half of them are not numeric** — seven rates
+(`23`, `22`, `8`, `7`, `5`, `4`, `3`) alongside seven codes (`0 KR`, `0 WDT`, `0 EX`,
+`zw`, `oo`, `np I`, `np II`). Any numeric coercion in the VAT path corrupts the latter,
+so rate codes are carried as strings throughout and only the *amounts* are `BigDecimal`.
+
+### 8.2 Import chain and offline validation
 
 ```
 schemat_FA(3)_v1-0E.xsd

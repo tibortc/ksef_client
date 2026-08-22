@@ -10,6 +10,32 @@ gem version for which API state".
 
 ## [Unreleased]
 
+**Targets:** KSeF API 2.0 · FA(3) `1-0E` · upstream `CIRFMF/ksef-api@1c34fe27`
+
+### Added
+
+- `rake fa3:generate` — codegen producing committed `lib/ksef/fa3/generated/`: 59 content
+  models and 21 enumerations read from the pinned FA(3) XSD. Hand-written models consume
+  this for element ordering, occurrence rules and enum membership.
+- `rake fa3:verify` — regenerates and fails on any byte difference, so a non-deterministic
+  generator or a stale `generated/` breaks the build. Runs in the default task and on every
+  CI matrix leg.
+- Pinned `AuthTokenRequest` schemas (auth v2-0 and v2-1) ahead of the certificate auth flow.
+
+### Changed
+
+- **Certificate/XAdES authentication moved from 0.3 into 0.1.** A KSeF token can only be
+  issued after a one-time XAdES authentication, so a token-only client cannot bootstrap a
+  credential from nothing.
+- The prior-art claim in DESIGN.md §1 ("there is no Ruby SDK") is withdrawn: `ksef-rb`
+  exists and is a working KSeF 2.0 client. This gem's distinction is FA(3) authoring and
+  validation rather than transport alone.
+
+### Fixed
+
+- `spec.files` globbed only the FA(3) schema directory, so schemas added elsewhere under
+  `lib/` would not have shipped — a failure that would appear only in the packaged gem.
+
 ## [0.1.0.rc1] — 2026-08-22
 
 **Targets:** KSeF API 2.0 · FA(3) `1-0E` (`kodSystemowy` `FA (3)`, variant 3)

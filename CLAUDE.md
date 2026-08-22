@@ -6,7 +6,7 @@ Precedence when sources disagree: **pinned artifacts** (OpenAPI spec, FA(3) XSD)
 
 ## Status
 
-- Current milestone: **Phase 1** (DESIGN.md §11). The transport track (configuration, environments, errors, http) is done and green; the builder track (XSD codegen, models, serializer, golden files) has not started. Update this line only when the phase's acceptance criteria pass.
+- Current milestone: **Phase 1** (DESIGN.md §11). Transport track done. Builder track: XSD codegen done and reproducible; **models, serializer and VAT golden files remain**. Of the three "Done when" gates, codegen-reproducible and CI-green pass; XSD-valid golden files do not. Update this line only when the phase's acceptance criteria pass.
 
 ## Commands
 
@@ -26,9 +26,8 @@ rbenv's shims are not on `PATH` in a non-interactive shell — without the prefi
 - `KSEF_ENV=test bundle exec rspec --tag integration` — live TEST suite (needs `KSEF_TEST_NIP`, `KSEF_TEST_TOKEN`). Run only when explicitly asked; it is nightly-CI's job. Tag-based, matching `nightly.yml`. No spec carries the tag yet, and integration specs must opt back into the network access `spec_helper` disables.
 - `KSEF_RELEASE_CHECK=1 bundle exec rspec` — adds the release gates in `spec/release_readiness_spec.rb`: gemspec invariants, the four approved runtime deps, and no reintroduced metadata placeholders. **Currently green — keep it that way.**
 
-Not implemented yet — do not run, it does not exist:
-
-- `bundle exec rake fa3:generate` — will regenerate `lib/ksef/fa3/generated/` from the pinned XSD. Building it is part of the Phase 1 builder track. Once it exists its output is committed and never hand-edited.
+- `bundle exec rake fa3:generate` — regenerate `lib/ksef/fa3/generated/` from the pinned XSD. Output is **committed**; never hand-edit it. The generator lives in `tasks/fa3_generator.rb`, outside `lib/` so it is not packaged.
+- `bundle exec rake fa3:verify` — regenerate and fail on any byte difference. Catches both a non-deterministic generator and a stale committed `generated/`. Part of the default task and of CI.
 
 ## Verifying the Ruby 3.2 floor
 
@@ -75,6 +74,6 @@ Even so, when reaching for any core or stdlib method, confirm it exists in 3.2 r
 ## Workflow
 
 - Work the current milestone only (see Status); do not start the next phase early.
-- Definition of done: `bundle exec rake` green — pinned artifacts verified, specs passing, RuboCop clean. Once `rake fa3:generate` exists, it must also produce an empty diff.
+- Definition of done: `bundle exec rake` green — pinned artifacts verified, codegen reproducible, specs passing, RuboCop clean. That task list mirrors CI exactly, so a green `rake` means a green matrix leg.
 - Unsure how KSeF behaves? Read the official C#/Java clients (github.com/CIRFMF) before guessing, then ledger the finding in `docs/REFERENCE.md`.
 - **Open** DESIGN.md §12 decisions belong to the human — ask, don't pick. Already settled, so don't re-ask: **§12.2** XSD redistribution (schemas are MIT-licensed → bundled; `docs/REFERENCE.md` §1.2), **§12.1** author/repo metadata (Tibor Molnár, `tibor@timcraft.pl`, `github.com/tibortc/ksef_client`), and the 3.2 floor surviving its EOL (DESIGN.md §3).

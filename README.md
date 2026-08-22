@@ -18,10 +18,10 @@ invoice types, the FA(3) XSD bundled, and three tiers of validation before anyth
 submitted.
 
 > **Status: pre-release, under active development.** The transport foundations
-> (configuration, environments, error model, HTTP layer) are in place. Authentication,
-> encryption, sessions and the FA(3) builder are not implemented yet — see
-> [Roadmap](#roadmap). The quickstart below is the **target** API for 0.1.0 and does not
-> run today.
+> (configuration, environments, error model, HTTP layer) are in place, and the FA(3)
+> schema metadata is generated and queryable. Authentication, encryption, sessions and the
+> invoice builder itself are not implemented yet — see [Roadmap](#roadmap). The quickstart
+> below is the **target** API for 0.1.0 and does not run today.
 
 ## Installation
 
@@ -87,6 +87,22 @@ rescue Ksef::ApiError => e
   e.trace_id         # quote this to Ministry support
 end
 ```
+
+The FA(3) schema metadata is generated from the bundled XSD, so element ordering and
+enum membership are queryable without parsing anything yourself:
+
+```ruby
+E = Ksef::FA3::Generated::Enums
+E.values_for("TRodzajFaktury")      # => ["VAT", "KOR", "ZAL", "ROZ", "UPR", "KOR_ZAL", "KOR_ROZ"]
+E.valid?("TStawkaPodatku", "23")    # => true
+
+T = Ksef::FA3::Generated::Types
+T.ordered_elements("Faktura").map { |e| e[:name] }
+# => ["Naglowek", "Podmiot1", "Podmiot2", ...] — the order KSeF requires
+```
+
+Note VAT rate codes are **strings**, not numbers: half of the fourteen are codes like
+`"0 WDT"`, `"zw"` and `"np I"`.
 
 ## Environments
 
