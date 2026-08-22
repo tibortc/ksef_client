@@ -237,6 +237,16 @@ RSpec.describe Ksef::HTTP::Connection do
       expect { connection.get("sessions") }.to raise_error(Ksef::TimeoutError)
     end
 
+    # Distinct from the two above: adapters other than net_http raise Faraday's own
+    # timeout class directly rather than wrapping it in ConnectionFailed, so that branch
+    # needs its own case. It is the only path that reports "request timed out".
+    it "wraps Faraday's own timeout, as non-net_http adapters raise it" do
+      stub_request(:get, "#{base}/sessions").to_raise(Faraday::TimeoutError.new("execution expired"))
+
+      expect { connection.get("sessions") }
+        .to raise_error(Ksef::TimeoutError, /KSeF request timed out: execution expired/)
+    end
+
     it "wraps a genuine connection failure" do
       stub_request(:get, "#{base}/sessions").to_raise(Faraday::ConnectionFailed.new("econnrefused"))
 

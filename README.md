@@ -21,14 +21,14 @@ submitted.
 >
 > **Working:** the transport foundations (configuration, environments, error model, HTTP
 > layer), the FA(3) schema metadata, offline XSD validation, and building a plain `VAT`
-> invoice from Ruby objects to schema-valid XML.
+> invoice — via the `Ksef::FA3.build` DSL or the value objects directly — to schema-valid
+> XML.
 >
 > **Not yet:** authentication, encryption, sessions — so nothing can actually be *sent* to
-> KSeF yet — the `Ksef::FA3.build` DSL, and the other six invoice types. See
-> [Roadmap](#roadmap).
+> KSeF yet — and the other six invoice types. See [Roadmap](#roadmap).
 >
-> The quickstart below is the **target** API for 0.1.0 and does not run today; the
-> [working example](#building-an-invoice-today) further down does.
+> In the quickstart below, **everything up to and including `Ksef::FA3.build` runs
+> today**; the `client` calls do not exist yet.
 
 ## Installation
 
@@ -42,15 +42,18 @@ The gem is named `ksef_client`; the namespace is `Ksef`.
 require "ksef_client"   # defines Ksef, Ksef::Client, Ksef::FA3, ...
 ```
 
-## Quickstart (target API for 0.1.0 — not yet functional)
+## Quickstart
+
+The `Ksef::FA3.build` block runs today and produces schema-valid FA(3) XML. The `client`
+calls around it are the target API for 0.1.0 and are **not implemented yet**.
 
 ```ruby
-client = Ksef::Client.new(
+client = Ksef::Client.new(                       # ← not yet
   env:  :test,
   auth: Ksef::Auth::Token.new(context_nip: "9999999999", token: ENV["KSEF_TOKEN"])
 )
 
-invoice = Ksef::FA3.build do |f|
+invoice = Ksef::FA3.build do |f|                 # ← this part works
   f.seller nip: "9999999999", name: "ACME sp. z o.o.",
            address: { street: "Prosta 1", city: "Warszawa", postal_code: "00-001", country: "PL" }
   f.buyer  nip: "1111111111", name: "Klient S.A.",
@@ -60,11 +63,27 @@ invoice = Ksef::FA3.build do |f|
   f.line name: "Consulting", qty: 10, unit: "godz.", net_unit_price: 150, vat: "23"
 end
 
-result = client.send_invoice(invoice)          # validate! → encrypt → session → submit
+invoice.validate!                              # ← works: offline, against the bundled XSD
+invoice.to_xml                                 # ← works
+
+result = client.send_invoice(invoice)          # ← not yet: validate! → encrypt → submit
 status = client.wait_until_accepted(result.reference)
-status.ksef_number                             # => "9999999999-2026…"
+status.ksef_number                             # => "9999999999-20260822-…-AF"
 upo    = client.upo(result.reference)          # signed UPO XML — archive this verbatim
 ```
+
+The DSL accepts English shorthand (`qty:`, `vat:`) and coerces a plain Hash into an
+address. A misspelled key raises and tells you what was permitted, rather than quietly
+producing an invoice with a field missing:
+
+```ruby
+Ksef::FA3.build { |f| f.line name: "X", price: 1 }
+# => Ksef::ValidationError: Unknown line option(s) :price. Permitted: name, quantity,
+#    unit, net_unit_price, vat_rate, net_amount. Shorthand: qty for quantity, vat for vat_rate
+```
+
+`address:` takes an `Address`, a Hash of its fields, or an already-formatted string —
+FA(3) stores an address as free text, so all three end up in the same place.
 
 ## What works today
 
@@ -95,9 +114,11 @@ rescue Ksef::ApiError => e
 end
 ```
 
-### Building an invoice today
+### Building an invoice without the DSL
 
-This runs. It produces schema-valid FA(3) XML — you just cannot submit it yet.
+The DSL is a thin front end over plain value objects, and they are public API too. Reach
+for these when you are mapping from your own domain objects and the keyword block would
+just be indirection.
 
 ```ruby
 require "ksef_client"
