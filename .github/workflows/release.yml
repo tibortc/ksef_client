@@ -36,9 +36,13 @@ jobs:
       - run: bundle exec rubocop
 
       - name: Check the tag matches Ksef::VERSION
+        # Requires `ksef/version`, not `ksef_client`. version.rb is standalone, so this
+        # needs no gems; requiring the entry point would pull in Zeitwerk, which plain
+        # `ruby` cannot see once bundler-cache has installed gems to a bundle path.
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          version="$(ruby -Ilib -rksef_client -e 'print Ksef::VERSION')"
+          version="$(ruby -Ilib -rksef/version -e 'print Ksef::VERSION')"
+          echo "tag=$tag version=$version"
           if [ "$tag" != "$version" ]; then
             echo "::error::Tag $tag does not match Ksef::VERSION $version"
             exit 1
