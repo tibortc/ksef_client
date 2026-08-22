@@ -56,7 +56,7 @@ mv /tmp/Gemfile.lock.dev Gemfile.lock                 # restore
 
 The separate `BUNDLE_PATH` keeps the 4.0.6 gem set intact, and resolving without the lockfile mirrors what CI does per matrix Ruby. Bundler under 3.2.11 is 2.4.19, which cannot read a lockfile written by Bundler 4.
 
-Last verified green on 3.2.11 (2026-08-22, after the `FA3.build` DSL landed): 280 examples, 0 failures, line 99.81 / branch 97.14 / method 100, RuboCop clean.
+Last verified green on 3.2.11 (2026-08-22, after the `FA3.build` DSL and the coverage ratchet): 281 examples, 0 failures, line 100 / branch 97.14 / method 100, RuboCop clean.
 
 Even so, when reaching for any core or stdlib method, confirm it exists in 3.2 rather than assuming — a filtered local run will not catch it.
 
@@ -80,7 +80,7 @@ Even so, when reaching for any core or stdlib method, confirm it exists in 3.2 r
 - `# frozen_string_literal: true` in every file. `Data.define` for value objects. `pack("m0")` / `unpack1("m0")` for base64.
 - Always pass `encoding: "UTF-8"` to `File.read`. The ambient locale is not UTF-8, and every KSeF artifact contains Polish characters.
 - Every behavior change lands with specs. FA(3) serializer changes land with golden-file updates, and goldens must validate against the pinned XSD.
-- Coverage is gated on **line 95, branch 90, method 100** (`generated/` excluded). The floors ratchet — raise them when the real numbers improve, never lower one to make a change pass. `method: 100` is the one that bites: a method nothing exercises fails the build. Branch coverage is where real gaps hide, so a change that adds a conditional needs a test per path, not just per line. Filtered runs (single file, `--tag`) skip the gate by design.
+- Coverage is gated on **line 99, branch 95, method 100** (`generated/` excluded). **Re-ratchet these at each phase boundary, not once** — they are percentages, so the absolute number of untested branches they permit grows as the codebase does; Phase 2 roughly doubles it. Part of the phase definition of done. The floors ratchet — raise them when the real numbers improve, never lower one to make a change pass. `method: 100` is the one that bites: a method nothing exercises fails the build. Branch coverage is where real gaps hide, so a change that adds a conditional needs a test per path, not just per line. Filtered runs (single file, `--tag`) skip the gate by design.
 - Thread safety of `Ksef::Client` is a requirement (DESIGN.md §5.2), not an optimization. (`Ksef::Client` is not written yet.)
 
 ## Workflow

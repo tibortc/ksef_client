@@ -37,13 +37,23 @@ SimpleCov.start do
 
   # Floors sit just under what the suite actually achieves, so they ratchet rather than
   # aspire. Raise them when the real numbers move up; do not lower them to make a change
-  # pass. Current: line 99.6%, branch 96.0%, method 100%.
+  # pass. Actual at last ratchet (2026-08-22): line 100%, branch 97.14%, method 100%.
   #
-  # Branch is not 100% because four `&.` guards defend against states that cannot occur —
-  # a completed Faraday response always carries headers, and the pinned XSD always has
-  # exactly one import with an http location. Contorting tests to reach them would prove
-  # nothing.
-  minimum_coverage line: 95, branch: 90, method: 100
+  # There is deliberate margin rather than a knife edge at the actuals: a floor pinned to
+  # the exact current figure fails on refactors that change nothing about test quality —
+  # extract a method with an early return and the build goes red for no reason. A ratchet
+  # you end up lowering is worse than one set a little loose.
+  #
+  # Branch is not 100% because the remaining gaps are `&.` guards against states that
+  # cannot occur: a completed Faraday response always carries headers, and the pinned XSD
+  # always has exactly one import with an http location. Contorting tests to reach them
+  # would prove nothing.
+  #
+  # Caveat for future phases: these are percentages, so the absolute number of untested
+  # branches they permit grows with the codebase. Phase 2 roughly doubles it, at which
+  # point branch 95 quietly allows twice today's slack. Re-ratchet at each phase boundary,
+  # not once (CLAUDE.md records this in the Phase 2 definition of done).
+  minimum_coverage line: 99, branch: 95, method: 100
 end
 
 require "ksef_client"
