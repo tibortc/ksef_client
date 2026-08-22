@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Explicit and minimal. The Coveralls step only reads the repo and posts outward to
+# coveralls.io, so nothing here needs write access.
+permissions:
+  contents: read
+
 jobs:
   spec:
     name: "spec (ruby ${{ matrix.ruby }})"
@@ -38,13 +43,26 @@ jobs:
       - name: Verify the gem packages
         run: gem build ksef_client.gemspec
 
-      - name: Upload coverage
+      - name: Upload coverage artifact
         if: matrix.ruby == '4.0'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage
           path: coverage/
           if-no-files-found: error
+
+      - name: Report coverage to Coveralls
+        if: matrix.ruby == '4.0'
+        uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2.3.8
+        with:
+          file: coverage/lcov.info
+          # github-token defaults to ${{ github.token }}, so there is no secret to
+          # create or rotate.
+          #
+          # Coveralls is reporting, not enforcement: the 90% SimpleCov gate in
+          # spec_helper.rb already fails the build in-repo. A third-party outage should
+          # not turn this matrix leg red.
+          fail-on-error: false
 
   rubocop:
     runs-on: ubuntu-latest

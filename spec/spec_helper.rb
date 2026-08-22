@@ -1,12 +1,25 @@
 # frozen_string_literal: true
 
 require "simplecov"
+require "simplecov-lcov"
 
 # A filtered run — one file, one line, or a tag selector — legitimately exercises only
 # part of the library, so the gate would fail on a green suite. It is enforced on full
 # runs only; without this, `rspec --tag integration` in nightly CI fails on coverage
 # rather than on tests.
 FILTERED_RUN = ARGV.any? { |arg| arg.start_with?("spec/", "--tag", "-t", "--example", "-e") }
+
+SimpleCov::Formatter::LcovFormatter.config do |c|
+  # A single lcov.info rather than one file per source file, which is what the Coveralls
+  # uploader expects.
+  c.report_with_single_file = true
+  c.single_report_path = "coverage/lcov.info"
+end
+
+# HTML stays for local use; LCOV is what CI uploads.
+SimpleCov.formatters = SimpleCov::Formatter::MultiFormatter.new(
+  [SimpleCov::Formatter::HTMLFormatter, SimpleCov::Formatter::LcovFormatter]
+)
 
 SimpleCov.start do
   add_filter "/spec/"

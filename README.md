@@ -1,5 +1,8 @@
 # ksef_client
 
+[![test](https://github.com/tibortc/ksef_client/actions/workflows/test.yml/badge.svg)](https://github.com/tibortc/ksef_client/actions/workflows/test.yml)
+[![Coverage Status](https://coveralls.io/repos/github/tibortc/ksef_client/badge.svg?branch=main)](https://coveralls.io/github/tibortc/ksef_client?branch=main)
+
 Ruby client for **KSeF 2.0**, Poland's national e-invoicing system (Krajowy System
 e-Faktur), with a standalone **FA(3)** invoice builder.
 
