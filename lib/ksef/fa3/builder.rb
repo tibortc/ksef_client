@@ -1,0 +1,138 @@
+# frozen_string_literal: true
+
+module Ksef
+  module FA3
+    # The object yielded by {Ksef::FA3.build}. Collects fields, then hands them to
+    # {Invoice} — which keeps every computation and every schema default in one place
+    # rather than splitting them between the model and the DSL.
+    #
+    # Two deliberate choices about strictness. An unknown or misspelled key **raises**,
+    # listing what is permitted, because the alternative is a silently incomplete invoice
+    # — the same reasoning as {Serializer}'s treatment of unknown element names. But a
+    # single-value field set twice simply takes the later value, which is what anyone
+    # writing a builder expects, and what `f.number` called twice obviously ought to do.
+    class Builder
+      SUBJECT_KEYS = %i[nip name address local_government_unit vat_group_member].freeze
+      ADDRESS_KEYS = %i[line1 line2 country street city postal_code].freeze
+      LINE_KEYS = %i[name quantity unit net_unit_price vat_rate net_amount].freeze
+
+      # English shorthand from DESIGN.md §8's example. The canonical names work too, so
+      # `qty:` and `quantity:` are interchangeable — but passing both is an error rather
+      # than a silent last-one-wins.
+      LINE_ALIASES = { qty: :quantity, vat: :vat_rate }.freeze
+
+      # Reported together, so one round trip tells the caller everything that is missing.
+      REQUIRED = %i[seller buyer number issue_date].freeze
+
+      def initialize
+        @fields = {}
+        @lines = []
+      end
+
+      # @param attributes [Hash] `:nip`, `:name`, `:address`, and optionally
+      #   `:local_government_unit` / `:vat_group_member`
+      def seller(**attributes) = @fields[:seller] = subject(attributes, role: :seller)
+
+      # @see #seller
+      def buyer(**attributes) = @fields[:buyer] = subject(attributes, role: :buyer)
+
+      # @param value [String] the invoice number (`P_2`)
+      def number(value) = @fields[:number] = value
+
+      # @param value [Date, String] date of issue (`P_1`)
+      def issue_date(value) = @fields[:issue_date] = value
+
+      # @param value [String] ISO-4217 code; defaults to `"PLN"`
+      def currency(value) = @fields[:currency] = value
+
+      # @param value [Time, DateTime, Date, String] document generation timestamp;
+      #   defaults to the moment of serialisation
+      def issued_at(value) = @fields[:issued_at] = value
+
+      # Polish VAT law permits both strategies and they can differ by a grosz, so this is
+      # explicit rather than inferred (DESIGN.md §7.3).
+      # @param value [Symbol] `:per_line` (default) or `:per_summary`
+      def rounding(value) = @fields[:rounding] = value
+
+      # @param value [String] a `TRodzajFaktury` code; defaults to `"VAT"`
+      def invoice_type(value) = @fields[:invoice_type] = value
+
+      # Appends a line. Call once per line; row numbers are assigned on serialisation.
+      #
+      # @param attributes [Hash] `:name`, `:quantity` (or `:qty`), `:unit`,
+      #   `:net_unit_price`, `:vat_rate` (or `:vat`), and optionally `:net_amount`
+      def line(**attributes)
+        @lines << Line.new(**normalise(attributes, LINE_KEYS, LINE_ALIASES, "line"))
+      end
+
+      # @return [Invoice]
+      # @raise [Ksef::ValidationError] if a required field was never set
+      def to_invoice
+        missing = REQUIRED.reject { |key| @fields.key?(key) }
+        unless missing.empty?
+          raise ValidationError,
+                "Incomplete invoice, missing #{missing.join(", ")}. " \
+                "Every invoice needs a seller, a buyer, a number and an issue date."
+        end
+
+        Invoice.new(**@fields, lines: @lines)
+      end
+
+      private
+
+      def subject(attributes, role:)
+        normalised = normalise(attributes, SUBJECT_KEYS, {}, "#{role} subject")
+        require_keys(normalised, %i[nip name address], role)
+        # `normalise` returns a fresh Hash, so replacing the address in place is safe —
+        # and reads better than relying on splat-then-override precedence.
+        normalised[:address] = coerce_address(normalised[:address], role)
+        Subject.new(**normalised)
+      end
+
+      # Accepts an {Address}, a Hash of its attributes, or a pre-formatted string — the
+      # last because FA(3) models an address as free-text lines anyway (see {Address}).
+      def coerce_address(value, role)
+        case value
+        when Address then value
+        when String then Address.new(line1: value)
+        when Hash
+          Address.new(**normalise(value.transform_keys(&:to_sym), ADDRESS_KEYS, {}, "#{role} address"))
+        else
+          raise ValidationError,
+                "#{role} address must be a Ksef::FA3::Address, a Hash of its fields, or a formatted " \
+                "String; got #{value.class}"
+        end
+      end
+
+      # Translates shorthand, then rejects anything the target object does not accept.
+      def normalise(attributes, permitted, aliases, what)
+        aliases.each do |short, long|
+          next unless attributes.key?(short) && attributes.key?(long)
+
+          raise ValidationError, "Pass either #{short}: or #{long}: to #{what}, not both"
+        end
+
+        translated = attributes.to_h { |key, value| [aliases.fetch(key, key), value] }
+        unknown = translated.keys - permitted
+        raise ValidationError, unknown_message(unknown, permitted, aliases, what) unless unknown.empty?
+
+        translated
+      end
+
+      def unknown_message(unknown, permitted, aliases, what)
+        message = "Unknown #{what} option(s) #{unknown.map(&:inspect).join(", ")}. " \
+                  "Permitted: #{permitted.join(", ")}"
+        return message if aliases.empty?
+
+        "#{message}. Shorthand: #{aliases.map { |short, long| "#{short} for #{long}" }.join(", ")}"
+      end
+
+      def require_keys(attributes, keys, what)
+        missing = keys.reject { |key| attributes.key?(key) }
+        return if missing.empty?
+
+        raise ValidationError, "Incomplete #{what}, missing #{missing.join(", ")}"
+      end
+    end
+  end
+end

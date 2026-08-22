@@ -31,6 +31,19 @@ gem version for which API state".
 - The serializer reads element order from the generated metadata rather than hand-listing
   it, and raises on element names the schema does not define at that position instead of
   dropping them silently.
+- **`Ksef::FA3.build` — the keyword DSL of DESIGN.md §8.** That section's snippet now runs
+  verbatim and produces schema-valid FA(3) XML, so the README's headline example is no
+  longer aspirational. The DSL accepts the English shorthand from the spec (`qty:`,
+  `vat:`) alongside the canonical names, and coerces an address given as a Hash or as an
+  already-formatted String. It is a thin front end over the existing value objects —
+  every computation and every schema default stays in `Invoice`, so there is one
+  implementation of each rule rather than two.
+
+  Unknown or misspelled keys **raise**, naming what was permitted, on the same reasoning
+  as the serializer's treatment of unknown element names: the alternative is an invoice
+  that is silently missing a field. Passing both a shorthand and its canonical name
+  (`qty:` and `quantity:`) is an error rather than a silent last-one-wins. Single-value
+  fields set twice do take the later value, which is what a builder should do.
 - **Pinned the normative subset of upstream's prose documentation** (`docs/upstream/`, 19
   files) plus the UPO schema and its six worked examples, all at the same
   `CIRFMF/ksef-api@1c34fe27` already used for the OpenAPI contract and FA schemas. The

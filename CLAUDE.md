@@ -8,8 +8,8 @@ Precedence when sources disagree: **pinned artifacts** (OpenAPI spec, FA(3) XSD)
 
 - Current milestone: **Phase 2** (DESIGN.md §11). Phase 1 is complete — all three "Done when" gates pass: codegen reproducible, VAT golden file XSD-valid, CI matrix green.
 - **Phase 2 order:**
-  1. `Ksef::FA3.build` — the DSL in DESIGN.md §8. Small now that the models exist, its shape is fixed by §8, and needs no unverified facts, so it is unblocked work. Until it exists the README's headline example is aspirational.
-  2. **Certificate/XAdES auth.** Build before token auth: a KSeF token can only be issued *after* a one-time XAdES authentication, so this is the only flow that bootstraps a credential from nothing. It unblocks §12.4 and makes nightly CI self-sufficient.
+  1. ~~`Ksef::FA3.build`~~ — **done.** `lib/ksef/fa3.rb` + `lib/ksef/fa3/builder.rb`. DESIGN.md §8's snippet runs verbatim and validates against the XSD; a spec asserts exactly that, so it stays true.
+  2. **Certificate/XAdES auth.** ← *next.* Build before token auth: a KSeF token can only be issued *after* a one-time XAdES authentication, so this is the only flow that bootstraps a credential from nothing. It unblocks §12.4 and makes nightly CI self-sufficient. Requirements are ledgered at `docs/REFERENCE.md` §4.3 (an allow-list — pick the simple permitted combination, do not over-engineer), §4.4 (certificate attributes) and §4.6 (TEST bootstrap).
   3. Crypto module — parameters are ledgered (`docs/REFERENCE.md` §10). No upstream golden vectors exist; use NIST/RFC vectors for the primitives and test the *framing* (§14.1) explicitly.
   4. Online sessions, send/status/UPO/download.
   5. Validator tiers 1 and 3; then the remaining six invoice types, starting with KOR (§7.4).
@@ -56,7 +56,7 @@ mv /tmp/Gemfile.lock.dev Gemfile.lock                 # restore
 
 The separate `BUNDLE_PATH` keeps the 4.0.6 gem set intact, and resolving without the lockfile mirrors what CI does per matrix Ruby. Bundler under 3.2.11 is 2.4.19, which cannot read a lockfile written by Bundler 4.
 
-Last verified green on 3.2.11: 117 examples, 0 failures, RuboCop clean, gem builds.
+Last verified green on 3.2.11 (2026-08-22, after the `FA3.build` DSL landed): 280 examples, 0 failures, line 99.81 / branch 97.14 / method 100, RuboCop clean.
 
 Even so, when reaching for any core or stdlib method, confirm it exists in 3.2 rather than assuming — a filtered local run will not catch it.
 
