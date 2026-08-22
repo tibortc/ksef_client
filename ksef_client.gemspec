@@ -50,7 +50,13 @@ Gem::Specification.new do |spec|
   # Runtime dependencies are exactly these four (DESIGN.md §4.3). Adding a fifth is a
   # decision that must be flagged, not made in passing.
   # bigdecimal is bundled, not default, as of Ruby 3.4 — it must be declared.
-  spec.add_dependency "bigdecimal", "~> 3.1"
+  #
+  # Spans both current majors rather than pinning to one. A library that demanded
+  # `~> 3.1` would be uninstallable for any application already on bigdecimal 4, and one
+  # demanding `~> 4.0` would exclude everyone still on 3. `< 5` keeps an upper bound on
+  # the dependency itself, which is unrelated to the rule against bounding
+  # `required_ruby_version` (DESIGN.md §3).
+  spec.add_dependency "bigdecimal", ">= 3.1", "< 5"
   spec.add_dependency "faraday", "~> 2.0"
   spec.add_dependency "nokogiri", "~> 1.16"
   spec.add_dependency "zeitwerk", "~> 2.6"

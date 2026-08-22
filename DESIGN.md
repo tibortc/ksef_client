@@ -126,8 +126,20 @@ Runtime (0.1.0) — exactly these, pessimistically constrained at current majors
 |---|---|---|
 | `faraday` (~> 2) | HTTP | default `net_http` adapter; keep adapter-swappable |
 | `nokogiri` | XML build/parse, XSD validation, canonicalization groundwork | |
-| `bigdecimal` | All monetary amounts | **Must** be declared: bundled (not default) gem since Ruby 3.4 |
+| `bigdecimal` | All monetary amounts | **Must** be declared: bundled (not default) gem since Ruby 3.4. Constrained `>= 3.1, < 5` — see the note below |
 | `zeitwerk` (~> 2) | Autoloading | |
+
+**Note on "pessimistically constrained at current majors" (revised 2026-08-22).** Read
+literally, that would mean `bigdecimal ~> 4.0` now that 4.x is current. It is instead
+`>= 3.1, < 5`, spanning both majors, because this is a **library**: `~> 3.1` would make
+the gem uninstallable for any application already on bigdecimal 4, and `~> 4.0` would
+exclude everyone still on 3. Neither is a decision a library should force on its users
+over a dependency it uses only for arithmetic. The upper bound stays, so this is not a
+precedent for unbounded runtime dependencies — and it has nothing to do with the separate
+rule against bounding `required_ruby_version` (§3).
+
+Apply the same reasoning to the other three when their majors turn over: prefer spanning
+to pinning unless a major genuinely breaks us.
 
 Deliberately **excluded** — do not add:
 

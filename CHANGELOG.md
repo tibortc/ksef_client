@@ -24,6 +24,9 @@ gem version for which API state".
 
 ### Changed
 
+- **`bigdecimal` constraint widened from `~> 3.1` to `>= 3.1, < 5`.** The old constraint
+  made this gem uninstallable alongside bigdecimal 4, which has been out since 2026-03.
+  A library should not force that choice on its users over an arithmetic dependency.
 - **Certificate/XAdES authentication moved from 0.3 into 0.1.** A KSeF token can only be
   issued after a one-time XAdES authentication, so a token-only client cannot bootstrap a
   credential from nothing.
