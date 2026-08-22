@@ -347,6 +347,32 @@ requiring it is not a new runtime dependency and needs no gemspec entry — the 
 as `date`, and unlike `bigdecimal`, which had to be declared because it became a *bundled*
 gem in Ruby 3.4.
 
+#### Signature namespaces, and where they are pinned
+
+Read from pinned artifacts rather than recalled, per the never-invent-a-namespace-URI rule.
+Upstream redistributes the W3C and ETSI schemas inside its PEF bundle, so they are
+available at the same commit as everything else:
+
+| Namespace | Pinned as |
+|---|---|
+| `http://www.w3.org/2000/09/xmldsig#` | `spec/fixtures/xades/UBL-xmldsig-core-schema-2.1.xsd` |
+| `http://uri.etsi.org/01903/v1.3.2#` | `spec/fixtures/xades/UBL-XAdESv132-2.1.xsd` |
+| `http://uri.etsi.org/01903/v1.4.1#` | `spec/fixtures/xades/UBL-XAdESv141-2.1.xsd` |
+
+Measured 2026-08-22: all three **compile offline**. Their `xsd:import` locations are
+*relative* (`UBL-xmldsig-core-schema-2.1.xsd`), so unlike the FA(3) schema they need no
+in-memory `schemaLocation` rewrite, and `xmldsig-core` imports nothing at all. A minimal
+enveloped `ds:Signature` using exclusive c14n, `rsa-sha256` and `xmlenc#sha256` validates
+against the xmldsig schema, and the same document with `SignatureValue` removed is
+rejected — so this gives the signer real structural validation, not a rubber stamp.
+
+**Placed under `spec/fixtures/`, not `lib/`, on purpose.** Two reasons. Validating a
+signature is a test-time concern — the client signs, and KSeF verifies — so nothing at
+runtime needs these files. And they are W3C and ETSI documents redistributed by OASIS and
+then by the Ministry; their terms are not the repository's MIT licence that §1.2 relied on
+for bundling the FA(3) schemas. Keeping them out of the gem sidesteps a redistribution
+question we do not need to answer.
+
 `ksef-client-csharp`'s `CertTestApp` (§4.6) is held in reserve as a debugging aid, not a
 build-time input: if TEST rejects a signature with a message that does not say why, its
 `--output file` signed XML gives something concrete to diff against. Installing a .NET SDK

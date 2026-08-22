@@ -44,6 +44,13 @@ gem version for which API state".
   each capped at ten, fixed order, mandatory `AllowedIps` wrapper). IP *values* are left
   to the schema rather than re-validated in Ruby, which would mean maintaining a second
   and divergent source of truth.
+- Pinned the **W3C xmldsig and ETSI XAdES v1.3.2/v1.4.1 schemas** that upstream
+  redistributes in its PEF bundle, so the signature namespaces come from an artifact
+  rather than from memory. All three compile offline — their imports are relative, so
+  unlike the FA(3) schema they need no `schemaLocation` rewrite — which means the signer
+  will get real structural validation. Kept under `spec/fixtures/`, not `lib/`: validating
+  a signature is a test-time concern, and these are W3C/ETSI documents whose terms are not
+  the repository's MIT licence that §1.2 relied on for bundling the FA schemas.
 - **`Ksef::Auth::Validator`** — offline XSD validation for auth documents, mirroring
   `Ksef::FA3::Validator`. Validates a document in either namespace, taking the rules from
   v2.1's file with its target namespace rewritten in memory, because v2.0's file cannot be
