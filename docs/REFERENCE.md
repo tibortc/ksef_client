@@ -739,10 +739,43 @@ XAdES from 0.3 into 0.1 (DESIGN.md §6.3, decided 2026-08-22). A token-only clie
 issue its own first credential, which would have forced every user — and our own nightly
 CI — to bootstrap via somebody else's client.
 
-Until the certificate flow is implemented, the interim workaround is a one-time
-out-of-band mint via the official `ksef-client-csharp`, using a self-signed certificate
-(permitted on TEST; see `auth/testowe-certyfikaty-i-podpisy-xades.md`). Once DESIGN.md §6.3's
-certificate flow lands, this gem mints its own and the workaround is retired.
+**Retired 2026-08-22.** This section used to say the interim workaround was a one-time
+out-of-band mint via the official C# client. That is no longer necessary — the certificate
+flow has landed, and `rake auth:bootstrap` does the whole chain in this gem. See §6a.3.
+
+### 6a.3 `rake auth:bootstrap`
+
+Implemented in `tasks/ksef_bootstrap.rb` — outside `lib/`, so never packaged, but covered
+by `spec/tasks/ksef_bootstrap_spec.rb` against stubs rather than left as an untested
+script. A checksum bug here would otherwise surface as an opaque rejection from a remote
+server.
+
+What it does, in order:
+
+1. invents a NIP and a PESEL, both checksum-valid, the NIP also shaped to satisfy the auth
+   schema's `TNIP` pattern (§4.1);
+2. `POST /testdata/person` — unauthenticated, which is the only reason the chain is not
+   circular;
+3. generates a self-signed certificate carrying `serialNumber=PNOPL-<pesel>` (§4.4), or
+   uses a real qualified certificate if one is supplied;
+4. runs the full §4.2 flow: challenge → sign → submit → poll → redeem;
+5. `POST /tokens` with the access token, requesting `InvoiceRead` and `InvoiceWrite`;
+6. prints `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN` for the repository secrets `nightly.yml`
+   reads.
+
+**PESEL checksum**, needed for step 1 and not previously ledgered: weights
+`1,3,7,9,1,3,7,9,1,3` across the first ten digits; the eleventh is `(10 - sum % 10) % 10`.
+Confirmed the way §6a.1 confirmed the NIP algorithm — it validates every PESEL the upstream
+documentation ships (`15062788702`, `30112206276`, `38092277125`, `88102341294`) and
+rejects those values with the check digit altered.
+
+**NIP checksum, stated precisely** because it is easy to get backwards: the check digit
+*is* the weighted sum `mod 11`, **not** `11 - (sum mod 11)`. Confirmed against four NIPs
+from the upstream docs. A sum of 10 is unrepresentable, so that draw is discarded.
+
+The task refuses any environment whose `test_data_api?` capability is false, so DEMO is
+refused as well as PROD — the `/testdata/*` endpoints exist on TEST only, and the guard is
+on the capability rather than the name so a `custom` environment cannot slip past.
 
 Tokens are minted in a `Nip` or `InternalId` context with a fixed permission set chosen at
 creation — changing permissions requires a new token. For this gem's integration suite,

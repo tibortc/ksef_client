@@ -37,6 +37,7 @@ rbenv's shims are not on `PATH` in a non-interactive shell — without the prefi
 - `KSEF_ENV=test bundle exec rspec --tag integration` — live TEST suite (needs `KSEF_TEST_NIP`, `KSEF_TEST_TOKEN`). Run only when explicitly asked; it is nightly-CI's job. Tag-based, matching `nightly.yml`. No spec carries the tag yet, and integration specs must opt back into the network access `spec_helper` disables.
 - `KSEF_RELEASE_CHECK=1 bundle exec rspec` — adds the release gates in `spec/release_readiness_spec.rb`: gemspec invariants, the four approved runtime deps, and no reintroduced metadata placeholders. **Currently green — keep it that way.**
 
+- `bundle exec rake auth:bootstrap` — **one-time, human-run.** Provisions a TEST credential: invents a checksum-valid NIP/PESEL, registers via the unauthenticated `/testdata/person`, authenticates by XAdES with a self-signed certificate, mints a KSeF token, and prints `KSEF_TEST_NIP` / `KSEF_TEST_TOKEN` for the repository secrets. Refuses anything but TEST. The token it prints is a real credential — it goes straight into GitHub secrets, never into a file here. Logic lives in `tasks/ksef_bootstrap.rb` and is spec-covered against stubs (`docs/REFERENCE.md` §6a.3).
 - `bundle exec rake fa3:generate` — regenerate `lib/ksef/fa3/generated/` from the pinned XSD. Output is **committed**; never hand-edit it. The generator lives in `tasks/fa3_generator.rb`, outside `lib/` so it is not packaged.
 - `bundle exec rake fa3:verify` — regenerate and fail on any byte difference. Catches both a non-deterministic generator and a stale committed `generated/`. Part of the default task and of CI.
 
@@ -56,7 +57,7 @@ mv /tmp/Gemfile.lock.dev Gemfile.lock                 # restore
 
 The separate `BUNDLE_PATH` keeps the 4.0.6 gem set intact, and resolving without the lockfile mirrors what CI does per matrix Ruby. Bundler under 3.2.11 is 2.4.19, which cannot read a lockfile written by Bundler 4.
 
-Last verified green on 3.2.11 (2026-08-22, after the auth HTTP client): 423 examples, 0 failures, line 100 / branch 96.62 / method 100, RuboCop clean.
+Last verified green on 3.2.11 (2026-08-22, after the bootstrap task): 449 examples, 0 failures, line 100 / branch 96.41 / method 100, RuboCop clean.
 
 Even so, when reaching for any core or stdlib method, confirm it exists in 3.2 rather than assuming — a filtered local run will not catch it.
 
