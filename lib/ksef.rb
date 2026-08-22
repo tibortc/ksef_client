@@ -30,6 +30,10 @@ module Ksef
       "fa3" => "FA3",
       "http" => "HTTP",
       "nip" => "NIP",
+      # Urzędowe Poświadczenie Odbioru — an acronym, so `Ksef::UPO`, not `Ksef::Upo`.
+      # Declared with the pinned schema rather than with the first class under it, so the
+      # namespace is never briefly wrong.
+      "upo" => "UPO",
       "version" => "VERSION"
     )
     loader.setup

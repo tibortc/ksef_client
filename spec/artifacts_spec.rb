@@ -13,16 +13,19 @@ RSpec.describe "pinned upstream artifacts" do
         .map { |l| l.chomp.split("  ", 2) }
   end
 
-  it "lists every artifact it should" do
-    expect(manifest.map(&:last)).to contain_exactly(
-      "lib/ksef/fa3/schema/schemat_FA(3)_v1-0E.xsd",
-      "lib/ksef/fa3/schema/bazowe/ElementarneTypyDanych_v10-0E.xsd",
-      "lib/ksef/fa3/schema/bazowe/KodyKrajow_v10-0E.xsd",
-      "lib/ksef/fa3/schema/bazowe/StrukturyDanych_v10-0E.xsd",
-      "lib/ksef/auth/schema/schemat_auth_v2-0.xsd",
-      "lib/ksef/auth/schema/schemat_auth_v2-1.xsd",
-      "spec/fixtures/openapi/open-api.json"
-    )
+  # Derived from the filesystem rather than hardcoded. The risk being guarded against is
+  # adding an upstream artifact and forgetting to manifest it — a hardcoded list catches
+  # that too, but needs editing every time, and the edit is exactly the step someone
+  # skipping the manifest would also skip.
+  it "manifests every upstream artifact present on disk" do
+    on_disk = [
+      Dir[File.join(root, "lib/**/*.xsd")],
+      Dir[File.join(root, "docs/upstream/**/*.md")],
+      Dir[File.join(root, "spec/fixtures/upo/*.xml")],
+      File.join(root, "spec/fixtures/openapi/open-api.json")
+    ].flatten.map { |f| f.sub("#{root}/", "") }
+
+    expect(manifest.map(&:last)).to include(*on_disk)
   end
 
   it "matches every recorded digest" do
@@ -86,6 +89,50 @@ RSpec.describe "pinned upstream artifacts" do
     it "offers exactly the two documented subject identifier types" do
       expect(xsd.scan(/enumeration value="(certificate\w+)"/).flatten)
         .to contain_exactly("certificateSubject", "certificateFingerprint")
+    end
+  end
+
+  # Locks in docs/REFERENCE.md §14.3 — upstream's own UPO examples do not validate against
+  # upstream's own UPO schema. This matters because it dictates that UPO validation cannot
+  # hard-fail on this element: doing so would reject every UPO that TEST issues. Asserting
+  # it here means an upstream fix shows up as a red build rather than going unnoticed.
+  describe "the UPO schema versus upstream's own examples (REFERENCE.md §14.3)" do
+    let(:xsd_source) { File.read(File.join(root, "lib/ksef/upo/schema/upo-v4-3.xsd"), encoding: "UTF-8") }
+    let(:examples) { Dir[File.join(root, "spec/fixtures/upo/*.xml")].sort }
+    let(:relaxed) { Nokogiri::XML::Schema(xsd_source.sub(/ fixed="Ministerstwo Finansów"/, "")) }
+
+    def errors_for(schema, path)
+      schema.validate(Nokogiri::XML(File.read(path, encoding: "UTF-8")))
+    end
+
+    it "pins all six worked examples" do
+      expect(examples.size).to eq(6)
+    end
+
+    it "is self-contained, needing no schemaLocation rewrite unlike FA(3)" do
+      expect(xsd_source).not_to include("xsd:import", "xsd:include")
+    end
+
+    it "constrains the receiving party to the production name" do
+      expect(xsd_source).to include('name="NazwaPodmiotuPrzyjmujacego" fixed="Ministerstwo Finansów"')
+    end
+
+    it "rejects every example, because each carries the TEST environment marker" do
+      schema = Nokogiri::XML::Schema(xsd_source)
+
+      examples.each do |path|
+        messages = errors_for(schema, path).map(&:to_s)
+        expect(messages.size).to eq(1), "#{File.basename(path)}: expected exactly one error, got #{messages}"
+        expect(messages.first).to include("NazwaPodmiotuPrzyjmujacego", "środowisko testowe (TE)")
+      end
+    end
+
+    # The important half: nothing else about these documents is wrong, so relaxing that one
+    # constraint is a sufficient and narrow fix.
+    it "accepts every example once that one constraint is relaxed" do
+      examples.each do |path|
+        expect(errors_for(relaxed, path)).to be_empty, "#{File.basename(path)} still invalid"
+      end
     end
   end
 end

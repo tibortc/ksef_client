@@ -10,10 +10,12 @@ Precedence when sources disagree: **pinned artifacts** (OpenAPI spec, FA(3) XSD)
 - **Phase 2 order:**
   1. `Ksef::FA3.build` — the DSL in DESIGN.md §8. Small now that the models exist, its shape is fixed by §8, and needs no unverified facts, so it is unblocked work. Until it exists the README's headline example is aspirational.
   2. **Certificate/XAdES auth.** Build before token auth: a KSeF token can only be issued *after* a one-time XAdES authentication, so this is the only flow that bootstraps a credential from nothing. It unblocks §12.4 and makes nightly CI self-sufficient.
-  3. Crypto module, with golden vectors ported from `ksef-client-csharp`.
+  3. Crypto module — parameters are ledgered (`docs/REFERENCE.md` §10). No upstream golden vectors exist; use NIST/RFC vectors for the primitives and test the *framing* (§14.1) explicitly.
   4. Online sessions, send/status/UPO/download.
   5. Validator tiers 1 and 3; then the remaining six invoice types, starting with KOR (§7.4).
-- **Steps 2–4 are blocked on unverified facts** — crypto parameters and XAdES signature specifics. See `docs/REFERENCE.md` §9. Resolve and ledger them *before* writing that code (§0.2); do not infer them from the C# client's behaviour without recording the source.
+- **Steps 2–4 are no longer blocked.** They were, until the 2026-08-22 pass pinned the normative subset of `CIRFMF/ksef-api`'s prose documentation (`docs/upstream/`, ledgered at `docs/REFERENCE.md` §1.3). Crypto parameters (§10), XAdES requirements (§4.3), session semantics (§11) and the UPO format (§12) are all now sourced from first-tier documentation. **Only the tier-3 business-rule catalogue and the error-code catalogue remain open** (§9).
+- The lesson worth keeping: `ksef-api` has **77 files**, and for a long time only 4 were pinned. Before declaring a fact unverifiable, list the upstream tree — most "unknowns" were prose nobody had read.
+- Where upstream contradicts itself, `docs/REFERENCE.md` §14 has the resolution. **§14.1 in particular: the AES IV is *not* prefixed to the ciphertext**, despite `sesja-interaktywna.md` saying it is. Following the prose there produces undecryptable payloads.
 - What is built: transport config/environments/errors/HTTP, FA(3) codegen, offline XSD validation, and models covering the plain `VAT` type. Nothing can be *sent* yet — there is no auth.
 - Also deferred: `docs/field_mapping.md` (see DESIGN.md §7.2 for why).
 

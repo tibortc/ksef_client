@@ -31,6 +31,18 @@ gem version for which API state".
 - The serializer reads element order from the generated metadata rather than hand-listing
   it, and raises on element names the schema does not define at that position instead of
   dropping them silently.
+- **Pinned the normative subset of upstream's prose documentation** (`docs/upstream/`, 19
+  files) plus the UPO schema and its six worked examples, all at the same
+  `CIRFMF/ksef-api@1c34fe27` already used for the OpenAPI contract and FA schemas. The
+  repository holds 77 files and only 4 had been pinned; most of what the ledger listed as
+  "unverified" turned out to be documented prose nobody had read. Newly ledgered from
+  first-tier sources: crypto parameters, XAdES signature requirements, online session
+  semantics, the UPO format, per-endpoint rate limits, size limits, and the KSeF number
+  structure. Four of the five open items in `docs/REFERENCE.md` §9 are now closed,
+  including both that were marked as blocking.
+- `docs/REFERENCE.md` §14 — a new section for **contradictions within upstream's own
+  sources**, kept separate from §7's divergences from this project's design document.
+  Three are recorded, each with the resolution and the evidence for it.
 - Coverage is now gated on three criteria rather than one — **line 95, branch 90,
   method 100**. Branch coverage was 83% behind 99% line coverage, so seventeen conditional
   paths were untested; closing the real gaps brought it to 96%. Fixes uncovered on the way:
@@ -53,6 +65,23 @@ gem version for which API state".
 
 - `spec.files` globbed only the FA(3) schema directory, so schemas added elsewhere under
   `lib/` would not have shipped — a failure that would appear only in the packaged gem.
+
+### Notes
+
+Three upstream inconsistencies found while pinning the documentation, each of which would
+have produced a working-looking client that fails in practice. All are recorded with
+evidence in `docs/REFERENCE.md` §14.
+
+- **The AES initialisation vector is not prefixed to the ciphertext**, despite
+  `sesja-interaktywna.md` saying it is. The pinned OpenAPI contract carries the IV as a
+  discrete `EncryptionInfo.initializationVector` field, and both the C# and Java reference
+  clients emit bare ciphertext. Following the prose yields payloads KSeF cannot decrypt.
+- **All six of upstream's UPO examples fail upstream's own UPO schema**, each with the same
+  single error: `NazwaPodmiotuPrzyjmujacego` is `fixed="Ministerstwo Finansów"` in the XSD,
+  but TEST issues `"Ministerstwo Finansów - środowisko testowe (TE)"`. A client that
+  strictly validates a received UPO would reject every UPO that TEST issues.
+- **`upo.pages[].downloadUrl` carries an `/api/v2` prefix** that the verified base URL does
+  not use; joining the two 404s.
 
 ## [0.1.0.rc1] — 2026-08-22
 

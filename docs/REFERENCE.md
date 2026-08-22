@@ -44,6 +44,44 @@ The schemas are published under the repository's MIT licence, which permits
 redistribution. **Decision: bundle the XSD in the gem.** The first-run
 fetch-and-cache fallback contemplated by DESIGN.md §7.7 tier 2 is not needed.
 
+### 1.3 Pinned prose documentation
+
+`ksef-api` holds **77 files**; the four schemas and the OpenAPI document above were
+originally the only ones pinned. That was a mistake: most of what §9 listed as
+"unverified" was sitting in the same repository, in prose. The normative subset is now
+mirrored under `docs/upstream/`, preserving upstream paths, at the **same commit
+`1c34fe27`**. Verified byte-for-byte against the upstream tree listing on download.
+
+| Local path (under `docs/upstream/`) | Feeds |
+|---|---|
+| `uwierzytelnianie.md` | §4, §4.3, §4.5 — the whole auth flow |
+| `auth/podpis-xades.md` | §4.3, §4.4 — XAdES allow-list, certificate attributes |
+| `auth/testowe-certyfikaty-i-podpisy-xades.md` | §4.6 — TEST bootstrap |
+| `auth/sesje.md` | §4.7 — auth session revocation |
+| `auth/context-identifier-*.md`, `auth/subject-identifier-type-*.md` | §4.1 — verbatim request examples |
+| `bezpieczenstwo/klucze-publiczne-do-szyfrowania.md` | §10.2 — key distribution and rotation |
+| `sesja-interaktywna.md` | §11 — online session semantics |
+| `faktury/sesje/sesja-sprawdzenie-stanu-i-pobranie-upo.md` | §12 — status and UPO retrieval |
+| `faktury/numer-ksef.md` | §13 — KSeF number structure and CRC-8 |
+| `limity/limity-api.md`, `limity/limity.md` | §6, §6.1 — rate and size limits |
+| `srodowiska.md` | §2, §11.3 — environments, accepted schema versions |
+| `dane-testowe-scenariusze.md` | §6a — TEST data provisioning |
+
+The UPO schema is pinned to `lib/ksef/upo/schema/upo-v4-3.xsd` (in `lib/`, following the
+precedent set by the auth schemas: pinned ahead of the code that consumes it) and the six
+worked UPO examples to `spec/fixtures/upo/`.
+
+Two entries share a digest — `auth/context-identifier-nip.md` and
+`auth/subject-identifier-type-certificate-subject.md` are byte-identical upstream, both
+illustrating the same NIP-plus-`certificateSubject` request. That is not a download error.
+
+**Deliberately not pinned yet:** `uprawnienia.md` (68 KB, permissions API → 0.2),
+`api-changelog.md` (76 KB), `certyfikaty-KSeF.md` (KSeF certificate lifecycle → 0.3),
+`kody-qr.md` and `qr/` (→ 0.3), `offline/`, `pobieranie-faktur/`, `sesja-wsadowa.md`
+(batch → 0.2), and the PEF / RR / FA(2) schemas. Prose churns on editorial fixes, and a
+`verify:artifacts` failure should mean *a fact changed*, not that someone corrected a
+typo — so only documents this milestone actually derives facts from are in the manifest.
+
 ---
 
 ## 2. Environments — resolves DESIGN.md §6.1 [VERIFY]
@@ -199,6 +237,121 @@ does issue a refresh token alongside the access token.
 user's permissions change in the meantime. Never treat possession of a live token as
 proof of current authorisation.
 
+**`/auth/token/redeem` is single-use.** `uwierzytelnianie.md` §4: the endpoint returns the
+token pair *once* for a completed authentication, and every subsequent call with the same
+`authenticationToken` returns **400**. A retry wrapper around redemption would turn a
+transient network blip into a permanently unusable authentication — this endpoint must
+surface its errors, which the POST-never-retried rule (DESIGN.md §6.7) already guarantees.
+
+The full flow, verified end to end from `uwierzytelnianie.md` (retrieved 2026-08-22):
+
+| Step | Call | Auth header | Notes |
+|---|---|---|---|
+| 1 | `POST /auth/challenge` | none | public endpoint, 60 req/s per IP; TTL 10 min |
+| 2 | build + sign `AuthTokenRequest` | — | offline |
+| 3 | `POST /auth/xades-signature` | none | returns `referenceNumber` + `authenticationToken` |
+| 4 | `GET /auth/{referenceNumber}` | `Bearer {authenticationToken}` | poll to completion |
+| 5 | `POST /auth/token/redeem` | `Bearer {authenticationToken}` | **once only** → `accessToken` + `refreshToken` |
+| 6 | `POST /auth/token/refresh` | `Bearer {refreshToken}` | renews `accessToken` |
+
+Note the header at steps 4–5 is the *temporary* `authenticationToken`, not an
+`accessToken`. Conflating them is the obvious implementation error here.
+
+**Step 4 must poll without a deadline on DEMO and PROD.** Those environments verify the
+signing certificate's status with the issuer over OCSP/CRL, and the operation legitimately
+reports "in progress" until the issuer answers — the docs state the duration depends on the
+certificate provider. A client that gives up after a fixed timeout will report failure for
+authentications that were about to succeed. (On TEST, self-signed certificates skip this.)
+
+### 4.3 XAdES signature requirements — resolves the §9 blocker
+
+Source: `auth/podpis-xades.md`. **The specification is an allow-list, not a single
+mandated combination**, which is the key finding: there is no exact byte-shape to
+reverse-engineer, only a permitted set to choose from.
+
+| Aspect | Permitted |
+|---|---|
+| Form | **enveloped** or **enveloping**. Detached is rejected. |
+| Profiles | XAdES-BES, -EPES, -T, -LT, -C, -X, -XL, -A, -ERS, and BASELINE-B/-T/-LT/-LTA |
+| Transforms | XPath `not(ancestor-or-self::ds:Signature)`, xmldsig-filter2, `#enveloped-signature`, `#base64`, c14n11 (±comments), exc-c14n (±comments), REC-xml-c14n-20010315 (±comments) |
+| `SignatureMethod` | RSASSA-PKCS1-v1_5 or RSASSA-PSS (sha1/256/384/512, plus sha3-\* for PSS), min **2048-bit**; or ECDSA (sha1/256/384/512, sha3-\*), min **256-bit** curve |
+| `DigestMethod` | sha1, sha256, sha384, sha512, sha3-256, sha3-384, sha3-512 — chosen **independently** of `SignatureMethod` |
+
+`DigestMethod` governs both `SignedInfo/Reference/DigestMethod` and the qualifying
+properties, notably `SigningCertificate/CertDigest/DigestMethod`.
+
+**Implementation choice for this gem:** enveloped, XAdES-BES,
+`#enveloped-signature` transform, exclusive c14n, `rsa-sha256`, `xmlenc#sha256` digest.
+Every one of those is explicitly listed above; the combination needs no further
+verification, only a test that the emitted document validates.
+
+For ECDSA, `SignatureValue` is `R || S` fixed-field concatenation per XMLDSIG 1.1 /
+RFC 4050 §3.3 — **not** DER, which is what OpenSSL emits by default. Only relevant if
+ECDSA support is added; RSA avoids the issue.
+
+### 4.4 Certificate subject requirements
+
+Source: `auth/podpis-xades.md`. Accepted certificate types: qualified personal (PESEL or
+NIP), qualified organisation seal (NIP), Trusted Profile (ePUAP), KSeF-issued internal
+certificate (not qualified, but honoured), and Peppol service-provider certificates.
+
+| Certificate kind | Required subject attributes | Identifier pattern |
+|---|---|---|
+| Qualified personal signature | `givenName` (2.5.4.42), `surname` (2.5.4.4), `serialNumber` (2.5.4.5), `commonName` (2.5.4.3), `countryName` (2.5.4.6) | `(PNOPL\|PESEL).*?(\d{11})` or `(TINPL\|NIP).*?(\d{10})` |
+| Qualified organisation seal | `organizationName` (2.5.4.10), `organizationIdentifier` (2.5.4.97), `commonName`, `countryName` | `(VATPL).*?(\d{10})` |
+
+An organisation seal **must not** carry `givenName` or `surname`. The `.*?` in each
+pattern accommodates the hyphenated form the reference clients emit — `TINPL-1234567890`,
+`VATPL-1234567890`.
+
+Where a qualified certificate lacks a usable identifier in 2.5.4.5, authentication is
+still possible by pre-granting permissions against the certificate's **SHA-256
+fingerprint** and using `SubjectIdentifierType` = `certificateFingerprint`.
+
+### 4.5 KSeF-token authentication — the encrypted payload
+
+Source: `uwierzytelnianie.md` §2.2. The plaintext is:
+
+```
+{ksefToken}|{timestampMs}
+```
+
+UTF-8 encoded, where `timestampMs` is the `timestamp` from the `POST /auth/challenge`
+response **as Unix milliseconds**. Encrypt with the KSeF public key using
+**RSA-OAEP with SHA-256 and MGF1-SHA-256**, then Base64-encode into `encryptedToken`.
+
+The timestamp is not decoration — the docs are explicit that it acts as a nonce, so that a
+captured ciphertext cannot be replayed into a later session. Reusing a stale timestamp, or
+sending a locally generated one, defeats that and will not match the challenge.
+
+`ECDsa` exists as an alternative encryption method in both reference clients. Out of scope
+for 0.1; RSA is the documented default.
+
+### 4.6 TEST bootstrap — resolves DESIGN.md §12.4's central unknown
+
+Source: `auth/testowe-certyfikaty-i-podpisy-xades.md`.
+
+**Self-signed certificates are permitted on TEST only**, and upstream ships a console app
+that does the whole bootstrap: `KSeF.Client.Tests.CertTestApp`. It generates a test
+certificate, builds and XAdES-signs `AuthTokenRequest`, submits it, polls to completion,
+and returns the JWT pair. `--output file` writes both the certificate and the **signed
+XML** to disk, which is exactly the reference artifact needed to check our own signature
+against.
+
+The document instructs installing .NET 10, but the project multi-targets
+`net8.0;net9.0;net10.0` (`KSeF.Client.Tests.CertTestApp.csproj` @ `ksef-client-csharp`,
+retrieved 2026-08-22), so any of those SDKs suffices.
+
+### 4.7 Auth session management
+
+Source: `auth/sesje.md`. `GET /auth/sessions` lists active authentication sessions
+(`continuationToken` paging). `DELETE /auth/sessions/current` and
+`DELETE /auth/sessions/{referenceNumber}` revoke one.
+
+Revocation invalidates the associated **`refreshToken` only** — already-issued
+`accessToken`s stay valid to their `exp`. Consistent with §4.2: there is no way to kill a
+live access token.
+
 ---
 
 ## 5. Error model — resolves DESIGN.md §6.7 [VERIFY]
@@ -299,6 +452,66 @@ Source: `limity/limity-api.md` (dated 22.11.2025), retrieved 2026-08-21.
 
 Live budgets are introspectable at runtime via `GET /rate-limits`, `GET /limits/context`
 and `GET /limits/subject`.
+
+### 6.1 Documented per-endpoint ceilings
+
+Source: `limity/limity-api.md` (22.11.2025), retrieved 2026-08-22. Columns are
+req/s · req/min · req/h. These are PROD defaults.
+
+| Endpoint | s | min | h |
+|---|---|---|---|
+| `POST /sessions/online` | 10 | 30 | 120 |
+| `POST /sessions/online/{ref}/invoices` | 10 | 30 | 180 |
+| `POST /sessions/online/{ref}/close` | 10 | 30 | 120 |
+| `POST /sessions/batch` | 10 | 20 | 60 |
+| `POST /sessions/batch/{ref}/close` | 10 | 20 | 60 |
+| `GET /sessions/{ref}/invoices/{invoiceRef}` | 30 | 120 | 1200 |
+| `GET /sessions` | **5** | **10** | **60** |
+| `GET /sessions/{ref}/invoices` | 10 | 20 | 200 |
+| `GET /sessions/{ref}/invoices/failed` | 10 | 20 | 200 |
+| `GET /sessions/*` (other) | 10 | 120 | 1200 |
+| `POST /invoices/query/metadata` | 8 | 16 | 20 |
+| `POST /invoices/exports` | 8 | 16 | 20 |
+| `GET /invoices/exports/{ref}` | 10 | 60 | 600 |
+| `GET /invoices/ksef/{ksefNumber}` | 8 | 16 | 64 |
+| everything else | 10 | 30 | 120 |
+| `POST /auth/challenge` (unauthenticated) | 60 per IP | — | — |
+
+Three consequences for the client design:
+
+- **`GET /sessions` is the tightest budget in the API** at 10/min. Session *polling* must
+  use `GET /sessions/{ref}` or the per-invoice status endpoint (1200/h), never a list scan.
+- **Batch part uploads are exempt from rate limiting entirely**, and the docs recommend
+  uploading parts in parallel. Relevant for 0.2.
+- The per-hour ceilings bite long before the per-second ones. `POST /invoices/exports` at
+  20/h is 1 per 3 minutes sustained — retry backoff has to be sized against req/h, not
+  req/s.
+
+Environment multipliers: **TEST is 10× the PROD defaults**; **DEMO replicates PROD
+exactly**. TEST can be pushed to PROD-like behaviour with
+`POST /testdata/rate-limits/production`, set arbitrarily with `POST /testdata/rate-limits`,
+and reset with `DELETE /testdata/rate-limits`.
+
+Higher download limits apply **20:00–06:00**; the values are unpublished pending
+production tuning.
+
+### 6.2 Size and volume limits
+
+Source: `limity/limity.md` (21.10.2025).
+
+| Parameter | Default |
+|---|---|
+| Max invoice size, no attachment | **1 MB** |
+| Max invoice size, with attachment | **3 MB** |
+| Max invoices per session (online or batch) | **10 000** |
+
+Per authenticated subject, KSeF certificate ceilings are 300 enrolments / 100 active for a
+NIP identifier, and 12 / 6 for PESEL or a certificate fingerprint.
+
+Both are adjustable on TEST via `POST /testdata/limits/context/session` and
+`POST /testdata/limits/subject/certificate` (with matching `DELETE`s to restore defaults),
+which makes the 1 MB invoice-size rejection path testable without constructing a real 1 MB
+invoice.
 
 ---
 
@@ -525,26 +738,23 @@ identical so the §1 digests keep verifying.
 Carried forward; must be resolved before the code that depends on them is written
 (DESIGN.md §0.2). Reviewed 2026-08-22.
 
-- **Crypto parameters** (DESIGN.md §6.4): symmetric cipher mode/padding/IV convention,
-  RSA-OAEP digest and MGF1 parameters for both key wrapping and token encryption, and
-  which published certificate serves which purpose. Sources to mine:
-  `bezpieczenstwo/klucze-publiczne-do-szyfrowania.md`, `tokeny-ksef.md`, and the
-  `ksef-client-csharp` reference implementation for golden vectors.
-  **Blocks the whole of Phase 2's transport work.**
-- **Session semantics**: whether one online session may carry multiple invoices, and
-  session lifetime. Source: `sesja-interaktywna.md`.
-- **XAdES signature specifics**: the exact enveloped/enveloping form the API accepts, the
-  canonicalisation and digest algorithms, and what makes it reject a signature. DESIGN.md
-  §6.3 asserts detached is rejected; the enveloped requirements are not yet pinned.
-  Sources: `uwierzytelnianie.md` §2.1.2, `auth/testowe-certyfikaty-i-podpisy-xades.md`.
-  **Blocks the certificate auth flow, which Phase 2 builds first.**
-- **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7).
-- **UPO document format** — schema pinned upstream at `faktury/upo/schemy/upo-v4-3.xsd`
-  with worked examples under `faktury/upo/przyklady/v4-3/`; not yet pulled in.
+- **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7). The only genuinely
+  open blocker of the original set. `faktury/weryfikacja-faktury.md` is the next place to
+  look; not yet pinned.
+- **Error-code catalogue.** Discrete codes are documented per endpoint rather than
+  centrally, and `uwierzytelnianie.md` says outright that the auth failure codes "will be
+  available in the endpoint's technical documentation". `21470` (§10.2) and `21405` are
+  known; the rest must be collected from the spec per operation, or observed.
+- **Nightly higher rate limits** (§6.1) — the 20:00–06:00 values are explicitly
+  unpublished pending production tuning. Do not hard-code a nightly multiplier.
+- **`upo.pages[].downloadUrl` path prefix** — see §14.2. Recorded as a divergence rather
+  than a blocker, since the workaround (construct the path, ignore the field) is safe.
 
-### 9.1 Resolved since this list was written
+### 9.1 Resolved
 
-Kept as a record so they are not re-investigated.
+Kept as a record so they are not re-investigated. The 2026-08-22 pass over the newly
+pinned prose (§1.3) closed four of the five items that were open, including both that were
+marked as blocking Phase 2.
 
 | Item | Where it now lives |
 |---|---|
@@ -555,3 +765,278 @@ Kept as a record so they are not re-investigated.
 | Error model and `Retry-After` semantics | §5 |
 | XSD redistribution terms | §1.2 — MIT, so the schemas are bundled |
 | TEST credential provisioning | §6a |
+| **Crypto parameters** *(was: blocks all of Phase 2)* | §10 — from `sesja-interaktywna.md` and `uwierzytelnianie.md`, corroborated by both reference clients |
+| **XAdES signature specifics** *(was: blocks Phase 2's first step)* | §4.3 — an allow-list, so no single shape had to be reverse-engineered |
+| **Session semantics** | §11 — 12-hour lifetime, many invoices, concurrent sessions permitted |
+| **UPO document format** | §12 — schema pinned to `lib/ksef/upo/schema/`, six examples to `spec/fixtures/upo/` |
+| TEST bootstrap for a real credential | §4.6 — upstream ships a console app that does it |
+
+---
+
+## 10. Cryptography — resolves DESIGN.md §6.4 [VERIFY]
+
+Primary source: `sesja-interaktywna.md` "Wymagania wstępne" and `uwierzytelnianie.md`
+§2.2 — **both first-tier documentation, not inferred from client behaviour.**
+Independently corroborated against `KSeF.Client/Api/Services/CryptographyService.cs`
+(`ksef-client-csharp`) and `DefaultCryptographyService.java` (`ksef-client-java`), both
+retrieved 2026-08-22. Where a line number is cited below it is from the C# file.
+
+### 10.1 Parameters
+
+| Purpose | Algorithm | Detail |
+|---|---|---|
+| Invoice payload | **AES-256-CBC**, **PKCS#7** padding | 256-bit key, 128-bit IV, 128-bit block (`CryptographyService.cs:486–490`) |
+| Symmetric key wrapping | **RSAES-OAEP**, SHA-256 digest + **MGF1-SHA-256** | `RSAEncryptionPadding.OaepSHA256` (`:133`, `:423`) |
+| KSeF token (§4.5) | **RSA-OAEP**, SHA-256 + MGF1-SHA-256 | over `{token}\|{timestampMs}` UTF-8 |
+| Key and IV generation | CSPRNG | 32 and 16 bytes respectively (`:498`, `:507`) |
+
+A fresh symmetric key per session is **recommended** by the docs, not required.
+
+Java uses the JCE name `AES/CBC/PKCS5Padding`; for a 16-byte block PKCS#5 and PKCS#7 are
+the same padding, so this is not a divergence.
+
+Ruby equivalents: `OpenSSL::Cipher.new("aes-256-cbc")` with `#random_key` / `#random_iv`,
+and `OpenSSL::PKey::RSA#public_encrypt` is **not** sufficient — OAEP with an explicit MGF1
+digest needs `OpenSSL::PKey::RSA#encrypt` with
+`rsa_padding_mode: "oaep", rsa_oaep_md: "sha256", rsa_mgf1_md: "sha256"`.
+
+**No golden vectors exist upstream.** Neither client repository commits fixed
+plaintext/ciphertext pairs; `Compatibility/CryptoCompat*.cs` are polyfills for older .NET
+runtimes, not test vectors. This is acceptable: AES-256-CBC/PKCS#7 and RSA-OAEP-SHA256 are
+standard primitives that OpenSSL reproduces by construction, and NIST/RFC vectors validate
+them just as well as a C#-generated pair would. What is *not* standard, and therefore does
+need pinning down, is the framing — see §14.1.
+
+### 10.2 Public key distribution and rotation
+
+Source: `bezpieczenstwo/klucze-publiczne-do-szyfrowania.md` (05.05.2026).
+
+`GET /security/public-key-certificates` returns a list of:
+
+| Field | Meaning |
+|---|---|
+| `certificate` | X.509 in **DER, Base64-encoded, without PEM BEGIN/END armour** |
+| `certificateId` | SHA-256 of the DER certificate, Base64 |
+| `publicKeyId` | SHA-256 of the DER `SubjectPublicKeyInfo`, Base64 — **the selector sent back to the API** |
+| `validFrom`, `validTo` | validity window |
+| `usage` | array; known values `KsefTokenEncryption`, `SymmetricKeyEncryption` |
+
+Certificates are issued by a qualified CA with `CN = Ministerstwo Finansów`.
+
+**Selection rule** (documented, so not a judgement call): pick by `usage`, require validity
+at the moment of use, and where several are valid prefer **the latest `validFrom`**.
+
+`publicKeyId` must be sent on `POST /auth/ksef-token`, `POST /sessions/online`,
+`POST /sessions/batch` and `POST /invoices/exports`. It appears in the spec as
+`EncryptionInfo.publicKeyId`.
+
+Two distinct rotation modes, which the client must not conflate:
+
+- **Re-certification** — new certificate, *same* key pair. `publicKeyId` is unchanged.
+- **Key rotation** — new key pair, so `publicKeyId` changes. Planned rotations publish the
+  new certificate early and both appear for the same `usage` during the overlap; emergency
+  rotations revoke the old one and drop it from the list immediately.
+
+Because emergency rotation is possible at any time, **the certificate list must not be
+cached indefinitely**. The documented recovery path is specific: on **HTTP 400 with code
+`21470`** ("the supplied key identifier is unknown or refers to a withdrawn key"), re-fetch
+the list, re-select, and repeat the operation. This is the one case where a failed POST
+should be retried after remediation — and it is remediation, not a blind retry, so it does
+not conflict with the never-auto-retry-POST rule.
+
+---
+
+## 11. Online session semantics — resolves the §9 session item
+
+Source: `sesja-interaktywna.md` (10.07.2025), retrieved 2026-08-22.
+
+| Fact | Value |
+|---|---|
+| Session lifetime | **12 hours** from creation; `validUntil` in the open response |
+| Invoices per session | many — up to the 10 000 cap of §6.2 |
+| Concurrent sessions | **permitted**, multiple per authentication |
+| Open cost | "lightweight and synchronous" |
+| Expiry behaviour | session closes automatically at `validUntil` |
+
+Flow: `POST /sessions/online` → `POST /sessions/online/{ref}/invoices` (repeat) →
+`POST /sessions/online/{ref}/close`. Closing triggers **asynchronous** generation of the
+collective UPO; it is not available at the moment `close` returns.
+
+### 11.1 The send-invoice request carries four integrity values
+
+`POST /sessions/online/{ref}/invoices` requires the hash **and** size of *both* the
+plaintext and the encrypted document, plus the Base64 ciphertext:
+
+- `invoiceHash` + size — SHA-256 of the **plaintext** XML
+- `encryptedInvoiceHash` + size — SHA-256 of the **ciphertext**
+- `encryptedInvoiceContent` — Base64 of the ciphertext
+
+Computing either hash over the wrong artifact is an easy and silent mistake; both must be
+covered by tests.
+
+### 11.2 Session open request
+
+`OpenOnlineSessionRequest` = `formCode` + `encryption` (pinned spec, `components.schemas`).
+`formCode` is the triple `systemCode` / `schemaVersion` / `value` — for FA(3) that is
+`FA (3)` / `1-0E` / `FA`, consistent with §8's finding that `KodFormularza` is `FA` and
+`FA (3)` is the `kodSystemowy`. `encryption` is `EncryptionInfo` =
+`encryptedSymmetricKey` + `initializationVector` + `publicKeyId`.
+
+### 11.3 Accepted schema versions differ by environment
+
+Source: `srodowiska.md` (16.03.2026). **TEST accepts FA(2), FA(3), FA_PEF(3) and
+FA_KOR_PEF(3); DEMO and PROD accept only FA(3), FA_PEF(3) and FA_KOR_PEF(3).** FA(2) works
+on TEST and is rejected in production — a trap for anyone who validates their integration
+solely against TEST.
+
+Also from the same document: test environments have a **maintenance window 16:00–18:00**
+(from 2025-10-01), which the nightly integration workflow should avoid.
+
+---
+
+## 12. Session status and UPO
+
+Source: `faktury/sesje/sesja-sprawdzenie-stanu-i-pobranie-upo.md` (20.04.2026).
+
+| Operation | Endpoint |
+|---|---|
+| List sessions | `GET /sessions` (filter by type/status; `continuationToken`) |
+| Session status | `GET /sessions/{ref}` |
+| Session invoices | `GET /sessions/{ref}/invoices` |
+| One invoice | `GET /sessions/{ref}/invoices/{invoiceRef}` |
+| Rejected only | `GET /sessions/{ref}/invoices/failed` |
+| UPO by invoice ref | `GET /sessions/{ref}/invoices/{invoiceRef}/upo` |
+| UPO by KSeF number | `GET /sessions/{ref}/invoices/ksef/{ksefNumber}/upo` |
+| Collective session UPO | `GET /sessions/{ref}/upo/{upoRef}` |
+
+Session status carries `invoiceCount`, `successfulInvoiceCount`, `failedInvoiceCount`, and
+**after close** a `upo.pages[]` array of `{ referenceNumber, downloadUrl }`.
+
+- The UPO is **XML, XAdES-signed by the Ministry of Finance**, conforming to the pinned
+  `upo-v4-3.xsd`. It is the legal proof of receipt: archive the bytes **verbatim**.
+  Re-serialising it — even losslessly by XML rules — risks invalidating the signature.
+- **A collective UPO holds at most 10 000 invoice entries**, which is why `pages[]` is an
+  array. A client that reads only `pages[0]` silently loses proof of receipt for the rest.
+- Paging throughout this area is `continuationToken`-based, not offset-based.
+- `downloadUrl` has a path-prefix inconsistency — §14.2.
+
+Reference numbers share a shape: `YYYYMMDD-XX-<hex>-<hex>-CC`, where `XX` is a kind tag
+(`CR` challenge, `SB` batch session, `EU` UPO) and `CC` looks like the same CRC-8 checksum
+as §13. Only the KSeF-number form is documented; **do not validate the others against §13's
+algorithm** without verifying it first.
+
+---
+
+## 13. KSeF number structure — verified with a working example
+
+Source: `faktury/numer-ksef.md`. Format, always **exactly 35 characters**:
+
+```
+9999999999-RRRRMMDD-FFFFFFFFFFFF-FF
+```
+
+Seller NIP (10) · `-` · acceptance date `YYYYMMDD` (8) · `-` · technical part (12 uppercase
+hex) · `-` · CRC-8 checksum (2 uppercase hex).
+
+CRC-8 parameters: **polynomial `0x07`, initial value `0x00`**, no reflection, no final XOR,
+computed over the **first 32 characters** (everything before the final hyphen), rendered as
+two uppercase hex digits.
+
+Verified locally 2026-08-22 against the documented example — CRC-8 of
+`5265877635-20250826-0100001AF629` is `0xAF`, matching the published
+`5265877635-20250826-0100001AF629-AF`. This doubles as the golden vector for the
+implementation.
+
+One business fact worth surfacing in the API: per `limity/limity-api.md`, **the invoice's
+official receipt date is the date its KSeF number was assigned**, not the date the client
+downloaded it.
+
+---
+
+## 14. Contradictions within upstream's own sources
+
+Distinct from §7, which records divergences from *our* design document. These are places
+where upstream's prose, its OpenAPI contract and its reference clients disagree. Precedence
+per DESIGN.md §2: the pinned artifacts win.
+
+### 14.1 The IV is *not* prefixed to the ciphertext
+
+`sesja-interaktywna.md` describes the 128-bit IV as "dołączanego jako prefiks do
+szyfrogramu" — appended as a prefix to the ciphertext. **This is wrong for the online
+session invoice path**, and following the prose produces a payload KSeF cannot decrypt.
+
+Three sources agree against it (all 2026-08-22):
+
+1. **The pinned OpenAPI spec** — `EncryptionInfo` carries `initializationVector` as a
+   discrete field of the session-open request, alongside `encryptedSymmetricKey` and
+   `publicKeyId`. Highest precedence.
+2. **C#** — `EncryptBytesWithAES256` returns the encryptor's output directly, with no
+   prepended bytes (`CryptographyService.cs:149–161`).
+3. **Java** — `cipher.doFinal(content)`, likewise bare
+   (`DefaultCryptographyService.java`).
+
+**Resolution: send the IV once in the session-open request; the per-invoice ciphertext is
+bare.** The prose's "prefix" phrasing may describe the separate ECDH/AES-GCM path, which
+*does* concatenate — `subjectPublicKeyInfo || nonce || tag || ciphertext`
+(`CryptographyService.cs:446`) — but that path is not used for online-session invoices.
+
+### 14.2 `downloadUrl` carries an `/api/v2` prefix the base URL does not
+
+The worked example in `sesja-sprawdzenie-stanu-i-pobranie-upo.md` returns:
+
+```json
+"downloadUrl": "/api/v2/sessions/20250901-SB-…/upo/20250901-EU-…"
+```
+
+But the verified base URL is `https://api-test.ksef.mf.gov.pl/v2` (§2), and §7 item 2
+records that endpoint paths carry **no** `/api` prefix. Joining the base URL with this
+field yields `…/v2/api/v2/…`, which will 404.
+
+`srodowiska.md` states only that a returned URL's **host** matches the environment called;
+it says nothing about the path prefix. So the field's prefix is unexplained.
+
+**Resolution: treat `downloadUrl` as advisory and construct the path from
+`GET /sessions/{ref}/upo/{upoRef}` using `referenceNumber`, which is documented and
+consistent.** Revisit if a live TEST response is observed to differ from the doc's example
+— the example may simply be stale.
+
+### 14.3 Every upstream UPO example fails upstream's own UPO schema
+
+Measured locally 2026-08-22, with both artifacts pinned at `1c34fe27`: all **six** worked
+examples under `faktury/upo/przyklady/v4-3/` fail XSD validation against
+`upo-v4-3.xsd` — each with exactly one error, the same one.
+
+`upo-v4-3.xsd:13` constrains the receiving party's name to a fixed value:
+
+```xml
+<xsd:element name="NazwaPodmiotuPrzyjmujacego" fixed="Ministerstwo Finansów">
+```
+
+while every example — all captured on TEST — carries:
+
+```xml
+<NazwaPodmiotuPrzyjmujacego>Ministerstwo Finansów - środowisko testowe (TE)</NazwaPodmiotuPrzyjmujacego>
+```
+
+Verified that this is the *only* discrepancy: with the `fixed` attribute removed, all six
+validate clean. So the schema is otherwise accurate, and the examples are otherwise
+well-formed UPOs.
+
+**Consequence, and it is a real one:** the `fixed` value evidently describes PROD, while
+the non-production environments append an environment marker. A client that strictly
+XSD-validates a received UPO **will reject every UPO issued by TEST and, presumably,
+DEMO.** Given this gem already does offline XSD validation for FA(3), that is a trap it
+would otherwise have walked straight into.
+
+**Resolution: do not hard-fail UPO validation on this element.** Either validate with the
+constraint relaxed, or treat a `NazwaPodmiotuPrzyjmujacego` mismatch as a warning carrying
+the observed value. Whichever is chosen, the UPO bytes are still archived verbatim (§12) —
+validation is a diagnostic here, never a gate on storing legal proof of receipt.
+
+The pinned examples double as regression fixtures for exactly this behaviour: a correct
+implementation accepts all six.
+
+Not treated as a §9 open item: the facts are measured and unambiguous. What is *not*
+verified is whether DEMO uses a third spelling and whether PROD matches the `fixed` value
+exactly — neither can be checked without access to those environments, and neither changes
+the resolution above.
