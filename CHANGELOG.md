@@ -43,6 +43,10 @@ gem version for which API state".
   always on, and error mapping.
 - `Ksef::HTTP::SystemWarning` — surfaces the `X-System-Warning` advisory header the API
   sets on successful responses.
+- Requests send `X-Error-Format: problem-details`, opting into RFC7807 error bodies.
+  This is opt-in per request, not selected by content negotiation: without the header the
+  API returns the deprecated envelopes, which carry no `traceId`, no structured `errors[]`
+  codes on 400 and no `reasonCode` on 403.
 - CI: test matrix across Ruby 3.2/3.3/3.4/4.0/head, nightly TEST integration, and a
   tag-triggered release workflow using RubyGems Trusted Publishing.
 
