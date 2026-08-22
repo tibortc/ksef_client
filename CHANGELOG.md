@@ -79,8 +79,13 @@ gem version for which API state".
   structure. Four of the five open items in `docs/REFERENCE.md` §9 are now closed,
   including both that were marked as blocking.
 - `docs/REFERENCE.md` §14 — a new section for **contradictions within upstream's own
-  sources**, kept separate from §7's divergences from this project's design document.
-  Three are recorded, each with the resolution and the evidence for it.
+  sources**, kept separate from §7's divergences from this project's design document. Four
+  are recorded, each with the resolution and the evidence for it.
+- `spec/openapi_contract_spec.rb` — asserts the ledger's claims against the pinned
+  contract, rather than only that the contract has not changed. It covers the two findings
+  that have **no code yet** (§14.1's discrete IV field, §14.2's pre-signed link), because
+  those are the ones that would otherwise rot unnoticed until someone implemented crypto
+  or session handling from a stale conclusion.
 - Coverage is now gated on three criteria rather than one, at **line 99, branch 95,
   method 100**. Branch coverage was 83% behind 99% line coverage, so seventeen conditional
   paths were untested; closing the real gaps brought it to 97%, and line coverage to 100%. Fixes uncovered on the way:
@@ -141,8 +146,13 @@ evidence in `docs/REFERENCE.md` §14.
   single error: `NazwaPodmiotuPrzyjmujacego` is `fixed="Ministerstwo Finansów"` in the XSD,
   but TEST issues `"Ministerstwo Finansów - środowisko testowe (TE)"`. A client that
   strictly validates a received UPO would reject every UPO that TEST issues.
-- **`upo.pages[].downloadUrl` carries an `/api/v2` prefix** that the verified base URL does
-  not use; joining the two 404s.
+- **`upo.pages[].downloadUrl` is a pre-signed storage link, not a path to join.** The
+  contract declares it `format: uri`, generated per status query, expiring at
+  `downloadUrlExpirationDate`, **exempt from API rate limits**, and served with an
+  `x-ms-meta-hash` SHA-256 integrity header — and says the access token must *not* be sent
+  to it. Both reference clients implement it that way; C# passes `token: null` explicitly.
+  Given how tight the session budgets are, this unmetered path is the better default, with
+  `GET /sessions/{ref}/upo/{upoRef}` as the fallback once a link expires.
 
 ## [0.1.0.rc1] — 2026-08-22
 

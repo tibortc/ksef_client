@@ -70,6 +70,7 @@ Even so, when reaching for any core or stdlib method, confirm it exists in 3.2 r
 - Honour `Retry-After` unclamped. Retrying sooner than instructed lengthens the block, and KSeF treats rotating IPs to dodge a 429 as an abuse pattern.
 - No secrets in code, logs, fixtures, or VCR cassettes — scrub filters per DESIGN.md §4.5.
 - No new runtime dependency beyond the four in DESIGN.md §4.3 (`faraday`, `nokogiri`, `bigdecimal`, `zeitwerk`) without asking. Excluded: `base64`, `logger`/`ostruct` requires, `jwt`, `activesupport`, `dry-*`, `rexml`. `rubyzip` is deferred to 0.2, not permanently banned.
+- **Two upstream traps that only bite at runtime, both with no code yet.** `docs/REFERENCE.md` §14.1: the AES IV is a discrete request field, *not* a prefix on the ciphertext, whatever `sesja-interaktywna.md` says — the prose version yields payloads KSeF cannot decrypt. §14.2: `downloadUrl` is a pre-signed storage link — follow it as an opaque URI, **never send the bearer token to it**, and verify `x-ms-meta-hash`. `spec/openapi_contract_spec.rb` guards both against the contract; read the ledger before changing either.
 - No `Float` anywhere money flows — `BigDecimal` only.
 - `required_ruby_version` stays `">= 3.2.0"` — no upper bound, ever.
 - Do not commit `Gemfile.lock` (library convention; CI resolves per matrix Ruby).

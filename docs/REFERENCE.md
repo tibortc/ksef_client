@@ -1090,25 +1090,47 @@ bare.** The prose's "prefix" phrasing may describe the separate ECDH/AES-GCM pat
 *does* concatenate — `subjectPublicKeyInfo || nonce || tag || ciphertext`
 (`CryptographyService.cs:446`) — but that path is not used for online-session invoices.
 
-### 14.2 `downloadUrl` carries an `/api/v2` prefix the base URL does not
+### 14.2 `downloadUrl` is a pre-signed link, not a path to join
 
-The worked example in `sesja-sprawdzenie-stanu-i-pobranie-upo.md` returns:
+**Corrected 2026-08-22.** An earlier revision of this section said the field carried a
+stray `/api/v2` prefix and concluded "treat `downloadUrl` as advisory and construct the
+path yourself". That conclusion was drawn from the *prose example* without checking the
+OpenAPI contract, which is the higher-precedence artifact and describes the field
+explicitly. The conclusion was wrong, and following it would have discarded something
+worth having.
 
-```json
-"downloadUrl": "/api/v2/sessions/20250901-SB-…/upo/20250901-EU-…"
-```
+`UpoPageResponse.downloadUrl` is `format: uri`, and the contract's own description says:
 
-But the verified base URL is `https://api-test.ksef.mf.gov.pl/v2` (§2), and §7 item 2
-records that endpoint paths carry **no** `/api` prefix. Joining the base URL with this
-field yields `…/v2/api/v2/…`, which will 404.
+- the link is **generated on every status query**, so it is not a stable identifier;
+- access is by `HTTP GET` and the access token **must not be sent** ("*nie należy* wysyłać
+  tokenu dostępowego");
+- it is **not subject to API rate limits**, and expires at `downloadUrlExpirationDate`;
+- the response carries **`x-ms-meta-hash`** — the SHA-256 of the UPO document, Base64.
 
-`srodowiska.md` states only that a returned URL's **host** matches the environment called;
-it says nothing about the path prefix. So the field's prefix is unexplained.
+The `x-ms-meta-hash` header is Azure Blob Storage's, so this is a pre-signed storage URL
+rather than an API route. That also explains the prefix that prompted the original
+misreading: the field is not meant to be concatenated with the base URL at all, so whether
+the documented example looks host-relative is beside the point.
 
-**Resolution: treat `downloadUrl` as advisory and construct the path from
-`GET /sessions/{ref}/upo/{upoRef}` using `referenceNumber`, which is documented and
-consistent.** Revisit if a live TEST response is observed to differ from the doc's example
-— the example may simply be stale.
+Both reference clients implement it that way. `ksef-client-csharp` exposes two distinct
+paths — `GetSessionUpoAsync(sessionRef, upoRef, accessToken)` for the metered API route,
+and `GetUpoAsync(Uri)` / `GetUpoWithHashAsync(restClient, uri)` for the link, the latter
+passing **`token: null`** explicitly.
+
+**Resolution: follow `downloadUrl` as an opaque absolute URI, without the bearer token,
+and verify `x-ms-meta-hash` against the bytes received.** Given how tight the session
+budgets are (§6.1 — `GET /sessions` allows 10/min), an unmetered path with a built-in
+integrity check is the better default; `GET /sessions/{ref}/upo/{upoRef}` remains the
+fallback when the link has expired.
+
+Two consequences for the client design. The URL must never be logged or persisted as a
+durable reference — it expires, and it is credential-bearing. And the token-suppression is
+not optional politeness: sending a bearer token to third-party storage leaks it.
+
+**Unverified:** whether the live API returns this field absolute or host-relative.
+`srodowiska.md` says only that a returned URL's *host* matches the environment called. Code
+should therefore resolve it against the environment's base host if it arrives relative, and
+use it as-is if absolute.
 
 ### 14.3 Every upstream UPO example fails upstream's own UPO schema
 
