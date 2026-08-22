@@ -24,7 +24,11 @@ submitted.
 > invoice — via the `Ksef::FA3.build` DSL or the value objects directly — to schema-valid
 > XML.
 >
-> **Not yet:** authentication, encryption, sessions — so nothing can actually be *sent* to
+> **Partly there:** authentication. The `AuthTokenRequest` document and its XAdES-BES
+> signature are implemented and verified offline; the HTTP calls that would exchange them
+> for a token are not.
+>
+> **Not yet:** those auth calls, encryption, sessions — so nothing can actually be *sent* to
 > KSeF yet — and the other six invoice types. See [Roadmap](#roadmap).
 >
 > In the quickstart below, **everything up to and including `Ksef::FA3.build` runs
@@ -214,8 +218,9 @@ integrators.
 - **`BigDecimal` everywhere for money.** `Float` is forbidden in any monetary path.
 - **Invoice submission is never auto-retried.** A duplicate invoice in KSeF is a real tax
   problem. Idempotent GETs retry with backoff; a failed submission surfaces to you.
-- **Thread-safe.** A single client is shareable across threads (Sidekiq is the expected
-  habitat); configuration is frozen at construction.
+- **Thread-safe by requirement.** Configuration is frozen at construction, and a single
+  client will be shareable across threads (Sidekiq is the expected habitat) — a stated
+  constraint on `Ksef::Client`, which is not written yet, not a claim about shipped code.
 - **Secrets never logged.** Tokens, JWTs, symmetric keys and IVs are redacted from
   `#inspect` output.
 

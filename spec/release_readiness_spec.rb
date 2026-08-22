@@ -11,7 +11,7 @@ RSpec.describe "release readiness", :release_check do
   # The sentinel avoids the words TODO/FIXME on purpose: RubyGems refuses to build a gem
   # containing those, which would make the package unbuildable throughout development.
   # The gate lives here instead, so CI can still exercise `gem build` on every push.
-  describe "§12.1 metadata placeholders" do
+  describe "DESIGN.md §12.1 metadata placeholders" do
     let(:sentinel) { "UNRESOLVED-DESIGN-12-1" }
 
     it "has a real author" do

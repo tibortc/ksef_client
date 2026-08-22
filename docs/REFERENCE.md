@@ -688,7 +688,7 @@ needs no prior credentials. (They exist on TEST only; see §2.)
 `createdDate` caveat: when re-creating test data under the same identifier, the date must
 be **later** than the previous one — not equal, not earlier.
 
-### 6a.2 The token needs a one-time XAdES authentication — this blocks §12.4 for 0.1
+### 6a.2 The token needs a one-time XAdES authentication — this blocks DESIGN.md §12.4 for 0.1
 
 `tokeny-ksef.md`: *"Wygenerowanie tokena KSeF jest możliwe wyłącznie po jednorazowym
 uwierzytelnieniu się podpisem elektronicznym (XAdES)."* — a KSeF token can be generated
@@ -705,7 +705,7 @@ CI — to bootstrap via somebody else's client.
 
 Until the certificate flow is implemented, the interim workaround is a one-time
 out-of-band mint via the official `ksef-client-csharp`, using a self-signed certificate
-(permitted on TEST; see `auth/testowe-certyfikaty-i-podpisy-xades.md`). Once §6.3's
+(permitted on TEST; see `auth/testowe-certyfikaty-i-podpisy-xades.md`). Once DESIGN.md §6.3's
 certificate flow lands, this gem mints its own and the workaround is retired.
 
 Tokens are minted in a `Nip` or `InternalId` context with a fixed permission set chosen at
@@ -917,8 +917,9 @@ marked as blocking Phase 2.
 
 ## 10. Cryptography — resolves DESIGN.md §6.4 [VERIFY]
 
-Primary source: `sesja-interaktywna.md` "Wymagania wstępne" and `uwierzytelnianie.md`
-§2.2 — **both first-tier documentation, not inferred from client behaviour.**
+Primary source: `sesja-interaktywna.md` "Wymagania wstępne" and `uwierzytelnianie.md` §2.2
+(upstream's own numbering) — **both first-tier documentation, not inferred from client
+behaviour.**
 Independently corroborated against `KSeF.Client/Api/Services/CryptographyService.cs`
 (`ksef-client-csharp`) and `DefaultCryptographyService.java` (`ksef-client-java`), both
 retrieved 2026-08-22. Where a line number is cited below it is from the C# file.
