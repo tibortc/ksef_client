@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../tasks/ksef_bootstrap"
+require_relative "../support/test_context"
 
 # Live integration against the KSeF TEST environment (DESIGN.md §9, docs/REFERENCE.md §6a.4).
 #
@@ -8,11 +9,13 @@ require_relative "../../tasks/ksef_bootstrap"
 # nightly CI's job, never a per-PR one — it reaches the network and consumes shared
 # TEST-environment state.
 #
-# **This suite provisions a fresh test person on each run** rather than reusing the identity
+# **This suite provisions one test person per run** rather than reusing the identity
 # `KSEF_TEST_NIP` refers to. That is deliberate: authenticating as an existing context by
 # XAdES needs a certificate carrying the PESEL that holds the permissions, and the PESEL is
 # not among the stored secrets. Self-provisioning keeps the suite self-contained at the cost
 # of one test person per run, which is what the TEST environment exists for.
+#
+# The grant is asynchronous — see {TestContext} and §6a.6.
 RSpec.describe "authentication against TEST", :integration do
   let(:configuration) { Ksef::Configuration.new(env: environment) }
   let(:connection) { Ksef::HTTP::Connection.build(configuration) }
@@ -57,18 +60,7 @@ RSpec.describe "authentication against TEST", :integration do
   describe "the full XAdES flow" do
     subject(:tokens) { authenticate }
 
-    let(:identifiers) do
-      { nip: KsefBootstrap::Identifiers.nip, pesel: KsefBootstrap::Identifiers.pesel }
-    end
-
-    def provision
-      connection.post("testdata/person") do |request|
-        request.body = {
-          nip: identifiers.fetch(:nip), pesel: identifiers.fetch(:pesel),
-          isBailiff: false, isDeceased: false, description: "ksef_client nightly integration"
-        }
-      end
-    end
+    let(:identifiers) { TestContext.identifiers(connection) }
 
     def signed_request
       certificate, key = KsefBootstrap::Certificate.personal(pesel: identifiers.fetch(:pesel))
@@ -78,13 +70,22 @@ RSpec.describe "authentication against TEST", :integration do
       Ksef::Auth::Signer.new(certificate: certificate, key: key).sign(request)
     end
 
-    # Provision, sign, submit, poll — everything up to but not including redemption, which
-    # is single-use and so belongs to the caller.
-    def submit_and_await
-      provision
+    # Sign, submit, poll — everything up to but not including redemption, which is
+    # single-use and so belongs to the caller.
+    #
+    # Retries on 415 because in *this* context it means "the grant has not landed yet"
+    # rather than "this subject has no rights" — the identity was provisioned moments ago
+    # (§6a.6). Library code must never retry a 415: there it is a legitimate final answer,
+    # and retrying would hammer the API over a permissions problem no retry can fix.
+    def submit_and_await(attempts: 3)
       initiated = client.submit_xades(signed_request)
       client.authenticate!(initiated.reference_number, token: initiated.authentication_token)
       initiated
+    rescue Ksef::AuthenticationError => e
+      raise unless attempts > 1 && e.message.include?("status #{Ksef::Auth::Status::NO_PERMISSIONS}")
+
+      sleep TestContext::SETTLE_SECONDS
+      submit_and_await(attempts: attempts - 1)
     end
 
     def authenticate
