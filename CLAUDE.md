@@ -60,7 +60,7 @@ mv /tmp/Gemfile.lock.dev Gemfile.lock                 # restore
 
 The separate `BUNDLE_PATH` keeps the 4.0.6 gem set intact, and resolving without the lockfile mirrors what CI does per matrix Ruby. Bundler under 3.2.11 is 2.4.19, which cannot read a lockfile written by Bundler 4.
 
-Last verified green on 3.2.11 (2026-08-23, after the session status layer): 698 examples, 0 failures, line 100 / branch 97.32 / method 100, RuboCop clean. **Check `rake`'s exit code, not just its output** — a coverage-floor failure prints among the RuboCop lines and is easy to read past; `rake exit=0` is the only reliable signal. The crypto primitives were measured on both 3.2.11 and 4.0.6 before any code was written — `OpenSSL::PKey::PKey#encrypt` with explicit OAEP options, the NIST and FIPS vectors, and the 190-byte OAEP limit all behave identically. One difference worth knowing: a wrong-padding decrypt raises `OpenSSL::PKey::PKeyError` on 4.0.6 but `OpenSSL::PKey::RSAError` on 3.2.11, so **rescue `OpenSSL::OpenSSLError`** in any spec asserting a crypto failure.
+Last verified green on 3.2.11 (2026-08-23, after the session status layer): 698 examples, 0 failures, line 100 / branch 97.32 / method 100, RuboCop clean. **Check `rake`'s exit code, not just its output** — a coverage-floor failure prints among the RuboCop lines and is easy to read past; `rake exit=0` is the only reliable signal. This is how the skipped-gate bug above stayed hidden. The crypto primitives were measured on both 3.2.11 and 4.0.6 before any code was written — `OpenSSL::PKey::PKey#encrypt` with explicit OAEP options, the NIST and FIPS vectors, and the 190-byte OAEP limit all behave identically. One difference worth knowing: a wrong-padding decrypt raises `OpenSSL::PKey::PKeyError` on 4.0.6 but `OpenSSL::PKey::RSAError` on 3.2.11, so **rescue `OpenSSL::OpenSSLError`** in any spec asserting a crypto failure.
 
 Even so, when reaching for any core or stdlib method, confirm it exists in 3.2 rather than assuming — a filtered local run will not catch it.
 
@@ -92,6 +92,8 @@ Even so, when reaching for any core or stdlib method, confirm it exists in 3.2 r
 ## Workflow
 
 - Work the current milestone only (see Status); do not start the next phase early.
-- Definition of done: `bundle exec rake` green — pinned artifacts verified, codegen reproducible, specs passing, RuboCop clean. That task list mirrors CI exactly, so a green `rake` means a green matrix leg.
+- Definition of done: `bundle exec rake` green — pinned artifacts verified, codegen reproducible, specs passing **with the coverage floors enforced**, RuboCop clean. That task list mirrors CI, so a green `rake` means a green matrix leg.
+
+  It did not, until 2026-08-23. `rake spec` invokes `rspec --pattern spec/**{,/*/**}/*_spec.rb`, and that pattern *value* starts with `spec/` — which `spec_helper`'s filtered-run check read as "the user narrowed the run", so it skipped the coverage gate on **every** `rake`. CI calls `bundle exec rspec` directly and was always strict, so the documented definition of done was weaker than the thing it claimed to mirror. Fixed by stripping `--pattern` and its value before looking for selectors.
 - Unsure how KSeF behaves? Read the official C#/Java clients (github.com/CIRFMF) before guessing, then ledger the finding in `docs/REFERENCE.md`.
 - **Open** DESIGN.md §12 decisions belong to the human — ask, don't pick. Already settled, so don't re-ask: **§12.2** XSD redistribution (schemas are MIT-licensed → bundled; `docs/REFERENCE.md` §1.2), **§12.1** author/repo metadata (Tibor Molnár, `tibor@timcraft.pl`, `github.com/tibortc/ksef_client`), and the 3.2 floor surviving its EOL (DESIGN.md §3).

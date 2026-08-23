@@ -37,5 +37,13 @@ module Ksef
     # that a `downloadUrl` is storage rather than an API route. Carries the SHA-256 of the
     # document, Base64-encoded.
     HASH_HEADER = "x-ms-meta-hash"
+
+    # Read from the pinned schema's `targetNamespace`, not from memory.
+    NAMESPACE = "http://upo.schematy.mf.gov.pl/KSeF/v4-3"
+
+    # The element §14.3 is about. `upo-v4-3.xsd` fixes it to `"Ministerstwo Finansów"`,
+    # while every non-production environment appends a marker — TEST sends
+    # `"Ministerstwo Finansów - środowisko testowe (TE)"`.
+    RECEIVING_PARTY_ELEMENT = "NazwaPodmiotuPrzyjmujacego"
   end
 end

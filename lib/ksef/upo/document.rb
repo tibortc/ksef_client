@@ -43,6 +43,13 @@ module Ksef
               "of receipt (docs/REFERENCE.md §14.2)."
       end
 
+      # Checks the document against the bundled schema — **a diagnostic, never a gate**
+      # (§14.3). Archive the bytes regardless of what this says; see {Validator} for why
+      # there is no raising counterpart.
+      #
+      # @return [Validation]
+      def validate = Validator.validate(xml)
+
       # Writes the bytes untouched. Binary mode on purpose: this must not pick up a newline
       # translation or a re-encode on the way to disk, or the archived file stops matching
       # what the Ministry signed.
