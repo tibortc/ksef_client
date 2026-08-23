@@ -20,9 +20,15 @@ module Ksef
   # contract says explicitly not to send the token. {Ksef::HTTP::Connection.storage} exists
   # so that requests to them go over a connection with no credential attached at all.
   #
-  # **Verify `x-ms-meta-hash`.** It is the only integrity check available on bytes fetched
-  # outside the API, and the artifact is legal proof of receipt. A mismatch raises
+  # **Verify `x-ms-meta-hash`.** The artifact is legal proof of receipt, so a mismatch raises
   # {Ksef::IntegrityError} rather than being logged and ignored.
+  #
+  # It is published on **both** paths — the pre-signed link and all three metered UPO routes,
+  # plus the invoice download; §5.5 records four `200` responses declaring it. An earlier
+  # revision of this comment called it "the only integrity check available on bytes fetched
+  # outside the API", and {Client} duly discarded it on the metered route. Wrong twice over:
+  # the ledger had the header recorded correctly all along, and throwing away a free
+  # integrity check on proof of receipt is a bad trade at any price.
   #
   # ## And one trap
   #

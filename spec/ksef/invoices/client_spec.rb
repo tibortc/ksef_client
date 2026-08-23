@@ -42,6 +42,32 @@ RSpec.describe Ksef::Invoices::Client do
       expect(a_request(:get, %r{/invoices/ksef/})).not_to have_been_made
     end
 
+    # This route declares x-ms-meta-hash too (§5.5), and an archived invoice is a legal
+    # document — so the free check is taken.
+    it "verifies the published hash when the response carries one" do
+      stub_request(:get, "#{base}/invoices/ksef/#{number}").to_return(
+        status: 200, body: "<Faktura/>",
+        headers: { Ksef::UPO::HASH_HEADER => Ksef::Crypto::Digest.of("<Faktura/>").base64 }
+      )
+
+      expect(invoices.download(number)).to eq("<Faktura/>")
+    end
+
+    it "raises IntegrityError when the bytes do not match the published hash" do
+      stub_request(:get, "#{base}/invoices/ksef/#{number}").to_return(
+        status: 200, body: "<Tampered/>",
+        headers: { Ksef::UPO::HASH_HEADER => Ksef::Crypto::Digest.of("<Faktura/>").base64 }
+      )
+
+      expect { invoices.download(number) }.to raise_error(Ksef::IntegrityError)
+    end
+
+    it "accepts a response with no hash header rather than failing" do
+      stub_request(:get, "#{base}/invoices/ksef/#{number}").to_return(status: 200, body: "<x/>")
+
+      expect(invoices.download(number)).to eq("<x/>")
+    end
+
     it "accepts an already-parsed KsefNumber" do
       stub_request(:get, "#{base}/invoices/ksef/#{number}").to_return(status: 200, body: "<x/>")
 

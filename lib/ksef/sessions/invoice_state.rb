@@ -43,6 +43,19 @@ module Ksef
       def original_ksef_number = extensions["originalKsefNumber"]
       def original_session_reference = extensions["originalSessionReferenceNumber"]
 
+      # Redacted for the same reason {UpoPage} redacts its link, and this docstring said so
+      # before the code did: `upo_download_url` is pre-signed, carrying its own
+      # authorisation in the query string, so it is a credential and must not reach a log
+      # line (DESIGN.md §4.5). Everything else stays visible, because the status and the
+      # duplicate extensions are exactly what a reader needs.
+      def inspect
+        link = upo_download_url.nil? ? "nil" : "[PRE-SIGNED]"
+        "#<data Ksef::Sessions::InvoiceState reference_number=#{reference_number.inspect} " \
+          "ksef_number=#{ksef_number.inspect} code=#{code.inspect} " \
+          "description=#{description.inspect} details=#{details.inspect} " \
+          "extensions=#{extensions.inspect} upo_download_url=#{link}>"
+      end
+
       # Parsed rather than returned raw, so the CRC-8 is checked and the acceptance date is
       # a Date. `nil` until the invoice is accepted.
       #

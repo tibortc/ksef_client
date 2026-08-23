@@ -95,14 +95,26 @@ module Ksef
 
       private
 
+      # **The metered routes publish `x-ms-meta-hash` too**, and an earlier version of this
+      # method threw it away with a comment claiming they did not. The pinned contract
+      # declares the header on all three UPO routes *and* on the invoice download — four
+      # `200` responses in total — which §5.5 of the ledger had recorded correctly all along.
+      # Discarding an available integrity check on legal proof of receipt was the wrong
+      # trade at any price. Corrected 2026-08-23.
+      #
+      # It is still read defensively rather than required: if the header is absent the
+      # document comes back unverifiable rather than failing, which is what {Document}'s
+      # `#verifiable?`/`#verified?` split is for.
       def via_api(endpoint)
         response = @connection.get(endpoint) do |request|
           request.headers["Authorization"] = "Bearer #{bearer}"
         end
 
-        # The API route publishes no hash, so there is nothing to verify against — hence
-        # `published_hash: nil` and a `#verified?` of nil rather than false.
-        Document.new(xml: response.body.to_s, published_hash: nil, source: :api)
+        Document.new(
+          xml: response.body.to_s,
+          published_hash: response.headers[HASH_HEADER],
+          source: :api
+        ).verify!
       end
 
       # §9 carries this as unverified: whether the live API returns `downloadUrl` absolute or

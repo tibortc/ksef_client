@@ -198,6 +198,24 @@ RSpec.describe Ksef::Sessions::Status do
       expect(status.invoice(session_ref, invoice_ref).to_s).to eq(invoice_ref)
     end
 
+    # The UPO link is pre-signed and carries its own authorisation, so it is a credential
+    # (DESIGN.md §4.5). UpoPage redacts the same class of value; this object did not until
+    # 2026-08-23, despite its own docstring claiming the same rules applied.
+    it "keeps the pre-signed UPO link out of #inspect" do
+      stub_invoice(invoice_body(200, "upoDownloadUrl" => "https://blob/upo?sig=SECRETSIG"))
+      state = status.invoice(session_ref, invoice_ref)
+
+      expect(state.inspect).not_to include("SECRETSIG")
+      expect(state.inspect).to include("upo_download_url=[PRE-SIGNED]")
+      expect(state.upo_download_url).to include("SECRETSIG")
+    end
+
+    it "says nil rather than [PRE-SIGNED] when there is no link" do
+      stub_invoice(invoice_body(150))
+
+      expect(status.invoice(session_ref, invoice_ref).inspect).to include("upo_download_url=nil")
+    end
+
     # The number is parsed rather than handed back raw, so its CRC-8 is checked and the
     # acceptance date is a Date.
     it "parses the KSeF number it returns, checksum and all" do

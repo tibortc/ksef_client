@@ -99,6 +99,36 @@ RSpec.describe Ksef::UPO::Client do
   end
 
   describe "the metered API routes" do
+    # The contract declares x-ms-meta-hash on all three metered UPO routes as well as the
+    # pre-signed link (§5.5). An earlier version of the client threw it away here, on a false
+    # premise; discarding a free integrity check on legal proof of receipt is a bad trade.
+    it "verifies the published hash on the metered route too" do
+      stub_request(:get, "#{base}/sessions/#{session_ref}/upo/20260823-EU-1-1-ZZ")
+        .to_return(status: 200, body: xml, headers: { Ksef::UPO::HASH_HEADER => hash_of(xml) })
+      document = upo.collective(session_ref, "20260823-EU-1-1-ZZ")
+
+      expect(document.verifiable?).to be(true)
+      expect(document.verified?).to be(true)
+    end
+
+    it "raises IntegrityError on the metered route when the bytes do not match" do
+      stub_request(:get, "#{base}/sessions/#{session_ref}/upo/20260823-EU-1-1-ZZ")
+        .to_return(status: 200, body: "<Tampered/>",
+                   headers: { Ksef::UPO::HASH_HEADER => hash_of(xml) })
+
+      expect { upo.collective(session_ref, "20260823-EU-1-1-ZZ") }
+        .to raise_error(Ksef::IntegrityError)
+    end
+
+    # Absent header means unverifiable, not corrupt — otherwise a response that legitimately
+    # omits it would look like tampering.
+    it "accepts a metered response with no header as unverifiable" do
+      stub_request(:get, "#{base}/sessions/#{session_ref}/upo/20260823-EU-1-1-ZZ")
+        .to_return(status: 200, body: xml)
+
+      expect(upo.collective(session_ref, "20260823-EU-1-1-ZZ").verifiable?).to be(false)
+    end
+
     it "fetches a collective UPO by session and UPO reference" do
       stub_request(:get, "#{base}/sessions/#{session_ref}/upo/20260823-EU-1-1-ZZ")
         .to_return(status: 200, body: xml)
