@@ -1338,6 +1338,35 @@ but both reference clients send it, and it selects which UPO format the session 
 produce. Since this gem pins `upo-v4-3.xsd`, staying silent means accepting whatever the
 server defaults to, which may not be the version we can validate.
 
+### 11.2a Decisions this gem made about sessions, that upstream does not state
+
+The counterpart to §10.3, kept beside the subsystem it governs. Recorded so they are not
+mistaken for ledgered facts, and so the reasoning survives the person who had it.
+Implemented 2026-08-23 in `lib/ksef/sessions/`.
+
+| Decision | Value | Why |
+|---|---|---|
+| **The `Encryptor` is bound to the `Session`** | `Session` carries the encryptor that opened it; `#send_invoice` takes no key | The single most consequential one — see below |
+| Session lifetime in the composite | **a fresh session per `send_invoice`**, with `client.session { }` for batching | Decided by the human, 2026-08-23. Reasoning in DESIGN.md §6.5 |
+| Bearer fetched per request | `#bearer` is called on each call, not captured at construction | A 12-hour session outlives a "kilkanaście minut" access token, so a long run must pick up {Auth::AccessToken}'s proactive refresh mid-flight |
+| Reference numbers shape-checked | character-set match before path interpolation | Keeps a garbled or hostile value out of a URL. Deliberately *not* a §13 checksum check: §12 warns the non-KSeF-number forms are unverified against that algorithm |
+| `X-KSeF-Feature` opt-out | `upo_version: nil` omits the header | The header itself is contract-silent (§14.6), so a caller must be able to decline our guess about it |
+| Granular layer is stateless | `Sessions::Online` holds no session | Not a decision so much as a copied one: both official clients thread the reference through as a parameter, and it matches `Auth::Client` |
+
+**Why the encryptor belongs to the session.** The symmetric key is agreed *once*, in the
+session-open request, and every invoice in that session is encrypted under it. So an invoice
+encrypted with any other key is undecryptable at the far end — and the only symptom is
+per-invoice status **435, "błąd odszyfrowania pliku"** (§12.1), which arrives
+**asynchronously**, long after the send returned `202`. There is no synchronous error and
+nothing in the response to inspect.
+
+A `send_invoice(session, xml, encryptor:)` signature would make that mistake a plausible
+typo. Binding the encryptor to the `Session` at open time makes it unrepresentable instead:
+there is no way to name the wrong key, because the caller never names one. This is the same
+move as {Ksef::Crypto::Encryptor#seal} returning both digests together (§10.3) — where a
+mistake is silent and remote, prefer an API shape that cannot express it over a comment
+warning against it.
+
 ### 11.3 Accepted schema versions differ by environment
 
 Source: `srodowiska.md` (16.03.2026). **TEST accepts FA(2) as well as the current schemas;

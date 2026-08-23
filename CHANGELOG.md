@@ -14,6 +14,47 @@ gem version for which API state".
 
 ### Added
 
+- **`Ksef::Sessions::Online` — open, send, close.** Stateless and thin, like
+  `Auth::Client`: it maps requests and responses and holds no session of its own. Both
+  official clients do the same, threading the reference through as a parameter.
+
+  **The `Encryptor` is bound to the `Session`, not passed per send**, and that is the
+  decision worth knowing about. The symmetric key is agreed once, at open, and every invoice
+  in the session is encrypted under it — so an invoice encrypted with any other key is
+  undecryptable at the far end, and the only symptom is per-invoice status `435` arriving
+  **asynchronously**, long after the send returned `202`. There is no synchronous error to
+  catch. Binding the key to the session makes the mistake unrepresentable rather than merely
+  documented, the same move as `Encryptor#seal` returning both digests together.
+
+  Sends `X-KSeF-Feature: upo-v4-3` on open — a header in neither the contract nor any
+  upstream prose, but sent by both official clients, which selects the UPO format the session
+  produces. This gem bundles `upo-v4-3.xsd` and nothing else, so silence would mean accepting
+  a version it might not be able to validate (`docs/REFERENCE.md` §14.6).
+
+  `formCode` comes from the contract rather than from `srodowiska.md`, whose prose misspells
+  the PEF system codes and omits `FA_RR (1)` entirely. Reference numbers are shape-checked
+  before reaching a URL path.
+- **`send_invoice` opens a fresh session per call**, with `client.session { |s| ... }` for
+  deliberate batching. Resolves the session-reuse `[VERIFY]` in DESIGN.md §6.5, which the
+  facts left open: sessions last 12 hours and take 10 000 invoices, and neither official
+  client offers a composite to copy. A reused session is mutable state on a client that must
+  be thread-safe; an opened-but-unused session is cancelled with status `440`; and the API
+  returning the *original's* KSeF number on a duplicate suggests resends are an expected
+  hazard rather than one to make likelier by hiding session state.
+- **`Ksef::KsefNumber`** — parses and validates the 35-character identifier KSeF assigns to
+  an accepted invoice. CRC-8 with polynomial `0x07`, verified against the Ministry's own
+  documented example, which doubles as the golden vector. Checking the checksum locally is
+  the point: these numbers get copied between systems and read down telephones, and a CRC-8
+  catches exactly those slips, turning a silent lookup failure into a specific error naming
+  both the carried and the computed value. `assigned_on` is a `Date` because it is not
+  metadata — it is the invoice's **official receipt date**.
+- **`Ksef::Auth::AccessToken`** — tracks expiry from the response's `validUntil`, never by
+  decoding the JWT: §4.3 excludes the `jwt` dependency and the contract carries `validUntil`
+  precisely so no decoding is needed. Refreshes at ~80% of the observed lifetime rather than
+  on expiry, so a request never carries a credential that dies mid-flight — on an invoice
+  submission, a failure that *might* have been delivered is the situation this gem works
+  hardest to avoid. Thread-safe with the staleness check re-run inside the lock, so a burst
+  of threads yields one refresh rather than a stampede.
 - **`Ksef::Crypto` — the encryption layer.** AES-256-CBC with PKCS#7 for payloads,
   RSA-OAEP with SHA-256 *and* MGF1-SHA-256 for wrapping, and the Ministry's published
   certificates fetched, cached and selected by declared usage. Every parameter is ledgered

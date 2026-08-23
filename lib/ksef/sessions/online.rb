@@ -13,6 +13,9 @@ module Ksef
     #
     # ## The encryptor travels with the session, not with each send
     #
+    # Recorded as a decision at docs/REFERENCE.md §11.2a, alongside the rest of the
+    # session-layer choices upstream does not make for us.
+    #
     # {Session} carries the {Ksef::Crypto::Encryptor} that opened it. That is the single
     # most important design decision here. The symmetric key is agreed *once*, at open,
     # and every invoice in the session is encrypted under it — so sending an invoice

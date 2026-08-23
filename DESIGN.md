@@ -285,7 +285,11 @@ Self-signed certificates are accepted on **TEST only** — never DEMO or PROD.
 
 ### 6.5 Sessions
 
-**Online (0.1):** open (submits encryption info: wrapped key, IV, cipher metadata) → send N encrypted invoices → close → poll session/invoice status → fetch UPO. Expose both granular calls and a happy-path composite (`client.send_invoice(invoice)` opens/uses a session appropriately — exact session-reuse semantics per docs **[VERIFY]**, e.g. whether one session may carry multiple invoices and for how long).
+**Online (0.1):** open (submits encryption info: wrapped key, IV, cipher metadata) → send N encrypted invoices → close → poll session/invoice status → fetch UPO. Expose both granular calls and a happy-path composite.
+
+**Session-reuse semantics — [VERIFY] resolved 2026-08-23, decided by the human.** The facts came back permissive: a session lives 12 hours, may carry up to 10 000 invoices, and concurrent sessions are allowed (`docs/REFERENCE.md` §11). Neither official client makes the choice for us — **neither offers a composite at all**, so there was no upstream semantics to inherit (§14.6's investigation notes).
+
+The decision is **a fresh session per `send_invoice`**, with an explicit `client.session { |s| ... }` block when a caller wants one session to carry many invoices. Reasoning: a reused session is mutable state on a client that §5.2 requires to be thread-safe; an opened-but-unused session is cancelled with status `440` so speculative opening is not free; and the API going out of its way to return the *original's* KSeF number on a duplicate (§12.1) suggests resends are an expected hazard, not one to make likelier by hiding session state. Batching stays available, but as a deliberate act rather than a default. Recorded with the rest of the session-layer decisions at `docs/REFERENCE.md` §11.2a.
 
 **Batch (0.2):** build ZIP of invoices → split into parts → encrypt parts → open batch session → upload parts to returned storage URLs (plain HTTP PUT to object storage — likely bypasses the Faraday auth stack **[VERIFY]**) → close → poll → collect **per-invoice** results *(verified: per-invoice error model)*.
 
