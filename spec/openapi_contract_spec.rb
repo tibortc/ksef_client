@@ -10,10 +10,12 @@ require "json"
 # conclusion the edit invalidated — and a mismatched digest is easy to "fix" by re-pinning
 # without re-reading the ledger.
 #
-# The sections covered here are the ones with **no code yet**. §14.3 and §14.4 are already
-# protected by executable assertions because the schemas they concern are in use; §14.1 and
-# §14.2 concern crypto and session code that is not written, so without these they would
-# rot silently until someone implemented them from a stale conclusion.
+# These cover the sections whose conclusions had no code to protect them when they were
+# ledgered. §14.3 and §14.4 were always guarded by executable assertions, because the
+# schemas they concern are in use. §14.1 is now implemented by `Ksef::Crypto` and guarded
+# there too, so these assertions are its second line of defence; **§14.2 still has no code
+# at all**, and until the session layer lands these are the only thing keeping it from
+# rotting into a stale conclusion someone later implements.
 RSpec.describe "the pinned OpenAPI contract" do
   let(:spec) do
     JSON.parse(File.read(File.expand_path("fixtures/openapi/open-api.json", __dir__), encoding: "UTF-8"))
@@ -113,6 +115,37 @@ RSpec.describe "the pinned OpenAPI contract" do
     it "declares 21470 for a withdrawn or unknown key identifier" do
       expect(spec.dig("paths", "/auth/ksef-token", "post", "responses", "400", "description"))
         .to include("21470")
+    end
+  end
+
+  # docs/REFERENCE.md §4.8. The ledger originally sourced these codes from the C# client's
+  # enum and said the contract did not state them. It does — and reading it added 480, which
+  # the C# enum lacks. Pinned here so the provenance cannot quietly regress a second time.
+  describe "§4.8 — the contract states the authentication status codes" do
+    let(:table) do
+      schemas.dig("AuthenticationOperationStatusResponse", "properties", "status", "description")
+    end
+
+    it "carries a code table, not merely prose about two of them" do
+      expect(table.scan(/^\| (\d{3}) \|/).flatten.map(&:to_i).uniq)
+        .to contain_exactly(100, 200, 415, 425, 450, 460, 470, 480, 500, 550)
+    end
+
+    # The one code a client must not treat as transient.
+    it "declares 480 as a security block, which is why it is not retryable" do
+      expect(table).to match(/^\| 480 \|/)
+      expect(table).to include("Podejrzenie incydentu bezpieczeństwa")
+      expect(Ksef::Auth::Status::DESCRIPTIONS).to have_key(480)
+    end
+
+    # §4.8 used to say four; the contract lists eight, which is why `#explain` prefers the
+    # server's own description over any table of ours.
+    it "collapses eight distinct causes into 450" do
+      expect(table.scan(/^\| 450 \|/).size).to eq(8)
+    end
+
+    it "does not declare 400 or 401, so those two are C#-only" do
+      expect(table).not_to match(/^\| 40[01] \|/)
     end
   end
 

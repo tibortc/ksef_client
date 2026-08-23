@@ -78,7 +78,10 @@ namespace :auth do
 
     puts <<~OUT
 
-      Done. Store these as repository secrets — nightly.yml reads both:
+      Done. Store these as **environment** secrets on the `ksef-test` environment
+      (not repository secrets — those are readable by every workflow in the repo,
+      which is more exposure than a live KSeF credential needs). nightly.yml
+      declares that environment and reads both (docs/REFERENCE.md §6a.3):
 
         KSEF_TEST_NIP    #{result.fetch(:nip)}
         KSEF_TEST_TOKEN  #{result.fetch(:token)}

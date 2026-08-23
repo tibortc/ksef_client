@@ -1,7 +1,7 @@
 # Verification ledger
 
 Every fact the implementation depends on, with its source and retrieval date, per
-DESIGN.md §0.2 and §2. **Nothing about endpoint paths, XML element names, namespace
+DESIGN.md §0 rule 2 and §2. **Nothing about endpoint paths, XML element names, namespace
 URIs or cryptographic parameters may enter the code unless it appears here.**
 
 Entries are `value + source URL + date`. When this ledger and DESIGN.md disagree, the
@@ -83,6 +83,12 @@ mirrored under `docs/upstream/`, preserving upstream paths, at the **same commit
 | `limity/limity-api.md`, `limity/limity.md` | §6, §6.1 — rate and size limits |
 | `srodowiska.md` | §2, §11.3 — environments, accepted schema versions |
 | `dane-testowe-scenariusze.md` | §6a — TEST data provisioning |
+| `tokeny-ksef.md` | §4.1, §6a.2, §6a.3 — KSeF token issuance, permitted contexts, confidentiality |
+
+(The `tokeny-ksef.md` row was missing until 2026-08-23 though the file was pinned all
+along. It is load-bearing: it is the sole source for "a token can only be issued in a `Nip`
+or `InternalId` context", which is what restricts `Auth::Token::CONTEXT_TYPES` to two of
+the contract's four.)
 
 The UPO schema is pinned to `lib/ksef/upo/schema/upo-v4-3.xsd` (in `lib/`, following the
 precedent set by the auth schemas: pinned ahead of the code that consumes it) and the six
@@ -288,8 +294,9 @@ this is why TEST contexts are not isolated between integrators.
 ### 4.2 Tokens
 
 `/auth/token/redeem` exchanges a completed authentication for the token pair;
-`/auth/token/refresh` renews. This confirms the DESIGN.md §6.3 step 4 [VERIFY] — the API
-does issue a refresh token alongside the access token.
+`/auth/token/refresh` renews. This confirms the [VERIFY] in DESIGN.md §6.3's shared
+epilogue — the API does issue a refresh token alongside the access token. (That section's
+numbered lists stop at 3; there is no step 4 to cite.)
 
 | Token | Lifetime | Notes |
 |---|---|---|
@@ -511,36 +518,67 @@ Revocation invalidates the associated **`refreshToken` only** — already-issued
 `accessToken`s stay valid to their `exp`. Consistent with §4.2: there is no way to kill a
 live access token.
 
+**`authenticationMethod` is deprecated** (noted 2026-08-23). The contract marks
+`AuthenticationOperationStatusResponse.authenticationMethod` `deprecated: true` and adds
+`authenticationMethodInfo` (`category` / `code` / `displayName`) beside it; both are
+required, so nothing breaks today. `Ksef::Auth::OperationStatus` still reads the deprecated
+field. Migrating is not urgent — the value is informational and this gem never branches on
+it — but it should happen before upstream removes the field, and the successor is the one
+to read for new work.
+
 
 ### 4.8 Authentication status codes
 
 `GET /auth/{referenceNumber}` returns **HTTP 200** carrying a `StatusInfo` whose `code` is
-*not* an HTTP status — it describes the asynchronous operation. The Ministry's prose names
-only "in progress" and "succeeded", and says outright that the full list "will be available
-in the endpoint's technical documentation".
+*not* an HTTP status — it describes the asynchronous operation. The Ministry's *prose* names
+only "in progress" and "succeeded", and says the full list "will be available in the
+endpoint's technical documentation".
 
-Source: `KSeF.Client.Core/Models/ApiResponses/AuthenticationStatusCodeResponse.cs` in
-`ksef-client-csharp`, retrieved 2026-08-22. Recorded with that provenance: this is a
-reference-implementation constant, not something the contract states.
+**Source: the pinned OpenAPI contract** —
+`components.schemas.AuthenticationOperationStatusResponse.properties.status.description`
+carries the complete table. Re-sourced 2026-08-23, and the correction matters twice over.
+
+An earlier revision of this section cited
+`KSeF.Client.Core/Models/ApiResponses/AuthenticationStatusCodeResponse.cs` in
+`ksef-client-csharp` and said this was "a reference-implementation constant, not something
+the contract states". That was wrong, and it **understated our own confidence**: the prose
+saying the list is not yet documented was taken at its word, and nobody looked in the
+contract, which is a *first-tier* artifact. Reading it changed the table in three ways —
+so the lesson generalises: when upstream prose says a fact is undocumented, check the
+OpenAPI descriptions before reaching for a reference implementation.
 
 | Code | Meaning | Terminal? |
 |---|---|---|
 | 100 | authentication in progress | no — the only code that means keep polling |
 | 200 | succeeded | yes |
-| 400 | bad request | yes |
-| 401 | unauthorized | yes |
 | 415 | failed — subject holds no permissions in this context | yes |
 | 425 | authentication and its refresh tokens revoked by the user | yes |
-| 450 | token invalid, expired, revoked or inactive | yes |
+| 450 | token problem — eight distinct causes, see below | yes |
 | 460 | certificate invalid, chain error, untrusted, revoked, suspended or malformed | yes |
 | 470 | authorisation methods of a deceased person | yes |
+| **480** | **authentication blocked — suspected security incident** | yes, and **not** retryable |
 | 500 | unknown error | yes |
 | 550 | cancelled by the system; retry later | yes, but retryable |
 
-Two of these collapse several distinct causes into one number: **450** covers four token
-problems and **460** covers six certificate ones. The distinction arrives only in
-`StatusInfo.description`, so surface the server's wording rather than a code-to-string
-table of our own.
+The three corrections:
+
+1. **`480` exists and was missing entirely.** "Uwierzytelnienie zablokowane — podejrzenie
+   incydentu bezpieczeństwa. Skontaktuj się z Ministerstwem Finansów." It is absent from the
+   C# enum, which is why it was absent here and from `Ksef::Auth::Status` until 2026-08-23.
+   It is the one code whose correct response is neither a retry nor a fix on the client side:
+   the user must contact the Ministry. Retrying it is the worst available move, given §6
+   records that repeated suspicious behaviour lengthens a block.
+2. **`450` collapses eight causes, not four** — a malformed, mistimed, revoked or inactive
+   token, *plus* a bad authorisation challenge, bad token encryption, bad token encoding, and
+   a token not usable in the requested context. `460` collapses six certificate ones. The
+   distinction arrives only in `StatusInfo.description`, so surface the server's wording
+   rather than a code-to-string table of our own.
+3. **`400` and `401` are not contract codes.** They appear in the C# enum only. Kept as named
+   constants because the server may still send them, but their absence from the contract is
+   upstream's choice, not an omission here.
+
+Asserted against the contract in `spec/openapi_contract_spec.rb`, so this provenance cannot
+regress silently a second time.
 
 **Treat any unrecognised code as terminal.** Assuming otherwise polls a dead operation for
 ever, and the docs already warn that on DEMO and PROD a legitimate 100 can persist for as
@@ -733,7 +771,8 @@ A test NIP must still pass the standard checksum: digits 1–9 weighted by
 `6,5,7,2,3,4,5,6,7`, summed, `mod 11`, which must equal digit 10 (and must not be 10).
 Verified against every NIP appearing in the upstream docs — `7762811692`, `7980332920`,
 `3755747347` — and against the two in DESIGN.md §8, `9999999999` and `1111111111`. All
-six are checksum-valid, which independently confirms the §7.2 algorithm.
+six are checksum-valid, which independently confirms **DESIGN.md** §7.2's NIP algorithm.
+(Named explicitly: inside this document a bare "§7.2" would read as §7's second item.)
 
 You then register the NIP on TEST:
 
@@ -858,8 +897,10 @@ that no amount of offline testing could:
 - **`/testdata/person` really is unauthenticated**, as §6a.1 read from the contract.
 - **A self-signed certificate is accepted on TEST** (§4.6), carrying the PESEL as
   `serialNumber=PNOPL-<pesel>` (§4.4).
-- **The whole §4.2 flow works as ledgered**, including polling on `StatusInfo.code` and
-  single-use redemption.
+- **The §4.2 steps the bootstrap exercises work as ledgered** — challenge, submission,
+  polling on `StatusInfo.code`, and single-use redemption. Scoped deliberately (corrected
+  2026-08-23): `POST /auth/token/refresh` is *not* among them, so nothing here vouches for
+  refresh, and `POST /auth/ksef-token` did not exist at the time.
 
 Two failures on the way there, both bugs on this side rather than upstream: a local OpenSSL
 trust store with no CA bundle (see §6a.5), and the PESEL structure above.
@@ -1084,13 +1125,15 @@ identical so the §1 digests keep verifying.
 ## 9. Still unverified
 
 Carried forward; must be resolved before the code that depends on them is written
-(DESIGN.md §0.2). Reviewed 2026-08-23 (second pass, after the crypto module).
+(DESIGN.md §0 rule 2). Reviewed 2026-08-23 (second pass, after the crypto module).
 
 - **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7). The only genuinely
   open blocker of the original set. `faktury/weryfikacja-faktury.md` is the next place to
   look; not yet pinned.
-- **Error-code catalogue.** Still open, but **narrowed again**: the eleven *authentication
-  operation* status codes are recorded at §4.8, from the reference implementation, and the
+- **Error-code catalogue.** Still open, but **narrowed again**: the *authentication
+  operation* status codes are recorded at §4.8 **from the pinned contract** — not, as this
+  bullet used to say, from the reference implementation; see §4.8 for why that distinction
+  cost us code 480 — and the
   per-endpoint `ExceptionResponse` codes now known are `21405` (input validation),
   `21470` (unknown or withdrawn key, §10.2), `21111` (invalid authorisation challenge,
   §4.5) and `21157` (invalid package part size). The rest must be collected from the spec
@@ -1292,10 +1335,27 @@ covered by tests.
 
 ### 11.3 Accepted schema versions differ by environment
 
-Source: `srodowiska.md` (16.03.2026). **TEST accepts FA(2), FA(3), FA_PEF(3) and
-FA_KOR_PEF(3); DEMO and PROD accept only FA(3), FA_PEF(3) and FA_KOR_PEF(3).** FA(2) works
-on TEST and is rejected in production — a trap for anyone who validates their integration
-solely against TEST.
+Source: `srodowiska.md` (16.03.2026). **TEST accepts FA(2) as well as the current schemas;
+DEMO and PROD reject FA(2).** That is the trap worth remembering: an integration validated
+solely against TEST can be sending a schema production will refuse.
+
+**The exact `formCode` triples come from the pinned contract, not from the prose**
+(corrected 2026-08-23 — `srodowiska.md` spells the PEF codes `FA_PEF(3)` / `FA_KOR_PEF(3)`,
+which are not the values the API accepts, and omits `FA_RR (1)` altogether).
+`OpenOnlineSessionRequest.formCode` declares exactly five:
+
+| `systemCode` | `schemaVersion` | `value` |
+|---|---|---|
+| `FA (2)` | `1-0E` | `FA` |
+| **`FA (3)`** | **`1-0E`** | **`FA`** |
+| `PEF (3)` | `2-1` | `PEF` |
+| `PEF_KOR (3)` | `2-1` | `PEF` |
+| `FA_RR (1)` | `1-1E` | `FA_RR` |
+
+FA(3) is the row this gem sends, and it is consistent with §8's finding that
+`KodFormularza` is `FA` while `FA (3)` is the `kodSystemowy` — note the space before the
+bracket in both. Take these three strings from the table above rather than assembling them,
+and never from `srodowiska.md`.
 
 Also from the same document: test environments have a **maintenance window 16:00–18:00**
 (from 2025-10-01), which the nightly integration workflow should avoid.

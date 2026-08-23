@@ -55,8 +55,10 @@ RSpec.describe "release readiness", :release_check do
       expect(gemspec.files).to include("lib/ksef/fa3/schema/schemat_FA(3)_v1-0E.xsd")
     end
 
-    # Every XSD under lib/ is loaded at runtime, so a missing one is a runtime failure in
-    # the packaged gem that no local run would catch.
+    # An XSD under lib/ is there because something reads it at runtime, or will within the
+    # current milestone — the UPO schema is pinned ahead of its consumer (docs/REFERENCE.md
+    # §1.3). Either way a schema missing from the package is a failure that appears only in
+    # the packaged gem, which no local run would catch.
     it "ships every pinned schema, not just the FA(3) ones" do
       on_disk = Dir[File.expand_path("../lib/**/*.xsd", __dir__)]
                 .map { |f| f.sub("#{File.expand_path("..", __dir__)}/", "") }

@@ -4,7 +4,9 @@ require "faraday"
 
 module Ksef
   module Auth
-    # The six HTTP calls of the authentication flow (docs/REFERENCE.md §4.2).
+    # The six authentication endpoint calls: the five HTTP steps of §4.2's flow — its
+    # sixth step, signing, is offline — plus `POST /auth/ksef-token` for the other
+    # authentication method (docs/REFERENCE.md §4.2, §4.5).
     #
     # Deliberately thin: it maps requests and responses and does nothing else. Deciding
     # *which* credential to present, and caching the result, belongs a layer up in

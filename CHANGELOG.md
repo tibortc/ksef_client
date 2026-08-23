@@ -76,6 +76,10 @@ gem version for which API state".
   since an access token is issued only if the RSA-OAEP ciphertext unwrapped to the right
   `token|timestampMs`. Unlike the XAdES suite this needs no PESEL, so it reuses the stored
   `KSEF_TEST_NIP`/`KSEF_TEST_TOKEN` rather than provisioning a test person.
+
+  **These specs have only ever run against stubs.** They are written, not yet exercised; the
+  nightly is their first real run. Nothing in the crypto module is live-verified, and the
+  two claims above are what the specs will *test*, not what they have shown.
 - `rake fa3:generate` — codegen producing committed `lib/ksef/fa3/generated/`: 59 content
   models and 21 enumerations read from the pinned FA(3) XSD. Hand-written models consume
   this for element ordering, occurrence rules and enum membership.
@@ -199,7 +203,8 @@ gem version for which API state".
   are recorded, each with the resolution and the evidence for it.
 - `spec/openapi_contract_spec.rb` — asserts the ledger's claims against the pinned
   contract, rather than only that the contract has not changed. It covers the two findings
-  that have **no code yet** (§14.1's discrete IV field, §14.2's pre-signed link), because
+  that had **no code when they were ledgered** — §14.1's discrete IV field, since
+  implemented by `Ksef::Crypto`, and §14.2's pre-signed link, which still has none — because
   those are the ones that would otherwise rot unnoticed until someone implemented crypto
   or session handling from a stale conclusion.
 - Coverage is now gated on three criteria rather than one, at **line 99, branch 95,
@@ -226,6 +231,42 @@ gem version for which API state".
 
 ### Fixed
 
+- **Authentication status code `480` was missing.** "Uwierzytelnienie zablokowane" — the
+  authentication is blocked on suspicion of a security incident, and the user must contact
+  the Ministry. `Ksef::Auth::Status` now names it and says so; before, it fell through to
+  "unrecognised status code 480".
+
+  The cause is worth recording, because it is a precedence mistake rather than an oversight.
+  `docs/REFERENCE.md` §4.8 had sourced the whole table from `ksef-client-csharp`'s enum, on
+  the strength of upstream *prose* saying the full list "will be available in the endpoint's
+  technical documentation". The pinned OpenAPI contract — a **first-tier** artifact — states
+  the table in full, and carries a code the C# enum does not. Two smaller corrections came
+  out of the same reading: `450` collapses **eight** distinct causes rather than four, and
+  `400`/`401` are C#-only and not contract codes at all. Now asserted in
+  `spec/openapi_contract_spec.rb` so the provenance cannot regress silently.
+
+  The general lesson, now in §4.8: when upstream prose says a fact is undocumented, read the
+  OpenAPI descriptions before reaching for a reference implementation.
+- **A documentation-consistency pass over the whole repo**, which found no defect that would
+  fail a live request but a good deal of drift worth correcting. The notable ones:
+  `rake auth:bootstrap` told the operator to store a live KSeF credential as a *repository*
+  secret, which is precisely what §6a.3 argues against; the coverage floors existed in three
+  places with three different values, one of which would have told a contributor they passed
+  when CI fails them; SECURITY.md promised a cassette-scanning spec that did not exist;
+  DESIGN.md still instructed the reader to send the 2.1 auth namespace and to take token
+  expiry from the JWT `exp` claim, both since ruled against; and `docs/errors.md` was missing
+  `Ksef::CryptoError` entirely.
+
+  Also corrected: several documents claimed the certificate flow's live verification covered
+  more endpoints than it did. Only four have ever reached KSeF — challenge,
+  `xades-signature`, `GET /auth/{ref}` and `redeem`. **`refresh` and `ksef-token` are
+  implemented but have never run live**, and the ledger now says so where it previously
+  claimed "the whole §4.2 flow works as ledgered".
+- **`spec/cassette_hygiene_spec.rb`** — scans every committed VCR cassette for `Bearer `
+  headers and for any value held in `KSEF_TEST_TOKEN` / `KSEF_TEST_NIP`, finding them by
+  content rather than by path so one saved somewhere unconventional is still caught. No
+  cassette exists yet, so it passes vacuously — which is the point of adding it now, since
+  SECURITY.md was already promising users that this check ran.
 - `spec.files` globbed only the FA(3) schema directory, so schemas added elsewhere under
   `lib/` would not have shipped — a failure that would appear only in the packaged gem.
 

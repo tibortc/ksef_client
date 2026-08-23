@@ -81,6 +81,7 @@ RSpec/NestedGroups:
 RSpec/DescribeClass:
   Exclude:
     - "spec/artifacts_spec.rb"
+    - "spec/cassette_hygiene_spec.rb"  # scans committed fixtures, not a class
     - "spec/openapi_contract_spec.rb"  # asserts facts about a pinned artifact, not a class
     - "spec/integration/**/*_spec.rb"  # describes a live flow, not a class
     - "spec/release_readiness_spec.rb"

@@ -25,18 +25,19 @@ submitted.
 > XML.
 >
 > **Certificate authentication works, against the real TEST environment.** The
-> `AuthTokenRequest` document, its XAdES-BES signature and all six auth calls are
-> implemented, and this gem has minted a KSeF token end to end with no external client.
+> `AuthTokenRequest` document, its XAdES-BES signature and the five HTTP calls that flow
+> needs are implemented, and this gem has minted a KSeF token end to end with no external client.
 >
 > **Both authentication methods are now implemented**, along with the encryption layer they
 > and the session layer share: `Ksef::Crypto` fetches and selects the Ministry's published
 > keys, wraps a symmetric key with RSA-OAEP, and encrypts payloads with AES-256-CBC.
 >
-> **Not yet:** sessions — so no invoice can be *sent* yet — and the other six invoice
-> types. See [Roadmap](#roadmap).
+> **Not yet:** sessions — so no invoice can be *sent* yet — validator tiers 1 and 3 (only
+> the XSD tier exists), and the other six invoice types. See [Roadmap](#roadmap).
 >
-> In the quickstart below, **everything up to and including `Ksef::FA3.build` runs
-> today**; the `client` calls do not exist yet.
+> In the quickstart below, everything except `Ksef::Client` runs today — including the
+> `Ksef::Auth::Token` credential. **`Ksef::Client` itself does not exist yet**, so the three
+> lines that call it are the 0.1.0 target rather than working code.
 
 ## Installation
 
@@ -47,7 +48,7 @@ gem "ksef_client"
 The gem is named `ksef_client`; the namespace is `Ksef`.
 
 ```ruby
-require "ksef_client"   # defines Ksef, Ksef::Client, Ksef::FA3, ...
+require "ksef_client"   # defines Ksef, Ksef::FA3, Ksef::Auth, Ksef::Crypto, ...
 ```
 
 ## Quickstart
@@ -56,10 +57,10 @@ The `Ksef::FA3.build` block runs today and produces schema-valid FA(3) XML. The 
 calls around it are the target API for 0.1.0 and are **not implemented yet**.
 
 ```ruby
-client = Ksef::Client.new(                       # ← not yet
+client = Ksef::Client.new(                       # ← Ksef::Client: not yet
   env:  :test,
   auth: Ksef::Auth::Token.new(context_nip: "9999999999", token: ENV["KSEF_TOKEN"])
-)
+)                                                # ← the credential itself works today
 
 invoice = Ksef::FA3.build do |f|                 # ← this part works
   f.seller nip: "9999999999", name: "ACME sp. z o.o.",

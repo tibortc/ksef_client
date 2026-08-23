@@ -6,9 +6,9 @@ module Ksef
   module Auth
     # The `AuthTokenRequest` document — step 2 of the authentication flow
     # (docs/REFERENCE.md §4.2). Built here, then XAdES-signed and submitted to
-    # `POST /auth/xades-signature`. The signer is not written yet, which is why
-    # {#document} exposes the mutable tree: an enveloped signature has to be inserted into
-    # the document, so a signed request cannot be assembled from a string afterwards.
+    # `POST /auth/xades-signature`. {#document} exposes the mutable tree because an
+    # enveloped signature has to be inserted *into* the document — {Signer} cannot assemble
+    # a signed request from a string afterwards.
     #
     # Defaults to the **2.0** namespace, matching both official clients and every upstream
     # example; `schema_version:` selects 2.1. See {Ksef::Auth::NAMESPACES} for why, and
