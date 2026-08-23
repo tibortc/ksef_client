@@ -760,8 +760,10 @@ What it does, in order:
    uses a real qualified certificate if one is supplied;
 4. runs the full §4.2 flow: challenge → sign → submit → poll → redeem;
 5. `POST /tokens` with the access token, requesting `InvoiceRead` and `InvoiceWrite`;
-6. prints `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN` for the repository secrets `nightly.yml`
-   reads.
+6. prints `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN`, which are stored as **environment**
+   secrets on `ksef-test` — not repository secrets. A repository secret is readable by
+   every workflow in the repo, which for a live KSeF credential is more exposure than
+   it needs; only a job declaring the environment can read an environment secret.
 
 **PESEL checksum**, needed for step 1 and not previously ledgered: weights
 `1,3,7,9,1,3,7,9,1,3` across the first ten digits; the eleventh is `(10 - sum % 10) % 10`.

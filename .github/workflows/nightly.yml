@@ -3,8 +3,11 @@ name: nightly
 # Live integration against the KSeF TEST environment. Never runs per-PR (DESIGN.md §9):
 # it consumes shared TEST-environment state and is subject to the API's rate limits.
 on:
-  # Enabled 2026-08-23, once `rake auth:bootstrap` had provisioned KSEF_TEST_NIP and
-  # KSEF_TEST_TOKEN in the `ksef-test` environment (DESIGN.md §12.4, resolved).
+  # Enabled 2026-08-23. `rake auth:bootstrap` minted the credential (DESIGN.md §12.4,
+  # resolved); KSEF_TEST_NIP and KSEF_TEST_TOKEN are then stored as **environment** secrets
+  # on `ksef-test`, not repository secrets. That scoping is the point: a repository secret
+  # is readable by every workflow in the repo, so `release.yml` — or anything added later —
+  # could read a live KSeF credential. Only a job declaring this environment can.
   #
   # 02:30 UTC is deliberately outside 16:00-18:00 local, when the Ministry runs scheduled
   # maintenance on the test environments (docs/REFERENCE.md §11.3).
