@@ -9,6 +9,10 @@ on:
   # is readable by every workflow in the repo, so `release.yml` — or anything added later —
   # could read a live KSeF credential. Only a job declaring this environment can.
   #
+  # The environment is further restricted to the `main` branch. Without that, any
+  # pushed branch could carry a workflow declaring `environment: ksef-test` and read the
+  # token. Both triggers below run on `main`, so the restriction costs nothing.
+  #
   # 02:30 UTC is deliberately outside 16:00-18:00 local, when the Ministry runs scheduled
   # maintenance on the test environments (docs/REFERENCE.md §11.3).
   schedule:
