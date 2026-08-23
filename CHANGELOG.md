@@ -14,6 +14,149 @@ gem version for which API state".
 
 ### Added
 
+- **`Ksef::Client` — the facade, and DESIGN.md §8's snippet now runs.** A spec drives that
+  snippet as written, from `Ksef::FA3.build` through `send_invoice`, `wait_until_accepted`
+  and `upo`, so the README's headline example can no longer drift from the code.
+
+  **`Receipt#reference` returns `self`,** and that is not a trick. §8 reads
+  `client.wait_until_accepted(result.reference)`, which looks like it wants a string — but
+  every status and UPO endpoint is keyed on **both** the session and the invoice, so an
+  invoice reference alone looks nothing up. Rather than bend §8 into two arguments, or cache
+  the session on a client that has to stay thread-safe, the pair *is* the reference.
+
+  **`#upo` uses the metered per-invoice route**, against §14.2's stated preference —
+  deliberately, and only there. Obtaining the unmetered pre-signed link costs a metered
+  status call first, so for one invoice the direct route is one request rather than two. The
+  link earns its keep on collective UPOs, which is what `#collective_upo` uses it for.
+
+  Thread-safe by construction rather than by promise (DESIGN.md §5.2): frozen configuration,
+  stateless connections, and the only mutable state — the memoised credential — behind one
+  mutex. **No session is ever held on the client**, which was the deciding argument for
+  opening a fresh one per send: a cached session would be mutable state two threads could
+  submit into at once. A spec runs six concurrent sends and asserts one authentication.
+
+  Authentication is lazy: constructing a client performs no I/O, and the first call needing
+  a credential runs the whole KSeF-token flow.
+- **`Ksef::Invoices::Client`** — `GET /invoices/ksef/{ksefNumber}`, returning the invoice
+  verbatim. 8 req/s but only **64 req/h**, one of the tightest ceilings in the API: it is a
+  per-document fetch, so a month of invoices exhausts the hourly allowance long before the
+  per-second limit bites, and the 0.2 package export is the bulk route. The number is
+  CRC-checked locally rather than spending one of those 64 requests on a 404.
+- **`Ksef::UPO` — retrieval, over a connection that has no credential.** A UPO is the legal
+  proof that KSeF received an invoice, fetched over an unauthenticated storage link, and
+  three properties follow from that.
+
+  **The access token is never sent to a `downloadUrl`.** Those links are pre-signed Azure
+  Blob URIs carrying their own authorisation in the query string, and the contract says
+  outright not to send the token — it would hand a live KSeF credential to third-party
+  storage. Rather than remembering that per call site, `Ksef::HTTP::Connection.storage`
+  builds a second connection with **no bearer and no base URL**, so no code path can leak
+  one. It also omits JSON encoding and parsing, since a UPO is XML that must survive as the
+  exact bytes received.
+
+  **The bytes are archived verbatim.** The Ministry's XAdES signature covers octets, not an
+  abstract tree, so even a lossless XML round-trip can produce a document that no longer
+  verifies. `UPO::Document` holds the received string and offers no parsed form, no
+  `#to_xml` and no re-encode; `#write` uses `binwrite` so a newline translation cannot
+  corrupt an archive.
+
+  **`x-ms-meta-hash` is verified** — the only integrity check available on bytes fetched
+  outside the API. `#fetch` prefers the unmetered, hash-verified link and falls back to the
+  metered route when it expires, which is §14.2's resolution after an earlier reading had it
+  backwards. `for_ksef_number` parses the number first, so a mistyped one fails on its CRC-8
+  locally rather than as an opaque 404.
+- **`Ksef::UPO::Validator`** — offline schema validation for a received UPO, and the place
+  §14.3's trap would otherwise have caught us. `upo-v4-3.xsd` fixes the receiving party's
+  name to `"Ministerstwo Finansów"` while every non-production environment appends a marker,
+  so **a strict validator rejects every UPO that TEST and DEMO issue** — measured: all six of
+  upstream's own worked examples fail upstream's own schema, each with exactly one error,
+  always that element.
+
+  The mismatch is reported as a **warning** rather than relaxing the constraint, which keeps
+  strictly more: in production the fixed value is presumably right, so a mismatch there is a
+  real anomaly a relaxed schema would never mention. The observed value is read from the
+  document by XPath, and doubles as a way to tell which environment issued a UPO.
+
+  **There is deliberately no `validate!`.** A UPO is legal proof that an invoice was
+  received; whether it satisfies a schema is never a reason to discard the bytes or fail an
+  operation that already succeeded at the far end. Offering a raising method would make
+  gating the path of least resistance, so a spec asserts its absence.
+- **`Ksef::IntegrityError`** — raised when downloaded bytes do not match the published hash.
+  Its own class because the right response is unlike every other error here: *fetch it
+  again*. Nothing is wrong with the request, the credentials or the document — the transfer
+  was corrupted. Silently archiving corrupt bytes as proof of receipt is the one outcome
+  worth refusing loudly.
+- **`Ksef::Sessions::Status`** — single-shot session and per-invoice reads, plus
+  deadline-bounded waits. Capped exponential backoff (1s, 2s, 4s … 30s, five-minute
+  deadline) rather than the reference clients' fixed 1s × 60: at 1/s a single wait spends 60
+  of the 1200 requests an hour a context gets, and a 60-second ceiling is far too short for
+  a large session. A timeout says the operation has **not failed but outlasted the wait**,
+  because conflating the two invites a needless resend.
+
+  **It exposes no list-sessions call at all.** `GET /sessions` is 10 req/min — the tightest
+  budget in the API — against 1200/h for the two endpoints polling should use. Omitting the
+  method is the simplest way to make that mistake impossible rather than merely discouraged.
+
+  `InvoiceState` surfaces what the endpoint already returns instead of making callers fetch
+  it twice: the per-invoice UPO link, and on a duplicate the **original** submission's KSeF
+  number and session reference, which is what makes a resend reconcilable. `UpoPage` keeps
+  its pre-signed URL out of `#inspect` and `#to_s` — the link carries its own authorisation
+  in the query string, so it is a credential — while still exposing it to a caller that asks.
+- **Corrected: both `100` and `150` mean "keep polling"**, not `150` alone. The earlier
+  reading came from `OnlineSessionUtils.cs`, whose poller returns as soon as the code is
+  anything but `150`, and it is wrong on the contract's own wording — `100` is *"przyjęta do
+  dalszego przetwarzania"*, accepted for **further** processing, so an invoice sitting there
+  is undecided and has no KSeF number. A poller that stops at `100` reports a pending
+  invoice as though it were settled.
+
+  The rule is now `code < 200 is in progress` rather than a list of intermediate codes, so a
+  code upstream adds later behaves correctly by default. This is deliberately the inverse of
+  the treat-the-unknown-as-terminal rule used for *authentication* status, and the asymmetry
+  is justified in both places: auth polls without a deadline so it must not loop for ever,
+  while session polling is bounded — and "unresolved" is a more honest answer about an
+  invoice than "prematurely final". The same rule makes `170` → `200` work for sessions,
+  where closing starts asynchronous UPO generation and "closed" is one step short of done.
+- **`Ksef::Sessions::Online` — open, send, close.** Stateless and thin, like
+  `Auth::Client`: it maps requests and responses and holds no session of its own. Both
+  official clients do the same, threading the reference through as a parameter.
+
+  **The `Encryptor` is bound to the `Session`, not passed per send**, and that is the
+  decision worth knowing about. The symmetric key is agreed once, at open, and every invoice
+  in the session is encrypted under it — so an invoice encrypted with any other key is
+  undecryptable at the far end, and the only symptom is per-invoice status `435` arriving
+  **asynchronously**, long after the send returned `202`. There is no synchronous error to
+  catch. Binding the key to the session makes the mistake unrepresentable rather than merely
+  documented, the same move as `Encryptor#seal` returning both digests together.
+
+  Sends `X-KSeF-Feature: upo-v4-3` on open — a header in neither the contract nor any
+  upstream prose, but sent by both official clients, which selects the UPO format the session
+  produces. This gem bundles `upo-v4-3.xsd` and nothing else, so silence would mean accepting
+  a version it might not be able to validate (`docs/REFERENCE.md` §14.6).
+
+  `formCode` comes from the contract rather than from `srodowiska.md`, whose prose misspells
+  the PEF system codes and omits `FA_RR (1)` entirely. Reference numbers are shape-checked
+  before reaching a URL path.
+- **`send_invoice` opens a fresh session per call**, with `client.session { |s| ... }` for
+  deliberate batching. Resolves the session-reuse `[VERIFY]` in DESIGN.md §6.5, which the
+  facts left open: sessions last 12 hours and take 10 000 invoices, and neither official
+  client offers a composite to copy. A reused session is mutable state on a client that must
+  be thread-safe; an opened-but-unused session is cancelled with status `440`; and the API
+  returning the *original's* KSeF number on a duplicate suggests resends are an expected
+  hazard rather than one to make likelier by hiding session state.
+- **`Ksef::KsefNumber`** — parses and validates the 35-character identifier KSeF assigns to
+  an accepted invoice. CRC-8 with polynomial `0x07`, verified against the Ministry's own
+  documented example, which doubles as the golden vector. Checking the checksum locally is
+  the point: these numbers get copied between systems and read down telephones, and a CRC-8
+  catches exactly those slips, turning a silent lookup failure into a specific error naming
+  both the carried and the computed value. `assigned_on` is a `Date` because it is not
+  metadata — it is the invoice's **official receipt date**.
+- **`Ksef::Auth::AccessToken`** — tracks expiry from the response's `validUntil`, never by
+  decoding the JWT: §4.3 excludes the `jwt` dependency and the contract carries `validUntil`
+  precisely so no decoding is needed. Refreshes at ~80% of the observed lifetime rather than
+  on expiry, so a request never carries a credential that dies mid-flight — on an invoice
+  submission, a failure that *might* have been delivered is the situation this gem works
+  hardest to avoid. Thread-safe with the staleness check re-run inside the lock, so a burst
+  of threads yields one refresh rather than a stampede.
 - **`Ksef::Crypto` — the encryption layer.** AES-256-CBC with PKCS#7 for payloads,
   RSA-OAEP with SHA-256 *and* MGF1-SHA-256 for wrapping, and the Ministry's published
   certificates fetched, cached and selected by declared usage. Every parameter is ledgered
@@ -104,7 +247,7 @@ gem version for which API state".
   always run or never run. WebMock is re-enabled around each example rather than globally,
   so a failure cannot leave the network open for whatever runs next.
 
-  **DESIGN.md §12.4 is resolved.** Running the bootstrap against TEST established what no
+  **DESIGN.md §12 item 4 is resolved.** Running the bootstrap against TEST established what no
   offline test could: KSeF accepts the XAdES-BES signature this gem produces, the 2.0
   namespace is correct, `/testdata/person` really is unauthenticated, and a self-signed
   certificate is accepted on TEST. Recorded at `docs/REFERENCE.md` §6a.4.
@@ -231,6 +374,19 @@ gem version for which API state".
 
 ### Fixed
 
+- **`bundle exec rake` was never enforcing the coverage floors.** `rake spec` invokes
+  `rspec --pattern spec/**{,/*/**}/*_spec.rb`, and that pattern *value* starts with `spec/` —
+  which `spec_helper`'s filtered-run check read as "the user narrowed the run", so it skipped
+  `minimum_coverage` on every single `rake`. CI calls `bundle exec rspec` directly and has
+  always been strict, so nothing shipped uncovered; but CLAUDE.md described `rake` as
+  mirroring CI, and on the one criterion that matters most it was strictly weaker.
+
+  Fixed by stripping `--pattern` and its value before looking for selectors, and verified
+  both ways: `rake` now fails on a shortfall, and a filtered run stays exempt — which is what
+  keeps the nightly's `rspec --tag integration` from failing on coverage rather than on tests.
+
+  It hid because a coverage failure prints among the RuboCop lines, so reading output instead
+  of exit codes conceals it. CLAUDE.md now says to check `rake`'s exit code.
 - **Authentication status code `480` was missing.** "Uwierzytelnienie zablokowane" — the
   authentication is blocked on suspicion of a security incident, and the user must contact
   the Ministry. `Ksef::Auth::Status` now names it and says so; before, it fell through to

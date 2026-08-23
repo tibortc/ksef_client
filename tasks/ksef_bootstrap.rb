@@ -4,7 +4,7 @@ require "date"
 require "openssl"
 require "securerandom"
 
-# One-time provisioning of a TEST credential — DESIGN.md §12.4, docs/REFERENCE.md §6a.
+# One-time provisioning of a TEST credential — DESIGN.md §12 item 4, docs/REFERENCE.md §6a.
 #
 # Invents a checksum-valid NIP and PESEL, registers them through the unauthenticated
 # `/testdata/person` endpoint, authenticates with a self-signed certificate, and mints a

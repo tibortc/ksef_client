@@ -7,7 +7,18 @@ require "simplecov-lcov"
 # part of the library, so the gate would fail on a green suite. It is enforced on full
 # runs only; without this, `rspec --tag integration` in nightly CI fails on coverage
 # rather than on tests.
-FILTERED_RUN = ARGV.any? { |arg| arg.start_with?("spec/", "--tag", "-t", "--example", "-e") }
+#
+# **`--pattern` and its value are stripped first, and that is not a nicety.** `rake spec`
+# invokes `rspec --pattern spec/**{,/*/**}/*_spec.rb`, whose *value* starts with `spec/` —
+# so the naive check read the **full** suite as filtered and skipped the coverage gate
+# entirely. `bundle exec rake` therefore never enforced the floors, while CI (which calls
+# `bundle exec rspec` directly) always did: the documented definition of done was strictly
+# weaker than the thing it claimed to mirror. Found and fixed 2026-08-23.
+SELECTORS = ARGV.each_with_index.reject do |argument, index|
+  argument == "--pattern" || ARGV[index - 1] == "--pattern"
+end.map(&:first)
+
+FILTERED_RUN = SELECTORS.any? { |arg| arg.start_with?("spec/", "--tag", "-t", "--example", "-e") }
 
 SimpleCov::Formatter::LcovFormatter.config do |c|
   # A single lcov.info rather than one file per source file, which is what the Coveralls

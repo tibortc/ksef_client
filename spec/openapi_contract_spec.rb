@@ -12,10 +12,14 @@ require "json"
 #
 # These cover the sections whose conclusions had no code to protect them when they were
 # ledgered. §14.3 and §14.4 were always guarded by executable assertions, because the
-# schemas they concern are in use. §14.1 is now implemented by `Ksef::Crypto` and guarded
-# there too, so these assertions are its second line of defence; **§14.2 still has no code
-# at all**, and until the session layer lands these are the only thing keeping it from
-# rotting into a stale conclusion someone later implements.
+# schemas they concern are in use; §14.1 is now implemented by `Ksef::Crypto` and §14.2 by
+# `Ksef::UPO::Client`, both with their own specs. So these assertions are no longer the only
+# line of defence for any of the four — they are the one that fails if *upstream* changes
+# rather than if we do, which is the failure the rest of the suite cannot see.
+#
+# §14.6 is the exception, and the reason to keep reading: it asserts a **negative** — that
+# the contract says nothing about a header both reference clients send. Nothing else can
+# notice if that stops being true.
 RSpec.describe "the pinned OpenAPI contract" do
   let(:spec) do
     JSON.parse(File.read(File.expand_path("fixtures/openapi/open-api.json", __dir__), encoding: "UTF-8"))
@@ -179,6 +183,72 @@ RSpec.describe "the pinned OpenAPI contract" do
 
     it "still declares the metered fallback route for an expired link" do
       expect(spec.fetch("paths")).to have_key("/sessions/{referenceNumber}/upo/{upoReferenceNumber}")
+    end
+  end
+
+  # docs/REFERENCE.md §14.6. The claim is a *negative* one — that the contract says nothing
+  # about a header both reference clients send — and a negative claim is the kind that rots
+  # without anyone noticing. If upstream documents the header, §14.6 stops being a
+  # contradiction and becomes an ordinary fact, and these assertions are what say so.
+  describe "§14.6 — the session-open UPO version header is undocumented" do
+    let(:raw) { File.read(File.expand_path("fixtures/openapi/open-api.json", __dir__), encoding: "UTF-8") }
+
+    it "never mentions X-KSeF-Feature" do
+      expect(raw).not_to include("X-KSeF-Feature")
+    end
+
+    it "never mentions a upo-v4-x format identifier" do
+      expect(raw).not_to match(/upo-v4-\d/)
+    end
+
+    it "declares no parameters at all on session open, header or otherwise" do
+      expect(spec.dig("paths", "/sessions/online", "post")).not_to have_key("parameters")
+    end
+  end
+
+  # docs/REFERENCE.md §12.1. Sourced from the contract rather than from the C# enum after
+  # §4.8's lesson — and the two codes singled out here are the ones that localise a crypto
+  # fault, so they matter more than the rest of the table.
+  describe "§12.1 — session and invoice status codes" do
+    let(:invoice_status) { schemas.dig("SessionInvoiceStatusResponse", "properties", "status", "description") }
+    let(:session_status) { schemas.dig("SessionStatusResponse", "properties", "status", "description") }
+
+    # Both are intermediate: 100 is "accepted for *further* processing", so an invoice
+    # sitting there is undecided. The reference clients poll only while 150, which is why
+    # §12.1 now states the rule as `code < 200` — see InvoiceCodes.
+    it "declares two intermediate per-invoice codes, not one" do
+      expect(invoice_status).to match(/^\| 100 \| Faktura przyjęta do dalszego przetwarzania/)
+      expect(invoice_status).to match(/^\| 150 \| Trwa przetwarzanie/)
+      expect(Ksef::Sessions::InvoiceCodes).to be_in_progress(100)
+      expect(Ksef::Sessions::InvoiceCodes).to be_in_progress(150)
+    end
+
+    # The code a §14.1 mistake produces: prefix the IV to the ciphertext and this comes back.
+    it "declares 435 as a payload decryption failure" do
+      expect(invoice_status).to match(/^\| 435 \| Błąd odszyfrowania pliku/)
+    end
+
+    # The only status carrying extensions, and they are what a caller needs to recover.
+    it "hands back the original's references on a duplicate" do
+      expect(invoice_status).to include("originalSessionReferenceNumber", "originalKsefNumber")
+    end
+
+    # Interactive and batch have different tables; 170 exists only for interactive, and a
+    # poller written against the batch table would wait for a code that never arrives.
+    it "gives interactive sessions their own closed code" do
+      expect(session_status).to include("Sesja interaktywna")
+      expect(session_status).to match(/^\| 170 \| Sesja interaktywna zamknięta/)
+    end
+
+    # Distinct from the per-invoice 435: this is the RSA-OAEP key wrap failing rather than
+    # the AES payload, which is what makes the pair diagnostic.
+    it "declares 415 at session level as the key wrap failing" do
+      expect(session_status).to match(/^\| 415 \| Błąd odszyfrowania dostarczonego klucza/)
+    end
+
+    # An opened-and-unused session is cancelled, so opening one speculatively is not free.
+    it "cancels a session that sent no invoices" do
+      expect(session_status).to include("Nie przesłano faktur")
     end
   end
 

@@ -493,7 +493,7 @@ the request is built.
 `ECDsa` exists as an alternative encryption method in both reference clients. Out of scope
 for 0.1; RSA is the documented default.
 
-### 4.6 TEST bootstrap — resolves DESIGN.md §12.4's central unknown
+### 4.6 TEST bootstrap — resolves DESIGN.md §12 item 4's central unknown
 
 Source: `auth/testowe-certyfikaty-i-podpisy-xades.md`.
 
@@ -756,7 +756,7 @@ invoice.
 
 ---
 
-## 6a. Provisioning TEST credentials (DESIGN.md §12.4)
+## 6a. Provisioning TEST credentials (DESIGN.md §12 item 4)
 
 Sources: `dane-testowe-scenariusze.md` (05.08.2025), `tokeny-ksef.md` (29.06.2025),
 `srodowiska.md`, and the pinned spec. Retrieved 2026-08-22.
@@ -1154,7 +1154,11 @@ Carried forward; must be resolved before the code that depends on them is writte
   recomputes both from the real certificates.
 - **Nightly higher rate limits** (§6.1) — the 20:00–06:00 values are explicitly
   unpublished pending production tuning. Do not hard-code a nightly multiplier.
-- **Whether `upo.pages[].downloadUrl` arrives absolute or host-relative** — see §14.2.
+- **Whether `upo.pages[].downloadUrl` arrives absolute or host-relative** — see §14.2. Still
+  unverified, but **no longer blocking**: `Ksef::UPO::Client` handles both, resolving a
+  relative value against the API host and using an absolute one untouched (§12.3). A live
+  session settles which is actually sent; until then neither branch is dead code, because
+  either could be the real one.
   `srodowiska.md` states only that a returned URL's *host* matches the environment called,
   so the code must resolve a relative value against that host and use an absolute one as
   is. Needs a live session to settle. (An earlier revision of this bullet said the field
@@ -1333,6 +1337,40 @@ covered by tests.
 `FA (3)` is the `kodSystemowy`. `encryption` is `EncryptionInfo` =
 `encryptedSymmetricKey` + `initializationVector` + `publicKeyId`.
 
+**Send `X-KSeF-Feature: upo-v4-3` with it** — see §14.6. The header is not in the contract,
+but both reference clients send it, and it selects which UPO format the session will
+produce. Since this gem pins `upo-v4-3.xsd`, staying silent means accepting whatever the
+server defaults to, which may not be the version we can validate.
+
+### 11.2a Decisions this gem made about sessions, that upstream does not state
+
+The counterpart to §10.3, kept beside the subsystem it governs. Recorded so they are not
+mistaken for ledgered facts, and so the reasoning survives the person who had it.
+Implemented 2026-08-23 in `lib/ksef/sessions/`.
+
+| Decision | Value | Why |
+|---|---|---|
+| **The `Encryptor` is bound to the `Session`** | `Session` carries the encryptor that opened it; `#send_invoice` takes no key | The single most consequential one — see below |
+| Session lifetime in the composite | **a fresh session per `send_invoice`**, with `client.session { }` for batching | Decided by the human, 2026-08-23. Reasoning in DESIGN.md §6.5 |
+| Bearer fetched per request | `#bearer` is called on each call, not captured at construction | A 12-hour session outlives a "kilkanaście minut" access token, so a long run must pick up {Auth::AccessToken}'s proactive refresh mid-flight |
+| Reference numbers shape-checked | character-set match before path interpolation | Keeps a garbled or hostile value out of a URL. Deliberately *not* a §13 checksum check: §12 warns the non-KSeF-number forms are unverified against that algorithm |
+| `X-KSeF-Feature` opt-out | `upo_version: nil` omits the header | The header itself is contract-silent (§14.6), so a caller must be able to decline our guess about it |
+| Granular layer is stateless | `Sessions::Online` holds no session | Not a decision so much as a copied one: both official clients thread the reference through as a parameter, and it matches `Auth::Client` |
+
+**Why the encryptor belongs to the session.** The symmetric key is agreed *once*, in the
+session-open request, and every invoice in that session is encrypted under it. So an invoice
+encrypted with any other key is undecryptable at the far end — and the only symptom is
+per-invoice status **435, "błąd odszyfrowania pliku"** (§12.1), which arrives
+**asynchronously**, long after the send returned `202`. There is no synchronous error and
+nothing in the response to inspect.
+
+A `send_invoice(session, xml, encryptor:)` signature would make that mistake a plausible
+typo. Binding the encryptor to the `Session` at open time makes it unrepresentable instead:
+there is no way to name the wrong key, because the caller never names one. This is the same
+move as {Ksef::Crypto::Encryptor#seal} returning both digests together (§10.3) — where a
+mistake is silent and remote, prefer an API shape that cannot express it over a comment
+warning against it.
+
 ### 11.3 Accepted schema versions differ by environment
 
 Source: `srodowiska.md` (16.03.2026). **TEST accepts FA(2) as well as the current schemas;
@@ -1387,6 +1425,119 @@ Session status carries `invoiceCount`, `successfulInvoiceCount`, `failedInvoiceC
   array. A client that reads only `pages[0]` silently loses proof of receipt for the rest.
 - Paging throughout this area is `continuationToken`-based, not offset-based.
 - `downloadUrl` has a path-prefix inconsistency — §14.2.
+
+### 12.1 Status codes — three separate tables, all from the pinned contract
+
+Retrieved 2026-08-23 from the contract's `SessionInvoiceStatusResponse.status` and
+`SessionStatusResponse.status` descriptions. Sourced from the contract deliberately, and not
+from `InvoiceInSessionStatusCodeResponse.cs`, after §4.8's lesson — and the caution paid:
+the C# enum lists `400`, `401` and `403` for invoice status, which **the contract does not
+declare at all**.
+
+**Per invoice, in a session.** **Both `100` and `150` mean keep polling** — corrected
+2026-08-23, having first been written here as "`150` is the only one". That came from
+`OnlineSessionUtils.cs`, whose poller returns as soon as the code is anything but `150`, and
+it is wrong on the contract's own wording: `100` is *"przyjęta do dalszego przetwarzania"* —
+accepted for **further** processing — which is by definition not a final state, and an
+invoice sitting at `100` has no KSeF number yet. A poller that stops there reports a
+pending invoice as though it were decided.
+
+So the rule this gem uses is **`code < 200` is in progress**, rather than a list of
+intermediate codes. That is deliberately the opposite of §4.8's
+treat-the-unknown-as-terminal rule for authentication, and the asymmetry is justified:
+authentication polls without a deadline, so an unrecognised code there must not loop for
+ever, whereas session polling is deadline-bounded, so an unknown intermediate code costs at
+worst one timeout — and "unresolved" is a more honest answer about an invoice than
+"prematurely final".
+
+| Code | Meaning | Notes |
+|---|---|---|
+| **100** | **accepted for further processing** | **not terminal — keep polling** |
+| **150** | **processing** | **not terminal — keep polling** |
+| 200 | success | terminal, and the invoice has a KSeF number |
+| 405 | processing cancelled because the session failed | |
+| 410 | invalid permission scope | |
+| 415 | cannot send an invoice with an attachment | |
+| 430 | invoice file verification error | |
+| **435** | **file decryption error** | what a wrong key or IV produces — see below |
+| **440** | **duplicate invoice** | carries `originalSessionReferenceNumber` and `originalKsefNumber` |
+| 450 | invoice semantic verification error | the business-rule tier rejecting it |
+| 500 | unknown error | |
+| 550 | cancelled by the system; retry later | retryable |
+
+Two of those earn their emphasis. **`435` is the code a §14.1 mistake produces** — prefix the
+IV to the ciphertext as upstream's prose instructs and this is what comes back, which makes
+it the single most useful code to surface verbatim. And **`440` is the only status carrying
+extensions**: on a duplicate the API hands back the session and KSeF number of the *original*
+submission, which is exactly what a caller needs to recover rather than guess. Do not discard
+those fields.
+
+**Per session** — and the two session types have **different tables**, which is easy to miss.
+
+| Code | Interactive | Batch |
+|---|---|---|
+| 100 | session open | batch session started |
+| 150 | — | processing |
+| **170** | **session closed** | — |
+| 200 | processed successfully | processed successfully |
+| 405 | — | package element verification error |
+| 415 | error decrypting the supplied key | error decrypting the supplied key |
+| 420 | — | invoice-per-session limit exceeded |
+| 430 | — | archive decompression error |
+| 435 | — | error decrypting archive parts |
+| 440 | cancelled — no invoices sent | cancelled — send window exceeded, or no invoices sent |
+| 445 | verification error, no valid invoices | verification error, no valid invoices |
+| 500 | unknown error | unknown error |
+
+Three consequences for the online session layer:
+
+- **`170` exists only for interactive sessions**, and interactive has no `150`. A poller
+  written against the batch table would wait for a code that never arrives.
+- **`415` at session level is the RSA-OAEP wrap failing** — the server could not decrypt the
+  symmetric key. Distinct from the per-invoice `435`, which is the AES payload failing. Those
+  two codes localise a crypto fault to either the key or the payload, which is worth
+  surfacing rather than collapsing.
+- **`440` "no invoices sent" means an opened-and-unused session is cancelled**, so opening
+  one speculatively is not free.
+
+### 12.2 The reference clients' polling defaults, and why ours differ
+
+Both clients poll on a **fixed 1-second interval up to 60 attempts** — a 60-second ceiling —
+and treat `150` as the sole continue condition (`OnlineSessionUtils.cs`:
+`DefaultSleepTimeMs = 1000`, `DefaultMaxAttempts = 60`, `ProcessingStatusCode = 150`).
+
+DESIGN.md §6.5 specifies capped exponential backoff instead — 1s, 2s, 4s … 30s, with a
+five-minute default deadline. Keep ours, for two reasons the reference clients do not have to
+care about: a library shared across many callers should not spend a per-hour rate budget at a
+fixed 1/s (§6.1 caps `GET /sessions/{ref}` at 1200/h, which 60 polls per invoice would eat
+quickly), and a 60-second ceiling is too short for a large session. Their *terminal condition*
+is right though, and is what we adopt: poll while the code is `150`, treat everything else as
+final.
+
+### 12.3 Decisions this gem made about UPO retrieval, that upstream does not state
+
+The third of these tables, after §10.3 (crypto) and §11.2a (sessions). Implemented
+2026-08-23 in `lib/ksef/upo/`.
+
+| Decision | Value | Why |
+|---|---|---|
+| **A separate, credential-free connection** | `HTTP::Connection.storage` — no bearer, no `base_url` | §14.2 forbids sending the access token to a `downloadUrl`. A rule nobody can break beats a rule everybody must remember — see below |
+| **No parsed form on `Document`** | holds the received `String`; no `#to_xml`, no re-encode, `#write` uses `binwrite` | The Ministry's XAdES signature covers **octets**. A lossless XML round-trip can still yield a document that no longer verifies, so the parsed form is simply not offered |
+| `Ksef::IntegrityError` | a new branch of DESIGN.md §6.7 | A hash mismatch means *fetch it again* — nothing is wrong with the request, the credentials or the document. Not a `ValidationError` (the caller's data is fine) nor an `ApiError` (the response was a success) |
+| `#verifiable?` separate from `#verified?` | two booleans, not one tri-state | The metered route publishes no hash. Folding "nothing to check" into "check failed" would make every API-route fetch look corrupt |
+| `#fetch` prefers the link | falls back to the metered route on expiry or absence | §14.2's resolution, in one call: the link is unmetered and hash-verified, and `GET /sessions` already allows only 10/min |
+| A relative `downloadUrl` is resolved | against the API host; an absolute one used untouched | §9 still carries which form the live API sends as unverified, so both are handled rather than one guessed at |
+| KSeF numbers parsed before use | `for_ksef_number` runs §13's CRC-8 first | A mistyped number fails locally instead of as an opaque 404 |
+
+**Why the connection split is the mechanism and not just tidiness.** A `downloadUrl` is a
+pre-signed Azure Blob URI that carries its own authorisation in the query string. Sending
+the KSeF access token to it would hand a live credential to third-party storage, and the
+contract says so explicitly — *"nie należy wysyłać tokenu dostępowego"*. That is a rule
+about something absent, and absences are exactly what code review misses: nobody notices
+the header that was not removed. Putting those requests on a connection that has no bearer
+to attach turns "we remembered" into "we cannot", which is the same reasoning as binding the
+encryptor to the session (§11.2a) and having `Encryptor#seal` produce both digests at once
+(§10.3).
 
 Reference numbers share a shape: `YYYYMMDD-XX-<hex>-<hex>-CC`, where `XX` is a kind tag
 (`CR` challenge, `SB` batch session, `EU` UPO) and `CC` looks like the same CRC-8 checksum
@@ -1634,3 +1785,33 @@ this, not a bug in the document.
 
 Consistent with §14.4's finding that neither reference client validates locally at all —
 had they tried, they would have hit this immediately.
+
+### 14.6 A session-open header both clients send and the contract never mentions
+
+Found 2026-08-23, by reading the reference clients before designing the session layer.
+
+`X-KSeF-Feature: upo-v4-3` is sent on `POST /sessions/online` (and on `POST /sessions/batch`)
+by **both** official clients. It selects the format of the UPO the session will eventually
+produce.
+
+| Source | Evidence |
+|---|---|
+| `ksef-client-java` | `DefaultKsefClient.openOnlineSession` sets `headers.put(X_KSEF_FEATURE, upoVersion.value())`; the `UpoVersion` enum holds `upo-v4-2` and `upo-v4-3`, and `fromValue` falls back to `upo-v4-3` |
+| `ksef-client-csharp` | `OpenOnlineSessionAsync(..., string upoVersion = null)` adds `{ "X-KSeF-Feature", upoVersion }`; `IOnlineSessionClient` documents it as "Opcjonalna wersja formatu UPO. Dostępne wartości: `upo-v4-3`" |
+| **Pinned OpenAPI contract** | **`X-KSeF-Feature` does not appear anywhere in the document.** `POST /sessions/online` declares no `parameters` at all, and the string `upo-v4-` occurs zero times |
+
+This is the inverse of §14.4's situation: not upstream contradicting itself, but the contract
+being *silent* about something both of its own reference implementations consider necessary.
+Measured, not inferred — grep counts of zero in the pinned spec.
+
+**Resolution: send `X-KSeF-Feature: upo-v4-3` explicitly on session open.** Three reasons.
+This gem pins `upo-v4-3.xsd` and nothing else, so a session producing 4.2 would yield a
+document we cannot validate. Java's enum proves the server still understands `upo-v4-2`,
+so a default exists and is not ours to guess. And §14.3 already establishes that UPO
+validation is delicate enough — TEST's own examples fail upstream's own schema — without
+adding version drift to it.
+
+Being contract-silent, this is the least certain fact in this section: it cannot be checked
+offline, only observed. The live session integration spec should assert that the UPO a session
+produces really is 4.3, and until it has run, treat the header as *believed* rather than
+*verified*.

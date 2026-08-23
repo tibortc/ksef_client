@@ -9,7 +9,7 @@ RSpec.describe Ksef::HTTP::Connection do
   describe "connection shape" do
     # Asserted behaviourally rather than by reading url_prefix: what matters is that a
     # relative path lands under /v2, since the base URL carries the version segment and
-    # there is no /api prefix (docs/REFERENCE.md §7.2).
+    # there is no /api prefix (docs/REFERENCE.md §7 item 2).
     it "resolves a relative path under the versioned base URL" do
       stub = stub_request(:post, "#{base}/auth/challenge").to_return(
         status: 200, body: "{}", headers: { "Content-Type" => "application/json" }

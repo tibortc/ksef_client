@@ -202,11 +202,20 @@ lib/
     │   ├── encryptor.rb      # session symmetric key gen, payload encryption, RSA-OAEP wrap
     │   └── digest.rb         # SHA-256 hashes + size metadata for payloads
     ├── sessions/
-    │   ├── online.rb         # open → send → close → status lifecycle
+    │   ├── online.rb         # open → send → close
     │   ├── batch.rb          # 0.2
-    │   └── status.rb         # polling with backoff; blocking wait_until_* helpers
-    ├── invoices/             # send, status, upo, download; query/export in 0.2
-    ├── models/               # Data.define response objects (SessionRef, SendResult, Upo, …)
+    │   ├── status.rb         # polling with backoff; blocking wait_* helpers
+    │   ├── invoice_codes.rb, session_codes.rb        # the two status tables (§12.1)
+    │   └── invoice_state.rb, session_state.rb, upo_page.rb   # response objects
+    ├── upo/                  # retrieval, integrity, diagnostic validation (§12.3, §14.3)
+    │   ├── client.rb         # pre-signed link + metered fallback
+    │   ├── document.rb       # verbatim bytes; no parsed form on purpose
+    │   └── validator.rb, validation.rb
+    ├── ksef_number.rb        # the 35-character invoice identifier + CRC-8 (§13)
+    │   └── client.rb         # download by KSeF number; query/export in 0.2
+    ├── client.rb             # the §8 facade; receipt.rb + session.rb beside it
+    ├── models/               # response objects — **not built as a directory**; each
+    │                         # subsystem keeps its own, following the auth precedent
     └── fa3/
         ├── invoice.rb, subject.rb, line.rb, address.rb   # models — Phase 1
         ├── annotations.rb, payment.rb, correction.rb     # models — Phase 2
@@ -285,7 +294,11 @@ Self-signed certificates are accepted on **TEST only** — never DEMO or PROD.
 
 ### 6.5 Sessions
 
-**Online (0.1):** open (submits encryption info: wrapped key, IV, cipher metadata) → send N encrypted invoices → close → poll session/invoice status → fetch UPO. Expose both granular calls and a happy-path composite (`client.send_invoice(invoice)` opens/uses a session appropriately — exact session-reuse semantics per docs **[VERIFY]**, e.g. whether one session may carry multiple invoices and for how long).
+**Online (0.1):** open (submits encryption info: wrapped key, IV, cipher metadata) → send N encrypted invoices → close → poll session/invoice status → fetch UPO. Expose both granular calls and a happy-path composite.
+
+**Session-reuse semantics — [VERIFY] resolved 2026-08-23, decided by the human.** The facts came back permissive: a session lives 12 hours, may carry up to 10 000 invoices, and concurrent sessions are allowed (`docs/REFERENCE.md` §11). Neither official client makes the choice for us — **neither offers a composite at all**, so there was no upstream semantics to inherit (§14.6's investigation notes).
+
+The decision is **a fresh session per `send_invoice`**, with an explicit `client.session { |s| ... }` block when a caller wants one session to carry many invoices. Reasoning: a reused session is mutable state on a client that §5.2 requires to be thread-safe; an opened-but-unused session is cancelled with status `440` so speculative opening is not free; and the API going out of its way to return the *original's* KSeF number on a duplicate (§12.1) suggests resends are an expected hazard, not one to make likelier by hiding session state. Batching stays available, but as a deliberate act rather than a default. Recorded with the rest of the session-layer decisions at `docs/REFERENCE.md` §11.2a.
 
 **Batch (0.2):** build ZIP of invoices → split into parts → encrypt parts → open batch session → upload parts to returned storage URLs (plain HTTP PUT to object storage — likely bypasses the Faraday auth stack **[VERIFY]**) → close → poll → collect **per-invoice** results *(verified: per-invoice error model)*.
 
@@ -444,7 +457,17 @@ Build the **certificate flow first**: it is the only one that can bootstrap a cr
 
 **Both auth flows and the crypto module have since landed** (`Ksef::Crypto`, `Ksef::Auth::Token`, `POST /auth/ksef-token`). One correction to §6.4 while doing it: the golden vectors it asks for **do not exist upstream** — neither reference client commits plaintext/ciphertext pairs — so the primitives are pinned to NIST SP 800-38A and FIPS 180-4 instead, and the OAEP digest and MGF1 digest are pinned behaviourally rather than by trusting an option name. `docs/REFERENCE.md` §10.1 records what replaced them and why it is at least as strong.
 
-Still outstanding: sessions and invoice send, validator tiers, and six of the seven invoice types — so the first and third gates are not met.
+**The session layer, UPO handling and the `Ksef::Client` facade have landed too**, so §8's snippet now runs end to end — `spec/ksef/client_spec.rb` drives it verbatim. **But it runs against stubs.** The first gate says "against TEST", and no session has ever been opened against the real service, so it is *not* met: the nightly TEST job is what will settle it.
+
+Gate status, precisely:
+
+| Gate | State |
+|---|---|
+| §8 contract runs against TEST | **not met** — runs against stubs; awaiting a live session |
+| A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
+| All seven types build, validate, round-trip | **not met** — only `VAT`; validator tiers 1 and 3 outstanding |
+
+Remaining for Phase 2: validator tiers 1 and 3, then the six other invoice types starting with KOR (§7.4).
 
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.

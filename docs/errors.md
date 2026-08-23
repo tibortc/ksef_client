@@ -8,6 +8,7 @@ Ksef::Error                        #problem → Ksef::ProblemDetails or nil
 ├── Ksef::AuthenticationError      challenge / token / JWT problems, and HTTP 401
 ├── Ksef::ValidationError          raised locally by the FA(3) validator
 ├── Ksef::CryptoError              no usable published key, or bad key material
+├── Ksef::IntegrityError           downloaded bytes did not match the published hash
 ├── Ksef::ApiError                 #status #code #details #trace_id #raw
 │   ├── Ksef::InvoiceRejectedError schema or business rejection by KSeF
 │   ├── Ksef::SessionError         session could not be opened, used or closed
@@ -23,10 +24,20 @@ Everything descends from `StandardError`, so a bare `rescue Ksef::Error` catches
 it. `#problem` is `nil` for locally raised errors and populated for anything derived from
 a response.
 
-`Ksef::CryptoError` is the one branch with no HTTP status behind it. It means either that
-no published KSeF certificate is valid for the usage needed, or that key material is the
-wrong size. The first is worth acting on: after an emergency key rotation it is transient,
-and `Ksef::Crypto::PublicKeys#refresh!` is the remedy (docs/REFERENCE.md §10.2, §10.3).
+Two branches have no HTTP status behind them.
+
+`Ksef::CryptoError` means either that no published KSeF certificate is valid for the usage
+needed, or that key material is the wrong size. The first is worth acting on: after an
+emergency key rotation it is transient, and `Ksef::Crypto::PublicKeys#refresh!` is the
+remedy (docs/REFERENCE.md §10.2, §10.3).
+
+`Ksef::IntegrityError` means a downloaded UPO did not match the `x-ms-meta-hash` the
+storage link published for it. **The right response is to fetch it again** — nothing is
+wrong with the request, the credentials or the document, so retrying is not a workaround
+here but the actual fix. It is deliberately not a `ValidationError` (the caller's data is
+fine) and not an `ApiError` (the response was a success). It exists as its own class
+because the artifact is legal proof that an invoice was received: archiving corrupt bytes
+as that proof is the one failure worth refusing loudly (§14.2, §12.3).
 
 ## Status mapping
 
