@@ -15,6 +15,26 @@ module Ksef
       # Ten minutes from issue (§4).
       LIFETIME = 600
 
+      # Length 36, `\d{8}-CR-[A-F0-9]{10}-[A-F0-9]{10}-[A-F0-9]{2}` (§4.1). Lives here
+      # rather than on the request documents because it describes a *challenge*, and both
+      # authentication methods consume the same one — the XAdES document and the KSeF-token
+      # JSON body would otherwise each carry their own copy.
+      FORMAT = /\A\d{8}-CR-[A-F0-9]{10}-[A-F0-9]{10}-[A-F0-9]{2}\z/
+
+      # Checked before a request is spent on the challenge, since a malformed or
+      # copy-pasted one is the cheapest failure to catch locally.
+      #
+      # @param value [String]
+      # @raise [Ksef::ValidationError]
+      def self.validate_format!(value)
+        return value if value.is_a?(String) && FORMAT.match?(value)
+
+        raise ValidationError,
+              "Challenge #{value.inspect} is malformed. Expected 36 characters as " \
+              "YYYYMMDD-CR-XXXXXXXXXX-XXXXXXXXXX-XX with uppercase hex, exactly as returned by " \
+              "POST /auth/challenge."
+      end
+
       def self.from(payload)
         new(
           challenge: payload["challenge"],

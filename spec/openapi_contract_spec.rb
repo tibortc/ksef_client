@@ -10,10 +10,12 @@ require "json"
 # conclusion the edit invalidated — and a mismatched digest is easy to "fix" by re-pinning
 # without re-reading the ledger.
 #
-# The sections covered here are the ones with **no code yet**. §14.3 and §14.4 are already
-# protected by executable assertions because the schemas they concern are in use; §14.1 and
-# §14.2 concern crypto and session code that is not written, so without these they would
-# rot silently until someone implemented them from a stale conclusion.
+# These cover the sections whose conclusions had no code to protect them when they were
+# ledgered. §14.3 and §14.4 were always guarded by executable assertions, because the
+# schemas they concern are in use. §14.1 is now implemented by `Ksef::Crypto` and guarded
+# there too, so these assertions are its second line of defence; **§14.2 still has no code
+# at all**, and until the session layer lands these are the only thing keeping it from
+# rotting into a stale conclusion someone later implements.
 RSpec.describe "the pinned OpenAPI contract" do
   let(:spec) do
     JSON.parse(File.read(File.expand_path("fixtures/openapi/open-api.json", __dir__), encoding: "UTF-8"))
@@ -39,6 +41,111 @@ RSpec.describe "the pinned OpenAPI contract" do
     # §10.2: the selector naming which published key did the wrapping.
     it "carries publicKeyId, the key selector of §10.2" do
       expect(encryption_info.fetch("properties")).to have_key("publicKeyId")
+    end
+
+    # The fourth, arithmetic, witness against the prose — found 2026-08-23 and recorded in
+    # §14.1. The worked example on the send-invoice operation pairs a 6480-byte plaintext
+    # with a 6496-byte ciphertext. 6480 is a whole number of AES blocks, so PKCS#7 adds
+    # exactly one block; a 16-byte IV prefix would have made it 6512.
+    it "pairs plaintext and ciphertext sizes that leave no room for a prefixed IV" do
+      example = spec.dig("paths", "/sessions/online/{referenceNumber}/invoices", "post",
+                         "requestBody", "content", "application/json", "example")
+      plain = example.fetch("invoiceSize")
+      encrypted = example.fetch("encryptedInvoiceSize")
+
+      expect(plain % 16).to eq(0)
+      expect(encrypted - plain).to eq(16)
+    end
+
+    # The document that describes the encryption names CBC and PKCS#7 outright, so the
+    # cipher choice of §10.1 is stated by the contract and not only by the prose.
+    it "names AES-256-CBC with PKCS#7 on the invoice payload itself" do
+      description = schemas.dig("SendInvoiceRequest", "properties", "encryptedInvoiceContent", "description")
+
+      expect(description).to include("AES-256-CBC")
+      expect(description).to include("PKCS#7")
+    end
+  end
+
+  # docs/REFERENCE.md §10.2. `Ksef::Crypto::PublicKeys` selects on `usage` and sends
+  # `publicKeyId` back; both facts come from here.
+  describe "§10.2 — the published encryption certificates" do
+    it "declares exactly the two usages the client selects between" do
+      expect(schemas.dig("PublicKeyCertificateUsage", "enum"))
+        .to contain_exactly("KsefTokenEncryption", "SymmetricKeyEncryption")
+    end
+
+    it "requires the usage list and the validity window the selection rule needs" do
+      expect(schemas.dig("PublicKeyCertificate", "required"))
+        .to include("certificate", "certificateId", "publicKeyId", "usage", "validFrom", "validTo")
+    end
+
+    # Base64 of a SHA-256 is always 44 characters, which is what fixes the field width —
+    # and what makes `publicKeyId` recognisable as a digest rather than an opaque id.
+    it "fixes publicKeyId at the 44 characters a base64 SHA-256 occupies" do
+      selector = schemas.dig("EncryptionInfo", "properties", "publicKeyId")
+
+      expect([selector["minLength"], selector["maxLength"]]).to eq([44, 44])
+      expect(schemas.dig("Sha256HashBase64", "minLength")).to eq(44)
+    end
+
+    it "leaves the certificate list unauthenticated, so keys can be fetched before login" do
+      expect(spec.dig("paths", "/security/public-key-certificates", "get")).not_to have_key("security")
+      expect(spec).not_to have_key("security")
+    end
+  end
+
+  # docs/REFERENCE.md §4.5 and §10.1 — the KSeF-token authentication payload.
+  describe "§4.5 — the encrypted KSeF token" do
+    it "documents RSA-OAEP with SHA-256 over token|timestamp in milliseconds" do
+      description = spec.dig("paths", "/auth/ksef-token", "post", "description")
+
+      expect(description).to include("RSA-OAEP")
+      expect(description).to include("SHA-256")
+      expect(description).to include("token|timestamp")
+      expect(description).to include("milisekund")
+    end
+
+    it "requires the challenge, the context and the encrypted token" do
+      expect(schemas.dig("InitTokenAuthenticationRequest", "required"))
+        .to contain_exactly("challenge", "contextIdentifier", "encryptedToken")
+    end
+
+    # The remediation path of §10.2 keys off this code, so its meaning is pinned here.
+    it "declares 21470 for a withdrawn or unknown key identifier" do
+      expect(spec.dig("paths", "/auth/ksef-token", "post", "responses", "400", "description"))
+        .to include("21470")
+    end
+  end
+
+  # docs/REFERENCE.md §4.8. The ledger originally sourced these codes from the C# client's
+  # enum and said the contract did not state them. It does — and reading it added 480, which
+  # the C# enum lacks. Pinned here so the provenance cannot quietly regress a second time.
+  describe "§4.8 — the contract states the authentication status codes" do
+    let(:table) do
+      schemas.dig("AuthenticationOperationStatusResponse", "properties", "status", "description")
+    end
+
+    it "carries a code table, not merely prose about two of them" do
+      expect(table.scan(/^\| (\d{3}) \|/).flatten.map(&:to_i).uniq)
+        .to contain_exactly(100, 200, 415, 425, 450, 460, 470, 480, 500, 550)
+    end
+
+    # The one code a client must not treat as transient.
+    it "declares 480 as a security block, which is why it is not retryable" do
+      expect(table).to match(/^\| 480 \|/)
+      expect(table).to include("Podejrzenie incydentu bezpieczeństwa")
+      expect(Ksef::Auth::Status::DESCRIPTIONS).to have_key(480)
+    end
+
+    # §4.8 used to say four; the contract lists eight, which is why `#explain` prefers the
+    # server's own description over any table of ours.
+    it "collapses eight distinct causes into 450" do
+      expect(table.scan(/^\| 450 \|/).size).to eq(8)
+    end
+
+    it "does not declare 400 or 401, so those two are C#-only" do
+      expect(table).not_to match(/^\| 40[01] \|/)
     end
   end
 

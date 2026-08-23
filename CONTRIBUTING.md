@@ -67,17 +67,19 @@ Please raise these for discussion rather than changing them in a PR:
 
 | Tier | Runs |
 |---|---|
-| Unit + recorded (WebMock/VCR) | every push, full Ruby matrix |
+| Unit (WebMock stubs; VCR planned, no cassette yet) | every push, full Ruby matrix |
 | Golden files, round-trip, crypto vectors | every push |
 | Live TEST integration | nightly and pre-release only, never per-PR |
 
-Coverage is gated on three criteria, excluding `generated/`: **line 95, branch 90,
-method 100**. Branch coverage is the one that finds real gaps — the suite once sat at 99%
+Coverage is gated on three criteria, excluding `generated/`: **line 99, branch 95,
+method 100**. `spec/spec_helper.rb` is the single source of truth for these numbers —
+if this paragraph and that file ever disagree, the file wins. Branch coverage is the one that finds real gaps — the suite once sat at 99%
 line coverage with 83% branch coverage, meaning plenty of conditional paths were untested
 behind covered lines. Method coverage at 100 means a method nothing exercises fails the
 build.
 
-The floors ratchet: raise them when the real numbers improve, and don't lower one to make
+The floors only ever move up, and they move **at phase boundaries** — set with
+deliberate margin under the then-current actuals, never pinned to them. Don't lower one to make
 a change pass. If you hit the method floor, the usual cause is a new method reachable only
 from an untested branch. Filtered runs (a single file, or `--tag`) skip the gate, since
 they legitimately cover less.

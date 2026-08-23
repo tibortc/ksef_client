@@ -214,7 +214,7 @@ lib/
         ├── nip.rb            # NIP checksum (§7.2)
         ├── vat_rate.rb       # rate code → percentage + summary bucket (§7.3)
         ├── generated/        # FROM XSD CODEGEN — never hand-edited
-        ├── builder.rb        # the DSL (§7.2) — NOT YET WRITTEN, required for 0.1.0
+        ├── builder.rb        # the DSL (§7.2) — done, see §11
         ├── serializer.rb     # Nokogiri; ordering read from generated/, never hand-listed
         ├── parser.rb         # XML → models; retains raw Nokogiri doc — Phase 2
         ├── validator.rb      # three tiers (§7.7); tier 2 (XSD) done, tiers 1 and 3 Phase 2
@@ -266,11 +266,11 @@ KSeF 2.0 offers exactly two authentication methods (`uwierzytelnianie.md`, verif
 
 **Certificate / XAdES flow:**
 
-1. Build an `AuthTokenRequest` XML against the pinned auth XSD (`lib/ksef/auth/schema/`, namespace `http://ksef.mf.gov.pl/auth/token/2.1`): `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` (`certificateSubject` or `certificateFingerprint`), optional `AuthorizationPolicy` restricting client IPs.
+1. Build an `AuthTokenRequest` XML against the pinned auth XSD (`lib/ksef/auth/schema/`, namespace `http://ksef.mf.gov.pl/auth/token/**2.0**` — corrected 2026-08-23; this said 2.1, which `docs/REFERENCE.md` §4.1 and §14.4 established was an inference, and 2.0 is what live TEST accepted per §6a.4): `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` (`certificateSubject` or `certificateFingerprint`), optional `AuthorizationPolicy` restricting client IPs.
 2. Sign it as XAdES via `Ksef::Auth::Signer` — `#sign(xml_string) -> signed_xml_string`. The interface stays, so users with an external signing service or HSM can supply their own; 0.1 additionally ships a built-in enveloped XAdES-BES signer (Nokogiri C14N + OpenSSL) taking a keypair and certificate. Detached form must be rejected with a clear error *(verified: API rejects detached)*.
 3. `POST /auth/xades-signature` with `Content-Type: application/xml`.
 
-**Shared epilogue.** Poll the operation, then `POST /auth/token/redeem` → `accessToken` (JWT, short-lived, expiry in `exp`) and `refreshToken` (valid up to **7 days**, reusable) *(verified)*. `Auth::AccessToken` tracks expiry from `exp`, refreshes proactively at ~80% lifetime under mutex; on 401, one refresh-and-replay for **idempotent** requests only.
+**Shared epilogue.** Poll the operation, then `POST /auth/token/redeem` → `accessToken` (JWT, short-lived) and `refreshToken` (valid up to **7 days**, reusable) *(verified)*. **Expiry comes from the response's `validUntil`, not from decoding the JWT** — §4.3 excludes the `jwt` dependency and treats the token as opaque, and the contract's `TokenInfo` carries `validUntil` precisely so no decoding is needed. (Corrected 2026-08-23: this said "expiry in `exp`" and "tracks expiry from `exp`", which contradicted §4.3.) `Auth::AccessToken` tracks expiry from `validUntil`, refreshes proactively at ~80% lifetime under mutex; on 401, one refresh-and-replay for **idempotent** requests only.
 
 Note an asymmetry worth honouring: an `accessToken` stays valid until `exp` **even if the user's permissions change**, so revocation is not immediate. Do not treat a live token as proof of current authorisation.
 
@@ -281,7 +281,7 @@ Self-signed certificates are accepted on **TEST only** — never DEMO or PROD.
 - Per-session symmetric key: AES-256, random key + IV via `OpenSSL::Cipher` / `SecureRandom`. Mode/padding/IV convention **[VERIFY]** (expected CBC + PKCS#7 with documented IV placement).
 - Key wrapped with RSA-OAEP using the designated KSeF public certificate **[VERIFY parameters]**.
 - `digest.rb` produces the SHA-256 (+ size) metadata the API requires for payloads **[VERIFY exact fields/encoding]**.
-- **Golden vectors:** port at least three encryption test vectors from the official C# client's tests (or generate with it) and assert byte-for-byte equality of our primitives. This is the anti-hallucination backstop for the whole module.
+- **Golden vectors:** ~~port at least three encryption test vectors from the official C# client's tests~~ — **superseded 2026-08-23. Those vectors do not exist**: neither reference client commits plaintext/ciphertext pairs. The backstop is instead NIST SP 800-38A and FIPS 180-4 for the primitives, plus behavioural pinning of the two parameters that could silently go wrong. See §11 and `docs/REFERENCE.md` §10.1.
 
 ### 6.5 Sessions
 
@@ -397,8 +397,8 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Tier | Tooling | Scope | When |
 |---|---|---|---|
 | Unit | RSpec + WebMock | request shaping, crypto primitives, models, serializer, validator | every push, full matrix |
-| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | every push |
-| Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors vs official C# client (§6.4) | every push |
+| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **planned, not yet built** — no cassette exists as of 2026-08-23; WebMock stubs cover this ground for now |
+| Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors — NIST/FIPS, not C#, see §6.4 | every push |
 | Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning | **nightly** CI + pre-release, never per-PR |
 
 **Coverage gate (ratcheted 2026-08-22):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 99, branch 95, method 100**.
@@ -440,7 +440,11 @@ Build the **certificate flow first**: it is the only one that can bootstrap a cr
 
 **Done when:** §8 contract runs against TEST; a KSeF token can be minted end-to-end by this gem with no external client; all seven types build, validate, round-trip.
 
-**In progress, 2026-08-23.** The DSL is done — §8's snippet runs verbatim and validates. **The certificate flow is complete and verified against live TEST**: request document, XAdES-BES signer, and all six HTTP calls of `docs/REFERENCE.md` §4.2. A KSeF token has been minted end to end by this gem with no external client, which satisfies the second "Done when" gate and resolves §12.4. Still outstanding: the token flow (needs the crypto module), sessions and invoice send, validator tiers, and six of the seven invoice types — so the first and third gates are not met.
+**In progress, 2026-08-23.** The DSL is done — §8's snippet runs verbatim and validates. **The certificate flow is complete and verified against live TEST**: request document, XAdES-BES signer, and the four §4.2 endpoints the bootstrap exercises — challenge, `xades-signature`, `GET /auth/{ref}` and `redeem`. **`refresh` and `ksef-token` are implemented but have never run live** (corrected 2026-08-23: this claimed all six calls were live-verified, which the bootstrap's call list does not support). A KSeF token has been minted end to end by this gem with no external client, which satisfies the second "Done when" gate and resolves §12.4.
+
+**Both auth flows and the crypto module have since landed** (`Ksef::Crypto`, `Ksef::Auth::Token`, `POST /auth/ksef-token`). One correction to §6.4 while doing it: the golden vectors it asks for **do not exist upstream** — neither reference client commits plaintext/ciphertext pairs — so the primitives are pinned to NIST SP 800-38A and FIPS 180-4 instead, and the OAEP digest and MGF1 digest are pinned behaviourally rather than by trusting an option name. `docs/REFERENCE.md` §10.1 records what replaced them and why it is at least as strong.
+
+Still outstanding: sessions and invoice send, validator tiers, and six of the seven invoice types — so the first and third gates are not met.
 
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.
@@ -461,8 +465,8 @@ After sustained production use; API stability promise begins.
 
 ## 12. Open questions (flag to the human, don't self-decide)
 
-1. Repo/org placement and gem author metadata (name, email, homepage).
-2. XSD redistribution outcome (§7.7 tier 2) — bundle vs fetch-and-cache.
+1. ~~Repo/org placement and gem author metadata (name, email, homepage).~~ **Resolved:** Tibor Molnár, `tibor@timcraft.pl`, `github.com/tibortc/ksef_client`; asserted by `spec/release_readiness_spec.rb`.
+2. ~~XSD redistribution outcome (§7.7 tier 2) — bundle vs fetch-and-cache.~~ **Resolved:** the schemas are MIT-licensed, so they are bundled and no fetch-and-cache fallback is needed (`docs/REFERENCE.md` §1.2, which also gives the test for where a *third-party* schema may live).
 3. Default rounding strategy confirmation (`:per_line` proposed) once real accounting examples are in fixtures.
 4. ~~Whether TEST-env credentials for nightly CI come from a dedicated test NIP (recommended) — needs human to provision via the TEST self-service tools.~~ **Resolved 2026-08-23.** A dedicated invented NIP, provisioned by `rake auth:bootstrap` (docs/REFERENCE.md §6a.3) rather than by hand. `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN` are stored in the `ksef-test` environment and the nightly schedule is enabled. The run also confirmed that KSeF accepts this gem's XAdES signature (`docs/REFERENCE.md` §6a.4).
-5. Any trademark/naming sensitivities around "KSeF" in the gem description (likely none — official SDKs use it — but confirm before publishing).
+5. ~~Any trademark/naming sensitivities around "KSeF" in the gem description (likely none — official SDKs use it — but confirm before publishing).~~ **Resolved 2026-08-23 — confirmed by the human**, on the basis the question anticipated. Two KSeF-named gems are already published unchallenged — [`ksef`](https://rubygems.org/gems/ksef) and [`ksef-rb`](https://rubygems.org/gems/ksef-rb), both catalogued in §1 — and the Ministry's own C# and Java SDKs use the name. Settled practice, not a trademark search, which is enough to publish on: `0.1.0.rc1` did so on 2026-08-22.

@@ -39,6 +39,14 @@ SimpleCov.start do
   # aspire. Raise them when the real numbers move up; do not lower them to make a change
   # pass. Actual at last ratchet (2026-08-22): line 100%, branch 97.14%, method 100%.
   #
+  # Measured after the crypto module and the KSeF-token flow (2026-08-23): line 100%,
+  # branch 96.79% (272/281), method 100%. **Deliberately not re-ratcheted here.** Branch 96
+  # would leave two branches of slack, which is the knife edge the paragraph above argues
+  # against; the ratchet is scheduled for the Phase 2 boundary, where the codebase stops
+  # moving under it. The nine uncovered branches are all `&.` guards against states that
+  # cannot occur — none of them in the new crypto code, which is fully covered on both
+  # criteria.
+  #
   # There is deliberate margin rather than a knife edge at the actuals: a floor pinned to
   # the exact current figure fails on refactors that change nothing about test quality —
   # extract a method with an early return and the build goes red for no reason. A ratchet

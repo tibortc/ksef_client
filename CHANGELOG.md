@@ -14,6 +14,72 @@ gem version for which API state".
 
 ### Added
 
+- **`Ksef::Crypto` — the encryption layer.** AES-256-CBC with PKCS#7 for payloads,
+  RSA-OAEP with SHA-256 *and* MGF1-SHA-256 for wrapping, and the Ministry's published
+  certificates fetched, cached and selected by declared usage. Every parameter is ledgered
+  at `docs/REFERENCE.md` §10 from first-tier documentation, not inferred from client
+  behaviour.
+
+  **The IV is not prefixed to the ciphertext**, whatever `sesja-interaktywna.md` says. It
+  travels once as a discrete field of the session-open request, and each invoice ciphertext
+  is bare. There is now a fourth witness against the prose, and it is the sharpest:
+  upstream's own worked example pairs a 6480-byte invoice with a 6496-byte ciphertext, which
+  is exactly one block of PKCS#7 padding and no room at all for a 16-byte IV (§14.1).
+
+  DESIGN.md §6.4 asked for golden vectors ported from the C# client. **There are none to
+  port** — neither reference client commits plaintext/ciphertext pairs. The primitives are
+  pinned to their standards instead: **NIST SP 800-38A F.2.5** for AES-256-CBC, byte for
+  byte, and **FIPS 180-4** for SHA-256. The two parameters that genuinely could have gone
+  wrong are pinned behaviourally: the longest accepted OAEP plaintext is 190 bytes, which
+  fixes the digest at SHA-256 without trusting an option name, and a ciphertext made with
+  MGF1-SHA-256 provably fails to decrypt under MGF1-SHA-1. That last one matters —
+  OpenSSL's MGF1 digest defaults to SHA-1, so naming only `rsa_oaep_md` yields a different
+  scheme that fails at the far end and nowhere else.
+- **`Ksef::Crypto::PublicKeys`** — `GET /security/public-key-certificates`, cached for an
+  hour behind a mutex, with the documented selection rule: filter by usage, require validity
+  *at the moment of use*, and prefer the latest `validFrom` where several qualify. The
+  endpoint is unauthenticated, so keys can be fetched before any credential exists.
+
+  Two rotation modes must not be conflated. Re-certification keeps the key pair, so
+  `publicKeyId` is unchanged; key rotation changes it, and an **emergency** rotation drops
+  the old certificate from the list immediately. `#with_key_rotation` implements §10.2's
+  recovery for that window — on a `400`/`21470` it re-fetches and re-runs the operation.
+  That is remediation and not a blind replay: a 21470 means the request was declined
+  outright, and the second attempt carries a *different* key identifier, so DESIGN.md
+  §6.7's never-auto-retry-a-POST rule is intact. Any other API error surfaces untouched.
+- **`Ksef::Crypto::Encryptor#seal`** returns the ciphertext together with the hash *and*
+  size of both the plaintext and the ciphertext. `POST /sessions/online/{ref}/invoices`
+  requires all four (§11.1) and hashing the wrong artifact is a silent error only the server
+  can catch, so the two digests are produced together rather than left to a caller to pair
+  up. Sizes are byte counts, not character counts — the distinction is not academic when
+  every KSeF document is full of Polish characters.
+- **`Ksef::Auth::Token` — the KSeF-token credential of DESIGN.md §8**, and
+  `Auth::Client#submit_ksef_token`. **Both authentication methods now exist.** The token is
+  never sent as a bearer: it is RSA-OAEP-encrypted alongside the challenge's own
+  `timestampMs`, which the docs describe as a replay nonce — so the method takes a
+  `Challenge` object rather than its string, and refuses the string outright. Inventing the
+  timestamp locally would fail with nothing to point at.
+
+  Only `Nip` and `InternalId` contexts are offered, though the contract's enum has four: a
+  token can only be *issued* in those two, so a token for the other two cannot exist to be
+  presented (§4.1). `#to_s` and `#inspect` are redacted; the token is reachable only by
+  building the request.
+- **`Ksef::CryptoError`** — a new branch of the DESIGN.md §6.7 hierarchy, for "no published
+  key is valid for this usage" and for malformed key material. Neither an `ApiError` (the
+  request succeeded; the list has nothing usable) nor a `ConfigurationError` (documented as
+  local and pre-request). Reasoning recorded at `docs/REFERENCE.md` §10.3, alongside the
+  other decisions upstream does not state.
+- **Live integration for the crypto module** (`spec/integration/crypto_spec.rb`). Two things
+  no offline test can reach: that `certificateId` and `publicKeyId` are derived as §10.2
+  claims — recomputed from the real certificates, which matters because the library only
+  ever echoes the server's value back — and that KSeF **decrypts** what this gem wrapped,
+  since an access token is issued only if the RSA-OAEP ciphertext unwrapped to the right
+  `token|timestampMs`. Unlike the XAdES suite this needs no PESEL, so it reuses the stored
+  `KSEF_TEST_NIP`/`KSEF_TEST_TOKEN` rather than provisioning a test person.
+
+  **These specs have only ever run against stubs.** They are written, not yet exercised; the
+  nightly is their first real run. Nothing in the crypto module is live-verified, and the
+  two claims above are what the specs will *test*, not what they have shown.
 - `rake fa3:generate` — codegen producing committed `lib/ksef/fa3/generated/`: 59 content
   models and 21 enumerations read from the pinned FA(3) XSD. Hand-written models consume
   this for element ordering, occurrence rules and enum membership.
@@ -137,7 +203,8 @@ gem version for which API state".
   are recorded, each with the resolution and the evidence for it.
 - `spec/openapi_contract_spec.rb` — asserts the ledger's claims against the pinned
   contract, rather than only that the contract has not changed. It covers the two findings
-  that have **no code yet** (§14.1's discrete IV field, §14.2's pre-signed link), because
+  that had **no code when they were ledgered** — §14.1's discrete IV field, since
+  implemented by `Ksef::Crypto`, and §14.2's pre-signed link, which still has none — because
   those are the ones that would otherwise rot unnoticed until someone implemented crypto
   or session handling from a stale conclusion.
 - Coverage is now gated on three criteria rather than one, at **line 99, branch 95,
@@ -148,6 +215,10 @@ gem version for which API state".
 
 ### Changed
 
+- The challenge format check moved from `Auth::TokenRequest::CHALLENGE_FORMAT` to
+  **`Auth::Challenge::FORMAT`**, with `Challenge.validate_format!` alongside it. Both
+  authentication methods consume the same challenge, so the XAdES document and the
+  KSeF-token JSON body would otherwise have carried their own copies of one rule.
 - **`bigdecimal` constraint widened from `~> 3.1` to `>= 3.1, < 5`.** The old constraint
   made this gem uninstallable alongside bigdecimal 4, which has been out since 2026-03.
   A library should not force that choice on its users over an arithmetic dependency.
@@ -160,6 +231,42 @@ gem version for which API state".
 
 ### Fixed
 
+- **Authentication status code `480` was missing.** "Uwierzytelnienie zablokowane" — the
+  authentication is blocked on suspicion of a security incident, and the user must contact
+  the Ministry. `Ksef::Auth::Status` now names it and says so; before, it fell through to
+  "unrecognised status code 480".
+
+  The cause is worth recording, because it is a precedence mistake rather than an oversight.
+  `docs/REFERENCE.md` §4.8 had sourced the whole table from `ksef-client-csharp`'s enum, on
+  the strength of upstream *prose* saying the full list "will be available in the endpoint's
+  technical documentation". The pinned OpenAPI contract — a **first-tier** artifact — states
+  the table in full, and carries a code the C# enum does not. Two smaller corrections came
+  out of the same reading: `450` collapses **eight** distinct causes rather than four, and
+  `400`/`401` are C#-only and not contract codes at all. Now asserted in
+  `spec/openapi_contract_spec.rb` so the provenance cannot regress silently.
+
+  The general lesson, now in §4.8: when upstream prose says a fact is undocumented, read the
+  OpenAPI descriptions before reaching for a reference implementation.
+- **A documentation-consistency pass over the whole repo**, which found no defect that would
+  fail a live request but a good deal of drift worth correcting. The notable ones:
+  `rake auth:bootstrap` told the operator to store a live KSeF credential as a *repository*
+  secret, which is precisely what §6a.3 argues against; the coverage floors existed in three
+  places with three different values, one of which would have told a contributor they passed
+  when CI fails them; SECURITY.md promised a cassette-scanning spec that did not exist;
+  DESIGN.md still instructed the reader to send the 2.1 auth namespace and to take token
+  expiry from the JWT `exp` claim, both since ruled against; and `docs/errors.md` was missing
+  `Ksef::CryptoError` entirely.
+
+  Also corrected: several documents claimed the certificate flow's live verification covered
+  more endpoints than it did. Only four have ever reached KSeF — challenge,
+  `xades-signature`, `GET /auth/{ref}` and `redeem`. **`refresh` and `ksef-token` are
+  implemented but have never run live**, and the ledger now says so where it previously
+  claimed "the whole §4.2 flow works as ledgered".
+- **`spec/cassette_hygiene_spec.rb`** — scans every committed VCR cassette for `Bearer `
+  headers and for any value held in `KSEF_TEST_TOKEN` / `KSEF_TEST_NIP`, finding them by
+  content rather than by path so one saved somewhere unconventional is still caught. No
+  cassette exists yet, so it passes vacuously — which is the point of adding it now, since
+  SECURITY.md was already promising users that this check ran.
 - `spec.files` globbed only the FA(3) schema directory, so schemas added elsewhere under
   `lib/` would not have shipped — a failure that would appear only in the packaged gem.
 

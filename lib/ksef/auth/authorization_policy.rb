@@ -20,6 +20,12 @@ module Ksef
       # Ordered as the schema sequences them; the caller's Hash order is irrelevant.
       IP_ELEMENTS = { addresses: "Ip4Address", ranges: "Ip4Range", masks: "Ip4Mask" }.freeze
 
+      # The same three lists as JSON, for the KSeF-token flow's `authorizationPolicy`.
+      # Both authentication methods accept the policy; only their encodings differ, so the
+      # rules above are shared rather than restated. The OpenAPI contract caps each of
+      # these arrays at ten entries too, which independently corroborates {MAX_IPS}.
+      IP_FIELDS = { addresses: :ip4Addresses, ranges: :ip4Ranges, masks: :ip4Masks }.freeze
+
       attr_reader :addresses, :ranges, :masks
 
       # @return [AuthorizationPolicy, nil] passes `nil` and an existing policy through
@@ -48,6 +54,15 @@ module Ksef
       # @return [Array<Array(String, String)>] `[element name, value]` pairs in schema order
       def entries
         IP_ELEMENTS.flat_map { |key, name| public_send(key).map { |value| [name, value] } }
+      end
+
+      # @return [Hash] the contract's `AllowedIps`, omitting the lists that are empty —
+      #   all three are nullable, and sending `[]` says nothing the absence does not
+      def to_h
+        IP_FIELDS.each_with_object({}) do |(key, field), json|
+          values = public_send(key)
+          json[field] = values unless values.empty?
+        end
       end
 
       def empty? = addresses.empty? && ranges.empty? && masks.empty?

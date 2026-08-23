@@ -3,7 +3,7 @@
 require "digest"
 
 # The pinned upstream artifacts are the anti-hallucination backstop for this whole gem
-# (DESIGN.md §0.2, §2). If one drifts, code generated from it is silently wrong, so the
+# (DESIGN.md §0 rule 2, and §2). If one drifts, code generated from it is silently wrong, so the
 # digests are asserted on every run rather than only in a rake task.
 RSpec.describe "pinned upstream artifacts" do
   let(:root) { File.expand_path("..", __dir__) }

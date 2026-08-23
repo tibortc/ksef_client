@@ -39,8 +39,11 @@ fixtures:
 Enforced by:
 
 - A redacting `#inspect` on configuration and authentication objects.
-- VCR cassette scrubbing, plus a spec that scans committed cassettes for `Bearer ` and
-  known secret environment values.
+- `spec/cassette_hygiene_spec.rb`, which scans every committed VCR cassette for `Bearer `
+  headers and for any value this machine holds in `KSEF_TEST_TOKEN` / `KSEF_TEST_NIP`. It
+  finds cassettes by content, not by path, so one saved somewhere unconventional is still
+  scanned. **No cassette exists yet** — the recorded-response test tier is planned, not
+  built — so the check currently passes vacuously and is in place ahead of the first one.
 - Integration tests reading credentials only from environment variables
   (`KSEF_TEST_NIP`, `KSEF_TEST_TOKEN`, `KSEF_ENV=test`).
 

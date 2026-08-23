@@ -7,6 +7,7 @@ Ksef::Error                        #problem → Ksef::ProblemDetails or nil
 ├── Ksef::ConfigurationError       raised locally, before any request
 ├── Ksef::AuthenticationError      challenge / token / JWT problems, and HTTP 401
 ├── Ksef::ValidationError          raised locally by the FA(3) validator
+├── Ksef::CryptoError              no usable published key, or bad key material
 ├── Ksef::ApiError                 #status #code #details #trace_id #raw
 │   ├── Ksef::InvoiceRejectedError schema or business rejection by KSeF
 │   ├── Ksef::SessionError         session could not be opened, used or closed
@@ -21,6 +22,11 @@ Ksef::Error                        #problem → Ksef::ProblemDetails or nil
 Everything descends from `StandardError`, so a bare `rescue Ksef::Error` catches all of
 it. `#problem` is `nil` for locally raised errors and populated for anything derived from
 a response.
+
+`Ksef::CryptoError` is the one branch with no HTTP status behind it. It means either that
+no published KSeF certificate is valid for the usage needed, or that key material is the
+wrong size. The first is worth acting on: after an emergency key rotation it is transient,
+and `Ksef::Crypto::PublicKeys#refresh!` is the remedy (docs/REFERENCE.md §10.2, §10.3).
 
 ## Status mapping
 

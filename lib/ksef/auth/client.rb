@@ -4,7 +4,9 @@ require "faraday"
 
 module Ksef
   module Auth
-    # The six HTTP calls of the authentication flow (docs/REFERENCE.md §4.2).
+    # The six authentication endpoint calls: the five HTTP steps of §4.2's flow — its
+    # sixth step, signing, is offline — plus `POST /auth/ksef-token` for the other
+    # authentication method (docs/REFERENCE.md §4.2, §4.5).
     #
     # Deliberately thin: it maps requests and responses and does nothing else. Deciding
     # *which* credential to present, and caching the result, belongs a layer up in
@@ -12,12 +14,12 @@ module Ksef
     #
     # Namespaced `Ksef::Auth::Client` rather than folded into `Ksef::Client` so that each
     # subsystem's endpoints stay together, matching how the official clients are organised.
+    #
+    # Three of these calls are **unauthenticated** — the challenge and both authentication
+    # submissions declare no `security` in the contract. Of the rest, {#status} and
+    # {#redeem} take the temporary *authentication* token and {#refresh} takes the refresh
+    # token, so the bearer is passed per call rather than held by the instance.
     class Client
-      # `POST /auth/challenge` and `POST /auth/xades-signature` are **unauthenticated**
-      # (`security: []` in the contract). Sending a bearer token to them is harmless but
-      # pointless; the other four require one, and it is not always the same one.
-      UNAUTHENTICATED = %w[challenge xades-signature ksef-token].freeze
-
       # Polling defaults. There is deliberately no timeout: on DEMO and PROD the operation
       # legitimately stays "in progress" while the certificate's status is checked with its
       # issuer over OCSP/CRL, and the docs say the duration depends on that issuer. A client
@@ -48,6 +50,21 @@ module Ksef
           request.body = signed_xml
         end
         Initiation.from(response.body)
+      end
+
+      # Submits a KSeF-token authentication. Like {#submit_xades} this takes an
+      # already-built request — {Token#authentication_request} assembles it, because the
+      # encryption depends on which published key was selected and that is not this
+      # layer's decision.
+      #
+      # A `400` here carries `21111` for a bad challenge or `21470` for a stale key
+      # identifier; the latter is worth wrapping in
+      # {Ksef::Crypto::PublicKeys#with_key_rotation}.
+      #
+      # @param request [Hash] the contract's `InitTokenAuthenticationRequest`
+      # @return [Initiation]
+      def submit_ksef_token(request)
+        Initiation.from(post("auth/ksef-token", body: request).body)
       end
 
       # @param token [String, TokenInfo] the *authentication* token from {#submit_xades}
@@ -104,8 +121,11 @@ module Ksef
         @connection.get(path) { |request| authorize(request, token) }
       end
 
-      def post(path, token: nil)
-        @connection.post(path) { |request| authorize(request, token) }
+      def post(path, token: nil, body: nil)
+        @connection.post(path) do |request|
+          authorize(request, token)
+          request.body = body unless body.nil?
+        end
       end
 
       # The bearer differs per call: the authentication token for status and redemption,

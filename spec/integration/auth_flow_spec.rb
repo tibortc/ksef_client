@@ -35,7 +35,7 @@ RSpec.describe "authentication against TEST", :integration do
 
     # Asserts §4.1's format claim against reality rather than against the XSD facet.
     it "returns a challenge in the documented 36-character form" do
-      expect(challenge.challenge).to match(Ksef::Auth::TokenRequest::CHALLENGE_FORMAT)
+      expect(challenge.challenge).to match(Ksef::Auth::Challenge::FORMAT)
     end
 
     it "reports the timestamp both ways, since the token flow needs milliseconds" do
