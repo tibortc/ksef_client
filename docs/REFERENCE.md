@@ -1430,7 +1430,21 @@ from `InvoiceInSessionStatusCodeResponse.cs`, after §4.8's lesson — and the c
 the C# enum lists `400`, `401` and `403` for invoice status, which **the contract does not
 declare at all**.
 
-**Per invoice, in a session.** `150` is the only code that means keep polling.
+**Per invoice, in a session.** **Both `100` and `150` mean keep polling** — corrected
+2026-08-23, having first been written here as "`150` is the only one". That came from
+`OnlineSessionUtils.cs`, whose poller returns as soon as the code is anything but `150`, and
+it is wrong on the contract's own wording: `100` is *"przyjęta do dalszego przetwarzania"* —
+accepted for **further** processing — which is by definition not a final state, and an
+invoice sitting at `100` has no KSeF number yet. A poller that stops there reports a
+pending invoice as though it were decided.
+
+So the rule this gem uses is **`code < 200` is in progress**, rather than a list of
+intermediate codes. That is deliberately the opposite of §4.8's
+treat-the-unknown-as-terminal rule for authentication, and the asymmetry is justified:
+authentication polls without a deadline, so an unrecognised code there must not loop for
+ever, whereas session polling is deadline-bounded, so an unknown intermediate code costs at
+worst one timeout — and "unresolved" is a more honest answer about an invoice than
+"prematurely final".
 
 | Code | Meaning | Notes |
 |---|---|---|

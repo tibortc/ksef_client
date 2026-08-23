@@ -63,6 +63,20 @@ module Ksef
         end
       end
 
+      # The three fields every `StatusInfo` / `InvoiceStatusInfo` carries, unpacked once
+      # rather than in each state object. `details` is nullable in the contract, so it is
+      # normalised to a frozen array — a caller should never have to nil-check it.
+      #
+      # @return [Hash] keyword arguments for a state object
+      def status_info(payload)
+        status = payload["status"] || {}
+        {
+          code: status["code"],
+          description: status["description"],
+          details: Array(status["details"]).freeze
+        }
+      end
+
       # @raise [Ksef::ValidationError] if the value could alter the request path
       def reference_number!(value)
         text = value.respond_to?(:reference_number) ? value.reference_number : value.to_s
