@@ -440,7 +440,11 @@ Build the **certificate flow first**: it is the only one that can bootstrap a cr
 
 **Done when:** §8 contract runs against TEST; a KSeF token can be minted end-to-end by this gem with no external client; all seven types build, validate, round-trip.
 
-**In progress, 2026-08-23.** The DSL is done — §8's snippet runs verbatim and validates. **The certificate flow is complete and verified against live TEST**: request document, XAdES-BES signer, and all six HTTP calls of `docs/REFERENCE.md` §4.2. A KSeF token has been minted end to end by this gem with no external client, which satisfies the second "Done when" gate and resolves §12.4. Still outstanding: the token flow (needs the crypto module), sessions and invoice send, validator tiers, and six of the seven invoice types — so the first and third gates are not met.
+**In progress, 2026-08-23.** The DSL is done — §8's snippet runs verbatim and validates. **The certificate flow is complete and verified against live TEST**: request document, XAdES-BES signer, and all six HTTP calls of `docs/REFERENCE.md` §4.2. A KSeF token has been minted end to end by this gem with no external client, which satisfies the second "Done when" gate and resolves §12.4.
+
+**Both auth flows and the crypto module have since landed** (`Ksef::Crypto`, `Ksef::Auth::Token`, `POST /auth/ksef-token`). One correction to §6.4 while doing it: the golden vectors it asks for **do not exist upstream** — neither reference client commits plaintext/ciphertext pairs — so the primitives are pinned to NIST SP 800-38A and FIPS 180-4 instead, and the OAEP digest and MGF1 digest are pinned behaviourally rather than by trusting an option name. `docs/REFERENCE.md` §10.1 records what replaced them and why it is at least as strong.
+
+Still outstanding: sessions and invoice send, validator tiers, and six of the seven invoice types — so the first and third gates are not met.
 
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.

@@ -28,9 +28,12 @@ submitted.
 > `AuthTokenRequest` document, its XAdES-BES signature and all six auth calls are
 > implemented, and this gem has minted a KSeF token end to end with no external client.
 >
-> **Not yet:** authenticating *with* a KSeF token (needs the encryption layer), encryption,
-> sessions — so no invoice can be *sent* yet — and the other six invoice types. See
-> [Roadmap](#roadmap).
+> **Both authentication methods are now implemented**, along with the encryption layer they
+> and the session layer share: `Ksef::Crypto` fetches and selects the Ministry's published
+> keys, wraps a symmetric key with RSA-OAEP, and encrypts payloads with AES-256-CBC.
+>
+> **Not yet:** sessions — so no invoice can be *sent* yet — and the other six invoice
+> types. See [Roadmap](#roadmap).
 >
 > In the quickstart below, **everything up to and including `Ksef::FA3.build` runs
 > today**; the `client` calls do not exist yet.

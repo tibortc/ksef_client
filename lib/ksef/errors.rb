@@ -29,6 +29,17 @@ module Ksef
   # Raised locally by the FA(3) validator (DESIGN.md §7.7), never by the transport layer.
   class ValidationError < Error; end
 
+  # Encryption could not proceed: no published KSeF certificate is valid for the usage
+  # needed, or key material is the wrong size (docs/REFERENCE.md §10).
+  #
+  # Not in DESIGN.md §6.7's hierarchy, and added rather than folded into a neighbour
+  # because neither fits. It is not an {ApiError} — the request succeeded, the published
+  # list simply has nothing usable in it — nor a {ConfigurationError}, which is documented
+  # as local and pre-request. The one branch a caller may want to act on is "no valid key
+  # for this usage": after an emergency key rotation that is transient, and
+  # {Ksef::Crypto::PublicKeys#refresh!} is the remedy.
+  class CryptoError < Error; end
+
   # Any error response from the KSeF API.
   class ApiError < Error
     # @return [Integer, nil] HTTP status

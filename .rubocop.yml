@@ -53,6 +53,16 @@ Metrics/ClassLength:
 Metrics/ParameterLists:
   CountKeywordArgs: false
 
+# `iv` is the universal name for an initialisation vector, in the same class as the
+# default list's `io` and `id`. Spelling it out would make the crypto API read worse, not
+# better. Merged with RuboCop's defaults rather than replacing them.
+Naming/MethodParameterName:
+  inherit_mode:
+    merge:
+      - AllowedNames
+  AllowedNames:
+    - iv
+
 Naming/FileName:
   Exclude:
     - "lib/ksef_client.rb"  # entry point for the gem name; namespace is Ksef

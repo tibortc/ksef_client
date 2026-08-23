@@ -466,6 +466,23 @@ The timestamp is not decoration — the docs are explicit that it acts as a nonc
 captured ciphertext cannot be replayed into a later session. Reusing a stale timestamp, or
 sending a locally generated one, defeats that and will not match the challenge.
 
+Corroborated by the pinned contract (checked 2026-08-23): the `POST /auth/ksef-token`
+operation description names **RSA-OAEP with SHA-256**, the `token|timestamp` framing, and
+the timestamp "jako liczba milisekund od 1 stycznia 1970 roku". So the encryption of this
+payload is stated by the contract as well as by the prose, and both are asserted in
+`spec/openapi_contract_spec.rb`.
+
+`InitTokenAuthenticationRequest` requires `challenge`, `contextIdentifier` and
+`encryptedToken`; `publicKeyId` and `authorizationPolicy` are optional. **Send
+`publicKeyId` anyway** — see §10.3. The `authorizationPolicy` here carries the same three
+IP lists as the XAdES document's, JSON-cased (`ip4Addresses`, `ip4Ranges`, `ip4Masks`) and
+capped at ten entries each, which independently corroborates §4.1's cap.
+
+The 400 table for this operation names **`21111`** — "Nieprawidłowe wyzwanie autoryzacyjne",
+an invalid authorisation challenge — alongside `21470` (§10.2) and `21405`. That is the
+cheapest of the three to avoid, so the challenge format of §4.1 is checked locally before
+the request is built.
+
 `ECDsa` exists as an alternative encryption method in both reference clients. Out of scope
 for 0.1; RSA is the documented default.
 
@@ -654,6 +671,14 @@ req/s · req/min · req/h. These are PROD defaults.
 | `GET /invoices/ksef/{ksefNumber}` | 8 | 16 | 64 |
 | everything else | 10 | 30 | 120 |
 | `POST /auth/challenge` (unauthenticated) | 60 per IP | — | — |
+| `POST /auth/ksef-token` | 60 | — | — |
+| `GET /security/public-key-certificates` | 60 | — | — |
+
+The last two are read from each operation's own `x-rate-limits` in the pinned spec
+(2026-08-23) rather than from `limity-api.md`, which lists neither. Both sit well above the
+"everything else" default, which is consistent with their being on the pre-authentication
+path — but it also means the per-endpoint values in the spec, not just the prose table,
+are the authority.
 
 Three consequences for the client design:
 
@@ -1059,18 +1084,31 @@ identical so the §1 digests keep verifying.
 ## 9. Still unverified
 
 Carried forward; must be resolved before the code that depends on them is written
-(DESIGN.md §0.2). Reviewed 2026-08-23.
+(DESIGN.md §0.2). Reviewed 2026-08-23 (second pass, after the crypto module).
 
 - **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7). The only genuinely
   open blocker of the original set. `faktury/weryfikacja-faktury.md` is the next place to
   look; not yet pinned.
-- **Error-code catalogue.** Still open, but **narrowed**: the eleven *authentication
-  operation* status codes are now recorded at §4.8, from the reference implementation.
-  What remains is the per-endpoint `ExceptionResponse` codes — `21470` (§10.2) and `21405`
-  are known; the rest must be collected from the spec per operation, or observed. The C#
-  client has sibling files (`CertificateStatusCodeResponse`, `InvoiceInSessionStatusCodeResponse`,
-  `OperationStatusCodeResponse`, `InvoiceExportStatusCodeResponse`) that will likely close
-  the corresponding areas the same way when those subsystems are built.
+- **Error-code catalogue.** Still open, but **narrowed again**: the eleven *authentication
+  operation* status codes are recorded at §4.8, from the reference implementation, and the
+  per-endpoint `ExceptionResponse` codes now known are `21405` (input validation),
+  `21470` (unknown or withdrawn key, §10.2), `21111` (invalid authorisation challenge,
+  §4.5) and `21157` (invalid package part size). The rest must be collected from the spec
+  per operation, or observed — **and the collection is mechanical**: each operation's `400`
+  response carries a Markdown table of its own codes in the `description`, which is where
+  `21111` came from. The C# client has sibling files (`CertificateStatusCodeResponse`,
+  `InvoiceInSessionStatusCodeResponse`, `OperationStatusCodeResponse`,
+  `InvoiceExportStatusCodeResponse`) that will likely close the corresponding areas the
+  same way when those subsystems are built.
+- **Whether the KSeF-token timestamp is really enforced as a replay nonce.** §4.5 records
+  the claim from first-tier documentation, and nothing offline can test it.
+  `spec/integration/crypto_spec.rb` now asserts it against live TEST by authenticating
+  with a deliberately stale `timestampMs`; **a failure there is a finding for this ledger,
+  not a regression in the gem.**
+- **Whether `certificateId` and `publicKeyId` are derived as §10.2 states.** The library
+  never computes either — it echoes the server's `publicKeyId` back — so a unit test could
+  only check the claim against a fixture built from it. `spec/integration/crypto_spec.rb`
+  recomputes both from the real certificates.
 - **Nightly higher rate limits** (§6.1) — the 20:00–06:00 values are explicitly
   unpublished pending production tuning. Do not hard-code a nightly multiplier.
 - **Whether `upo.pages[].downloadUrl` arrives absolute or host-relative** — see §14.2.
@@ -1138,11 +1176,31 @@ standard primitives that OpenSSL reproduces by construction, and NIST/RFC vector
 them just as well as a C#-generated pair would. What is *not* standard, and therefore does
 need pinning down, is the framing — see §14.1.
 
+**What is asserted instead** (implemented 2026-08-23, `spec/ksef/crypto_spec.rb` and
+`spec/ksef/crypto/encryptor_spec.rb`), replacing DESIGN.md §6.4's "port three vectors from
+the C# client":
+
+| Parameter | How it is pinned |
+|---|---|
+| AES-256-CBC | **NIST SP 800-38A F.2.5** CBC-AES256.Encrypt, four blocks, byte for byte |
+| PKCS#7 | the padded output is one block longer than an exact multiple of 16 |
+| SHA-256 | **FIPS 180-4** vectors for `"abc"` and the empty string |
+| OAEP digest | the longest accepted plaintext is **190 bytes**, i.e. `k − 2·hLen − 2` with `hLen = 32`. With SHA-1 it would be 214, so this pins the digest without trusting the option name |
+| MGF1 digest | a ciphertext produced with MGF1-SHA-256 **fails** to decrypt under MGF1-SHA-1, so the two are genuinely distinguishable and the option is not being ignored |
+
+The MGF1 row is the one that matters most. OpenSSL's MGF1 digest defaults to SHA-1, so
+setting `rsa_oaep_md` alone silently produces OAEP-SHA256-with-MGF1-SHA1 — a different
+scheme, which fails only at the far end. Verified on both 3.2.11 and 4.0.6.
+
 ### 10.2 Public key distribution and rotation
 
 Source: `bezpieczenstwo/klucze-publiczne-do-szyfrowania.md` (05.05.2026).
 
-`GET /security/public-key-certificates` returns a list of:
+`GET /security/public-key-certificates` is **unauthenticated** — the contract declares no
+global `security` and none on the operation, the same reading that §6a.1 applied to
+`/testdata/*`. So keys can be fetched before a credential exists, which is what makes the
+KSeF-token flow possible from a cold start. Its ceiling is **60 req/s**, matching
+`/auth/challenge` rather than the 10/30/120 default of §6.1. It returns a list of:
 
 | Field | Meaning |
 |---|---|
@@ -1174,6 +1232,25 @@ cached indefinitely**. The documented recovery path is specific: on **HTTP 400 w
 the list, re-select, and repeat the operation. This is the one case where a failed POST
 should be retried after remediation — and it is remediation, not a blind retry, so it does
 not conflict with the never-auto-retry-POST rule.
+
+### 10.3 Decisions this gem made, that upstream does not state
+
+Recorded here so they are not mistaken for ledgered facts, and so the reasoning survives.
+Implemented 2026-08-23 in `lib/ksef/crypto/`.
+
+| Decision | Value | Why |
+|---|---|---|
+| Certificate cache TTL | **one hour**, `PublicKeys::DEFAULT_TTL` | §10.2 says "not indefinitely" and nothing more. An hour fetches once per process in practice while bounding how long a withdrawn key can linger; `refresh!` and `with_key_rotation` cover the rest |
+| `publicKeyId` | **always sent**, though the contract marks it nullable | It names *which* published key did the wrapping. Omitting it turns a key rotation from a `21470` you can remediate into an undecryptable payload with nothing to diagnose |
+| Unparseable `validFrom`/`validTo` | the certificate becomes **unselectable** | Fail closed. A nil window must not read as "no constraint" — that would wrap a payload under a key KSeF may already have withdrawn |
+| Unknown `usage` string | raises, rather than selecting nothing | A typo would otherwise present as "the Ministry publishes no such key", sending the reader to look for a rotation that never happened |
+| `Ksef::CryptoError` | a new branch of the DESIGN.md §6.7 hierarchy | Neither an `ApiError` (the request succeeded; the list has nothing usable) nor a `ConfigurationError` (documented as local and pre-request). The same reasoning that added `AuthorizationError` and `ResourceGoneError` (§7.4) |
+| Wrapping is done **by** the certificate | `Certificate#encrypt` | Keeps the public key and the OAEP parameters in one place, so no caller can wrap with the right key under the wrong padding |
+
+One more, and it is the one worth stating: `Encryptor#seal` returns the ciphertext **and**
+the hash-and-size of both forms in a single object. §11.1 requires four integrity values
+per invoice and hashing the wrong artifact is silent — only the server can detect it — so
+the two digests are produced together rather than left to a caller to pair up.
 
 ---
 
@@ -1296,15 +1373,22 @@ per DESIGN.md §2: the pinned artifacts win.
 szyfrogramu" — appended as a prefix to the ciphertext. **This is wrong for the online
 session invoice path**, and following the prose produces a payload KSeF cannot decrypt.
 
-Three sources agree against it (all 2026-08-22):
+Four sources agree against it:
 
 1. **The pinned OpenAPI spec** — `EncryptionInfo` carries `initializationVector` as a
    discrete field of the session-open request, alongside `encryptedSymmetricKey` and
-   `publicKeyId`. Highest precedence.
+   `publicKeyId`. Highest precedence. (2026-08-22)
 2. **C#** — `EncryptBytesWithAES256` returns the encryptor's output directly, with no
-   prepended bytes (`CryptographyService.cs:149–161`).
+   prepended bytes (`CryptographyService.cs:149–161`). (2026-08-22)
 3. **Java** — `cipher.doFinal(content)`, likewise bare
-   (`DefaultCryptographyService.java`).
+   (`DefaultCryptographyService.java`). (2026-08-22)
+4. **The contract's own worked example, arithmetically** (found 2026-08-23). The
+   `POST /sessions/online/{ref}/invoices` example pairs `invoiceSize: 6480` with
+   `encryptedInvoiceSize: 6496`. 6480 is 405 whole AES blocks, so PKCS#7 adds **exactly one
+   block** of padding and lands on 6496. A prefixed 16-byte IV would have made it 6512.
+   This is the sharpest of the four: it is a number upstream published about its own
+   encryption, and it leaves no room for the IV. Asserted in
+   `spec/openapi_contract_spec.rb`, and reproduced by `Encryptor` in its own spec.
 
 **Resolution: send the IV once in the session-open request; the per-invoice ciphertext is
 bare.** The prose's "prefix" phrasing may describe the separate ECDH/AES-GCM path, which

@@ -32,11 +32,6 @@ module Ksef
       # therefore meaningful rather than advisory.
       VALIDATABLE_CONTEXT_TYPES = %i[nip internal_id].freeze
 
-      # Length 36, `\d{8}-CR-[A-F0-9]{10}-[A-F0-9]{10}-[A-F0-9]{2}` (§4.1). Checked before
-      # a signature is spent on the document, since a stale or malformed challenge is the
-      # cheapest failure to catch locally.
-      CHALLENGE_FORMAT = /\A\d{8}-CR-[A-F0-9]{10}-[A-F0-9]{10}-[A-F0-9]{2}\z/
-
       attr_reader :challenge, :context_type, :context_value, :subject_identifier_type, :allowed_ips,
                   :namespace, :schema_version
 
@@ -58,7 +53,7 @@ module Ksef
                 "Expected one of #{NAMESPACES.keys.map(&:inspect).join(", ")}."
         end
         @schema_version = schema_version
-        @challenge = validate_challenge(challenge)
+        @challenge = Challenge.validate_format!(challenge)
         @context_type = validate_context_type(context_type)
         @context_value = context_value
         @subject_identifier_type = validate_subject_identifier_type(subject_identifier_type)
@@ -126,15 +121,6 @@ module Ksef
         element = doc.create_element(name)
         element.content = value.to_s
         parent.add_child(element)
-      end
-
-      def validate_challenge(value)
-        return value if value.is_a?(String) && CHALLENGE_FORMAT.match?(value)
-
-        raise ValidationError,
-              "Challenge #{value.inspect} is malformed. Expected 36 characters as " \
-              "YYYYMMDD-CR-XXXXXXXXXX-XXXXXXXXXX-XX with uppercase hex, exactly as returned by " \
-              "POST /auth/challenge."
       end
 
       def validate_context_type(value)

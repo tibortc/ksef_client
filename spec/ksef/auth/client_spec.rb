@@ -75,6 +75,48 @@ RSpec.describe Ksef::Auth::Client do
     end
   end
 
+  describe "#submit_ksef_token" do
+    let(:request) do
+      { challenge: "20250604-CR-461EA5B000-537A6BA15D-D7",
+        contextIdentifier: { type: "Nip", value: "9999999999" },
+        encryptedToken: "Y2lwaGVy", publicKeyId: "a" * 44 }
+    end
+
+    it "posts the request as JSON and returns the 202 body" do
+      stub_request(:post, "#{base}/auth/ksef-token")
+        .with(body: JSON.dump(request), headers: { "Content-Type" => "application/json" })
+        .to_return(json({ "referenceNumber" => "20260822-AU-1234567890-1234567890-AB",
+                          "authenticationToken" => token_info("auth.jwt") }, status: 202))
+      result = client.submit_ksef_token(request)
+
+      expect(result.reference_number).to eq("20260822-AU-1234567890-1234567890-AB")
+      expect(result.token).to eq("auth.jwt")
+    end
+
+    # The contract declares no `security` for this operation: the credential travels
+    # RSA-encrypted in the body, never as a bearer.
+    it "sends no Authorization header" do
+      stub = stub_request(:post, "#{base}/auth/ksef-token").to_return(json({}, status: 202))
+      client.submit_ksef_token(request)
+
+      expect(stub.with { |r| !r.headers.key?("Authorization") }).to have_been_made
+    end
+
+    # §10.2 documents this code as "the supplied key identifier is unknown or refers to a
+    # withdrawn key". It surfaces rather than being retried here; remediation belongs to
+    # Ksef::Crypto::PublicKeys#with_key_rotation, which re-selects before trying again.
+    it "surfaces a 21470 without retrying" do
+      stub_request(:post, "#{base}/auth/ksef-token").to_return(
+        status: 400,
+        body: JSON.dump("status" => 400, "errors" => [{ "code" => 21_470, "description" => "Klucz nieznany" }]),
+        headers: { "Content-Type" => "application/problem+json" }
+      )
+
+      expect { client.submit_ksef_token(request) }.to raise_error(Ksef::ApiError) { |e| expect(e.code).to eq(21_470) }
+      expect(a_request(:post, "#{base}/auth/ksef-token")).to have_been_made.once
+    end
+  end
+
   describe "#status" do
     it "presents the authentication token as the bearer, not an access token" do
       stub_request(:get, "#{base}/auth/REF1")
@@ -157,6 +199,16 @@ RSpec.describe Ksef::Auth::Client do
 
       expect { client.authenticate!("REF1", token: "t", sleeper: ->(_) {}) }
         .to raise_error(Ksef::AuthenticationError, /status 460: Certyfikat odwołany \(serial 42\)/)
+    end
+
+    # 415 arrives with no details at all when a subject simply holds no permissions, and
+    # the message must not trail an empty parenthesis.
+    it "omits the detail clause when the server sent none" do
+      stub_request(:get, "#{base}/auth/REF1").to_return(json({ "status" => { "code" => 415 } }))
+
+      expect { client.authenticate!("REF1", token: "t", sleeper: ->(_) {}) }
+        .to raise_error(Ksef::AuthenticationError,
+                        /status 415: failed: the subject holds no permissions in this context\z/)
     end
   end
 
