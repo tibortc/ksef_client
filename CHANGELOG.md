@@ -37,6 +37,22 @@ gem version for which API state".
   metered route when it expires, which is §14.2's resolution after an earlier reading had it
   backwards. `for_ksef_number` parses the number first, so a mistyped one fails on its CRC-8
   locally rather than as an opaque 404.
+- **`Ksef::UPO::Validator`** — offline schema validation for a received UPO, and the place
+  §14.3's trap would otherwise have caught us. `upo-v4-3.xsd` fixes the receiving party's
+  name to `"Ministerstwo Finansów"` while every non-production environment appends a marker,
+  so **a strict validator rejects every UPO that TEST and DEMO issue** — measured: all six of
+  upstream's own worked examples fail upstream's own schema, each with exactly one error,
+  always that element.
+
+  The mismatch is reported as a **warning** rather than relaxing the constraint, which keeps
+  strictly more: in production the fixed value is presumably right, so a mismatch there is a
+  real anomaly a relaxed schema would never mention. The observed value is read from the
+  document by XPath, and doubles as a way to tell which environment issued a UPO.
+
+  **There is deliberately no `validate!`.** A UPO is legal proof that an invoice was
+  received; whether it satisfies a schema is never a reason to discard the bytes or fail an
+  operation that already succeeded at the far end. Offering a raising method would make
+  gating the path of least resistance, so a spec asserts its absence.
 - **`Ksef::IntegrityError`** — raised when downloaded bytes do not match the published hash.
   Its own class because the right response is unlike every other error here: *fetch it
   again*. Nothing is wrong with the request, the credentials or the document — the transfer
@@ -203,7 +219,7 @@ gem version for which API state".
   always run or never run. WebMock is re-enabled around each example rather than globally,
   so a failure cannot leave the network open for whatever runs next.
 
-  **DESIGN.md §12.4 is resolved.** Running the bootstrap against TEST established what no
+  **DESIGN.md §12 item 4 is resolved.** Running the bootstrap against TEST established what no
   offline test could: KSeF accepts the XAdES-BES signature this gem produces, the 2.0
   namespace is correct, `/testdata/person` really is unauthenticated, and a self-signed
   certificate is accepted on TEST. Recorded at `docs/REFERENCE.md` §6a.4.
@@ -330,6 +346,19 @@ gem version for which API state".
 
 ### Fixed
 
+- **`bundle exec rake` was never enforcing the coverage floors.** `rake spec` invokes
+  `rspec --pattern spec/**{,/*/**}/*_spec.rb`, and that pattern *value* starts with `spec/` —
+  which `spec_helper`'s filtered-run check read as "the user narrowed the run", so it skipped
+  `minimum_coverage` on every single `rake`. CI calls `bundle exec rspec` directly and has
+  always been strict, so nothing shipped uncovered; but CLAUDE.md described `rake` as
+  mirroring CI, and on the one criterion that matters most it was strictly weaker.
+
+  Fixed by stripping `--pattern` and its value before looking for selectors, and verified
+  both ways: `rake` now fails on a shortfall, and a filtered run stays exempt — which is what
+  keeps the nightly's `rspec --tag integration` from failing on coverage rather than on tests.
+
+  It hid because a coverage failure prints among the RuboCop lines, so reading output instead
+  of exit codes conceals it. CLAUDE.md now says to check `rake`'s exit code.
 - **Authentication status code `480` was missing.** "Uwierzytelnienie zablokowane" — the
   authentication is blocked on suspicion of a security incident, and the user must contact
   the Ministry. `Ksef::Auth::Status` now names it and says so; before, it fell through to

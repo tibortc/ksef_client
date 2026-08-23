@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # The error hierarchy from DESIGN.md §6.7, extended with the 403 and 410 branches the
-# API actually returns (docs/REFERENCE.md §7.4).
+# API actually returns (docs/REFERENCE.md §7 item 4).
 #
 # This file defines many constants and no `Ksef::Errors`, so Zeitwerk cannot manage it —
 # `lib/ksef.rb` ignores it and requires it eagerly.

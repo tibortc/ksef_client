@@ -11,7 +11,7 @@ module Ksef
   # re-verifying it against that source and updating the ledger.
   #
   # Note the base URL already carries `/v2`; endpoint paths are appended bare. There is
-  # no `/api` segment (docs/REFERENCE.md §7.2).
+  # no `/api` segment (docs/REFERENCE.md §7 item 2).
   module Environments
     Environment = Data.define(:name, :base_url, :supports_test_data) do
       # TEST alone exposes the `/testdata/*` helper API and `/collective-identifiers*`.

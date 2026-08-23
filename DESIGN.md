@@ -202,11 +202,19 @@ lib/
     │   ├── encryptor.rb      # session symmetric key gen, payload encryption, RSA-OAEP wrap
     │   └── digest.rb         # SHA-256 hashes + size metadata for payloads
     ├── sessions/
-    │   ├── online.rb         # open → send → close → status lifecycle
+    │   ├── online.rb         # open → send → close
     │   ├── batch.rb          # 0.2
-    │   └── status.rb         # polling with backoff; blocking wait_until_* helpers
-    ├── invoices/             # send, status, upo, download; query/export in 0.2
-    ├── models/               # Data.define response objects (SessionRef, SendResult, Upo, …)
+    │   ├── status.rb         # polling with backoff; blocking wait_* helpers
+    │   ├── invoice_codes.rb, session_codes.rb        # the two status tables (§12.1)
+    │   └── invoice_state.rb, session_state.rb, upo_page.rb   # response objects
+    ├── upo/                  # retrieval, integrity, diagnostic validation (§12.3, §14.3)
+    │   ├── client.rb         # pre-signed link + metered fallback
+    │   ├── document.rb       # verbatim bytes; no parsed form on purpose
+    │   └── validator.rb, validation.rb
+    ├── ksef_number.rb        # the 35-character invoice identifier + CRC-8 (§13)
+    ├── invoices/             # download by KSeF number; query/export in 0.2 — NOT YET WRITTEN
+    ├── models/               # response objects — **not built as a directory**; each
+    │                         # subsystem keeps its own, following the auth precedent
     └── fa3/
         ├── invoice.rb, subject.rb, line.rb, address.rb   # models — Phase 1
         ├── annotations.rb, payment.rb, correction.rb     # models — Phase 2

@@ -493,7 +493,7 @@ the request is built.
 `ECDsa` exists as an alternative encryption method in both reference clients. Out of scope
 for 0.1; RSA is the documented default.
 
-### 4.6 TEST bootstrap — resolves DESIGN.md §12.4's central unknown
+### 4.6 TEST bootstrap — resolves DESIGN.md §12 item 4's central unknown
 
 Source: `auth/testowe-certyfikaty-i-podpisy-xades.md`.
 
@@ -756,7 +756,7 @@ invoice.
 
 ---
 
-## 6a. Provisioning TEST credentials (DESIGN.md §12.4)
+## 6a. Provisioning TEST credentials (DESIGN.md §12 item 4)
 
 Sources: `dane-testowe-scenariusze.md` (05.08.2025), `tokeny-ksef.md` (29.06.2025),
 `srodowiska.md`, and the pinned spec. Retrieved 2026-08-22.

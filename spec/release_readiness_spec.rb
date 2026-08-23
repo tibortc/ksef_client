@@ -5,13 +5,13 @@
 RSpec.describe "release readiness", :release_check do
   let(:gemspec) { Gem::Specification.load(File.expand_path("../ksef_client.gemspec", __dir__)) }
 
-  # DESIGN.md §12.1 — repo/org placement and author metadata are a human decision,
+  # DESIGN.md §12 item 1 — repo/org placement and author metadata are a human decision,
   # deliberately deferred. This is what stops the placeholders shipping to RubyGems.
   #
   # The sentinel avoids the words TODO/FIXME on purpose: RubyGems refuses to build a gem
   # containing those, which would make the package unbuildable throughout development.
   # The gate lives here instead, so CI can still exercise `gem build` on every push.
-  describe "DESIGN.md §12.1 metadata placeholders" do
+  describe "DESIGN.md §12 item 1 metadata placeholders" do
     let(:sentinel) { "UNRESOLVED-DESIGN-12-1" }
 
     it "has a real author" do
