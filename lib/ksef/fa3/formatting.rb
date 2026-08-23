@@ -64,6 +64,20 @@ module Ksef
           end
         end
 
+        # The inverse of {.flag}, for the parser.
+        #
+        # `nil` reads as false, which is not laxity: for `JST` and `GV` the seller has no
+        # such element at all, and a buyer that omits them means "no". Anything else raises,
+        # because a third value in a 1/2 field is a document we do not understand rather
+        # than one we should guess at.
+        def unflag(value)
+          case value
+          when "1", 1, true then true
+          when "2", 2, nil, false then false
+          else raise ValidationError, "Expected a 1/2 flag, got #{value.inspect}"
+          end
+        end
+
         # @raise [Ksef::ValidationError] Float is forbidden in any monetary path
         #   (DESIGN.md §4.4) — binary floating point cannot represent 0.01 exactly, and
         #   a rounding error in a tax document is a real problem.

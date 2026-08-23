@@ -8,7 +8,7 @@ module Ksef
     # this core and add their own required and forbidden fields.
     Invoice = Data.define(
       :seller, :buyer, :number, :issue_date, :lines,
-      :currency, :issued_at, :rounding, :invoice_type
+      :currency, :issued_at, :rounding, :invoice_type, :raw_document
     )
 
     # Computation, defaults and serialisation for {Ksef::FA3::Invoice}.
@@ -17,15 +17,54 @@ module Ksef
       # one-grosz mismatches against a user's ERP (DESIGN.md §7.3).
       ROUNDING_STRATEGIES = %i[per_line per_summary].freeze
 
+      # All five flags plus the three wrapper elements are mandatory (§8.2), and every one of
+      # them is the same on an ordinary domestic invoice. Defaulting them to "not applicable"
+      # is what makes such an invoice possible without the caller knowing any of this — and
+      # they are fixed, so this is a constant rather than a method that rebuilds it per call.
+      ANNOTATIONS = {
+        "P_16" => Formatting.flag(false),
+        "P_17" => Formatting.flag(false),
+        "P_18" => Formatting.flag(false),
+        "P_18A" => Formatting.flag(false),
+        "Zwolnienie" => { "P_19N" => "1" },
+        "NoweSrodkiTransportu" => { "P_22N" => "1" },
+        "P_23" => Formatting.flag(false),
+        "PMarzy" => { "P_PMarzyN" => "1" }
+      }.freeze
+
+      # Everything except {#raw_document}: the fields that make this invoice *this* invoice.
+      # {Provenance} reads this to decide what equality, hashing and `#inspect` cover.
+      IDENTITY = (members - [:raw_document]).freeze
+
+      # Equality, `#inspect` and {Provenance#unmapped_elements} — everything to do with the
+      # document this invoice may have been read from.
+      include Provenance
+
+      # `issued_at` is normalised to the string the document will carry, which is the same
+      # rule {Address} and {Line} follow: **the model stores the document's representation,
+      # not the caller's input.** A `Time` renders to `"2026-08-22T10:00:00Z"` here rather
+      # than at serialisation, so an invoice built from a Time and the same invoice parsed
+      # back from XML are one object — the round-trip law of DESIGN.md §7.6 would otherwise
+      # fail on a field whose value never actually changed.
+      #
+      # `nil` is left alone, and means something different: not "no timestamp" but "stamp it
+      # when you serialise". Such an invoice is not fully determined and cannot round-trip
+      # to an equal object, which is a property of that choice rather than a defect.
       def initialize(seller:, buyer:, number:, issue_date:, lines:,
-                     currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT")
+                     currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT",
+                     raw_document: nil)
         unless ROUNDING_STRATEGIES.include?(rounding)
           raise ValidationError,
                 "Unknown rounding strategy #{rounding.inspect}; expected one of #{ROUNDING_STRATEGIES.inspect}"
         end
         raise ValidationError, "An invoice needs at least one line" if lines.nil? || lines.empty?
 
-        super
+        super(
+          seller: seller, buyer: buyer, number: number, issue_date: issue_date, lines: lines,
+          currency: currency, rounding: rounding, invoice_type: invoice_type,
+          raw_document: raw_document,
+          issued_at: issued_at.nil? ? nil : Formatting.date_time(issued_at)
+        )
       end
 
       # Net totals per rate code, in the order the lines first mention each rate, so the
@@ -50,10 +89,7 @@ module Ksef
       def to_xml = Serializer.new(to_fa3).to_xml
 
       # @raise [Ksef::ValidationError] if the document does not conform to the XSD
-      def validate!
-        Validator.validate!(to_xml)
-      end
-
+      def validate! = Validator.validate!(to_xml)
       def valid? = Validator.valid?(to_xml)
 
       def to_fa3
@@ -95,7 +131,7 @@ module Ksef
         {
           "KodFormularza" => Serializer::Element.new(text: "FA", attributes: attributes),
           "WariantFormularza" => 3,
-          "DataWytworzeniaFa" => Formatting.date_time(issued_at || Time.now)
+          "DataWytworzeniaFa" => issued_at || Formatting.date_time(Time.now)
         }
       end
 
@@ -106,7 +142,7 @@ module Ksef
           "P_2" => number,
           **rate_summaries,
           "P_15" => Formatting.amount(gross_total),
-          "Adnotacje" => annotations,
+          "Adnotacje" => ANNOTATIONS,
           "RodzajFaktury" => invoice_type,
           "FaWiersz" => rows
         }
@@ -127,22 +163,6 @@ module Ksef
           # Zero-rated and exempt buckets have no tax element at all (§8.1a).
           acc[tax_element] = Formatting.amount(vat[code]) if tax_element
         end
-      end
-
-      # All five flags plus the three wrapper elements are mandatory (§8.2). Defaulting
-      # them to "not applicable" is what makes a plain domestic invoice possible without
-      # the caller knowing any of this.
-      def annotations
-        {
-          "P_16" => Formatting.flag(false),
-          "P_17" => Formatting.flag(false),
-          "P_18" => Formatting.flag(false),
-          "P_18A" => Formatting.flag(false),
-          "Zwolnienie" => { "P_19N" => "1" },
-          "NoweSrodkiTransportu" => { "P_22N" => "1" },
-          "P_23" => Formatting.flag(false),
-          "PMarzy" => { "P_PMarzyN" => "1" }
-        }
       end
     end
   end

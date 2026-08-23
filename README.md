@@ -210,6 +210,40 @@ branch of each mandatory choice wrapper. Omitting any of them is a schema error.
 Rounding is explicit, because Polish VAT law permits two approaches and they can differ by
 a grosz — pass `rounding: :per_line` (the default) or `:per_summary`.
 
+### Reading an invoice back
+
+`Ksef::FA3.parse` turns FA(3) XML into the same model the builder produces — useful for an
+invoice you fetched from KSeF, or for inspecting one KSeF rejected.
+
+```ruby
+invoice = Ksef::FA3.parse(File.read("faktura.xml", encoding: "UTF-8"))
+invoice.number        # => "FA/2026/08/001"
+invoice.gross_total   # => BigDecimal("1845")
+invoice.lines.size    # => 3
+```
+
+Two things to know, because they matter more than the happy path.
+
+**Parsing is not validating.** A document KSeF refused still parses — that is the point, since
+you usually parse one in order to find out what was wrong with it. Run `invoice.validate!`
+yourself if you want the schema checked.
+
+**FA(3) is much larger than this model, so re-serialising a document you did not write loses
+whatever it does not cover.** Nothing is thrown away — the whole document stays on
+`#raw_document` — but check before you round-trip:
+
+```ruby
+invoice.fully_mapped?       # => false
+invoice.unmapped_elements   # => ["Faktura/Fa/Platnosc", "Faktura/Podmiot3", ...]
+invoice.raw_document        # the complete Nokogiri document, always
+```
+
+For an invoice this gem built, the XML always round-trips byte for byte, and
+`Ksef::FA3.parse(invoice.to_xml) == invoice` holds whenever the invoice states everything the
+document will carry — set `issued_at`, and a `net_amount` per line. Leave them out and
+serialisation supplies them (a generation timestamp, and each line's net from quantity ×
+price), so the parsed invoice knows two things the original did not.
+
 ### Querying the schema
 
 The FA(3) schema metadata is generated from the bundled XSD, so element ordering and

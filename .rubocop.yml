@@ -83,5 +83,8 @@ RSpec/DescribeClass:
     - "spec/artifacts_spec.rb"
     - "spec/cassette_hygiene_spec.rb"  # scans committed fixtures, not a class
     - "spec/openapi_contract_spec.rb"  # asserts facts about a pinned artifact, not a class
+    # A law over the pinned FA(3) corpus (DESIGN.md §7.6), holding across the parser, the
+    # serializer and the validator together — no single class owns it.
+    - "spec/ksef/fa3/round_trip_spec.rb"
     - "spec/integration/**/*_spec.rb"  # describes a live flow, not a class
     - "spec/release_readiness_spec.rb"

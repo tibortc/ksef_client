@@ -370,6 +370,8 @@ Nokogiri-based; consumes generated ordering; formatting rules centralized: BigDe
 
 `Ksef::FA3.parse(xml)` → model objects, best-effort typed; **always** retains the raw `Nokogiri::XML::Document` (`#raw_document`) so nothing unmapped is lost. Ministry-published FA(3) sample files are the fixture corpus. **Round-trip law:** for every builder golden file, `parse(serialize(invoice))` reproduces equivalent models, and `serialize(parse(sample))` is XSD-valid.
 
+**Corrected 2026-08-24 — the corpus is not where this said it was.** `ksef-api` publishes no example invoice at all; the samples live in `CIRFMF/ksef-pdf-generator` and `CIRFMF/ksef-client-csharp`, pinned per-repository at `spec/fixtures/fa3/` (`docs/REFERENCE.md` §1.4). Two consequences for the law above. The C# samples are **templates** carrying `#nip#`-style placeholders, so a fixture helper substitutes them; and `#raw_document` is load-bearing rather than a nicety, because a real sample uses `Podmiot3`, `DaneKontaktowe`, `OkresFa` and much else this model does not carry — so `serialize(parse(sample))` is XSD-valid *and lossy*, and the law says nothing stronger than validity on purpose. `#unmapped_elements` exists so that loss is visible before a caller re-serialises a document they did not write.
+
 ### 7.7 Validation — three tiers, one entry point
 
 `invoice.validate!` (and `#valid?` / `#errors`) runs:
@@ -468,9 +470,21 @@ Gate status, precisely:
 |---|---|
 | §8 contract runs against TEST | **not met** — runs against stubs; awaiting a live session |
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
-| All seven types build, validate, round-trip | **not met** — only `VAT`; validator tiers 1 and 3 outstanding |
+| All seven types build, validate, round-trip | **not met** — only `VAT`; validator tiers 1 and 3 outstanding. **Round-trip is now met for `VAT`**: the parser landed 2026-08-24 and the law runs green over the pinned corpus |
 
 Remaining for Phase 2: validator tiers 1 and 3, then the six other invoice types starting with KOR (§7.4).
+
+**The parser landed 2026-08-24**, with the sample corpus §7.6 assumed and did not have
+(`docs/REFERENCE.md` §1.4). Two findings changed the plan around it, both ledgered:
+
+- **Tier 3's rule catalogue does not exist upstream.** `faktury/weryfikacja-faktury.md` — the
+  document §9 named as the place to look — is a list of *technical admission* checks, and
+  turned out to be the missing first-tier source for tier **1** instead. No file in
+  `ksef-api` states a reconciliation rule (`docs/REFERENCE.md` §15.6). So tier 1 is now the
+  better-specified of the two, and should be built first, reversing §7.7's implied order.
+- **Tier 1 is provably not redundant with tier 2.** Upstream ships an invoice that is
+  XSD-valid *and* rejected by KSeF, on forbidden C1 characters that a schema cannot see
+  (§15.1). It is pinned, and `spec/ksef/fa3/round_trip_spec.rb` asserts both halves.
 
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.

@@ -141,6 +141,7 @@ RSpec.describe Ksef::FA3::Invoice do
   describe "validation" do
     it "requires at least one line" do
       expect { invoice(lines: []) }.to raise_error(Ksef::ValidationError, /at least one line/)
+      expect { invoice(lines: nil) }.to raise_error(Ksef::ValidationError, /at least one line/)
     end
 
     it "rejects a seller NIP that fails its checksum" do
@@ -183,6 +184,77 @@ RSpec.describe Ksef::FA3::Invoice do
       expect(node.text).to eq("FA")
       expect(node["kodSystemowy"]).to eq("FA (3)")
       expect(node["wersjaSchemy"]).to eq("1-0E")
+    end
+  end
+
+  # raw_document is provenance, not identity (see {Ksef::FA3::Invoice::IDENTITY}). Without
+  # this, a parsed invoice could never equal the one that produced the document.
+  describe "identity" do
+    # Fully determined: every field the model holds is one the document will carry. A line
+    # that leaves `net_amount` to be derived comes back stating it, because `P_11` is in the
+    # document — a real difference, pinned by its own example in the parser spec.
+    def determined = invoice(lines: [line(net_amount: BigDecimal("1500"))])
+
+    it "ignores the retained document when comparing" do
+      built = determined
+      parsed = Ksef::FA3.parse(built.to_xml)
+
+      expect(parsed.raw_document).not_to be_nil
+      expect(built.raw_document).to be_nil
+      expect(parsed).to eq(built)
+      expect(parsed.hash).to eq(built.hash)
+    end
+
+    it "still distinguishes invoices that differ in a modelled field" do
+      expect(invoice(number: "FV/1")).not_to eq(invoice(number: "FV/2"))
+    end
+
+    # The `is_a?` guard in Provenance#==: comparing against another Data object is the case
+    # worth covering, since member-wise comparison would otherwise be attempted on it.
+    it "is not equal to something that is not an invoice" do
+      expect(invoice).not_to eq("FV/2026/08/001")
+      expect(invoice).not_to eq(invoice.lines.first)
+    end
+
+    it "works as a Hash key" do
+      table = { determined => :first }
+
+      expect(table[Ksef::FA3.parse(determined.to_xml)]).to be(:first)
+    end
+  end
+
+  describe "#inspect" do
+    # `Data#inspect` would dump the whole XML document into any line that mentions an
+    # invoice — including RSpec diffs and exception messages.
+    it "redacts the retained document rather than printing it" do
+      text = Ksef::FA3.parse(invoice.to_xml).inspect
+
+      expect(text).to include("#<data Ksef::FA3::Invoice", "raw_document=#<Nokogiri::XML::Document (retained)>")
+      expect(text).not_to include("Naglowek")
+    end
+
+    it "says so plainly when there is no document" do
+      expect(invoice.inspect).to include("raw_document=nil")
+    end
+
+    it "is what to_s gives too" do
+      expect(invoice.to_s).to eq(invoice.inspect)
+    end
+  end
+
+  describe "#unmapped_elements" do
+    it "is empty for an invoice that was built rather than parsed" do
+      expect(invoice.unmapped_elements).to eq([])
+      expect(invoice).to be_fully_mapped
+    end
+
+    it "reports an element the model cannot carry" do
+      # `P_1M`, the place of issue: valid FA(3), and not in this model.
+      xml = invoice.to_xml.sub("<P_2>", "<P_1M>Warszawa</P_1M>\n      <P_2>")
+      parsed = Ksef::FA3.parse(xml)
+
+      expect(parsed.unmapped_elements).to eq(["Faktura/Fa/P_1M"])
+      expect(parsed).not_to be_fully_mapped
     end
   end
 end

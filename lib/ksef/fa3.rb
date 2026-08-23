@@ -33,6 +33,27 @@ module Ksef
         yield builder
         builder.to_invoice
       end
+
+      # Read an FA(3) document back into an {Invoice} (DESIGN.md §7.6).
+      #
+      # The inverse of {#build} only as far as this model reaches. FA(3) is much larger than
+      # a plain `VAT` invoice, so the whole document is retained on
+      # {Invoice#raw_document} and {Invoice#unmapped_elements} names what `#to_xml` would
+      # drop. Check it before re-serialising anything you did not write yourself.
+      #
+      # @example round-tripping your own invoice
+      #   Ksef::FA3.parse(invoice.to_xml) == invoice   # => true
+      #
+      # @example reading one KSeF sent back
+      #   parsed = Ksef::FA3.parse(client.invoice("5265877635-20260824-010000000123-45"))
+      #   parsed.number                                # => "FA/2026/08/001"
+      #   parsed.unmapped_elements                     # => ["Faktura/Podmiot3", …]
+      #
+      # @param xml [String, Nokogiri::XML::Document]
+      # @return [Invoice]
+      # @raise [Ksef::ValidationError] if the input is not a parseable FA(3) invoice, or
+      #   identifies a party by something other than a NIP
+      def parse(xml) = Parser.parse(xml)
     end
   end
 end

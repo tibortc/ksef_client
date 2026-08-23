@@ -65,6 +65,32 @@ RSpec.describe Ksef::FA3::Formatting do
     end
   end
 
+  describe ".unflag" do
+    it "reads the codes back as booleans" do
+      expect(described_class.unflag("1")).to be(true)
+      expect(described_class.unflag("2")).to be(false)
+    end
+
+    # An absent element means "no": the seller has no JST/GV elements at all, and a buyer
+    # may omit them.
+    it "treats an absent value as no" do
+      expect(described_class.unflag(nil)).to be(false)
+    end
+
+    it "accepts booleans and integers, so it composes with .flag" do
+      expect(described_class.unflag(described_class.flag(true))).to be(true)
+      expect(described_class.unflag(1)).to be(true)
+      expect(described_class.unflag(2)).to be(false)
+      expect(described_class.unflag(false)).to be(false)
+    end
+
+    # A third value in a 1/2 field is a document we do not understand, not one to guess at.
+    it "refuses anything else" do
+      expect { described_class.unflag("3") }
+        .to raise_error(Ksef::ValidationError, %r{Expected a 1/2 flag, got "3"})
+    end
+  end
+
   describe ".flag" do
     # The schema spells booleans as 1/2, and the inversion is easy to get backwards.
     it "maps true to 1 and false to 2" do
