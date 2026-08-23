@@ -862,6 +862,38 @@ Fix without weakening anything: point OpenSSL at a real bundle,
 `ca-certificates` to restore the symlink. **Never by disabling verification** — that is a
 hard rule, and the misleading error message makes it a tempting one to break.
 
+### 6a.6 `/testdata/person` grants permissions asynchronously
+
+Learned from the API, 2026-08-23 — the second fact in this ledger whose source is
+observed behaviour rather than a document. `POST /testdata/person` returns **200**, but the
+Owner grant it describes is **not yet in effect**. Authenticating immediately afterwards
+fails with status **415**, "Brak przypisanych uprawnień" (no assigned permissions), returned
+on the *first* poll rather than after a `100`.
+
+Measured, with a fresh NIP and PESEL each time:
+
+| Wait after registering | Result |
+|---|---|
+| none, isolated call after an idle period | success |
+| none, three calls in quick succession | success, **415**, **415** |
+| ten seconds, three calls in quick succession | success, success, success |
+
+So it is not a fixed latency but a queue: an isolated grant lands within the ~2 s the auth
+flow takes, and consecutive ones do not. That is why a single manual `rake auth:bootstrap`
+worked first time while a three-example integration suite failed every example.
+
+**415 is genuinely ambiguous here**, which is the important part. It is both "the grant has
+not landed yet" and the legitimate permanent answer for a subject with no rights. So:
+
+- the **integration suite** may retry it, and does, because it provisioned the identity
+  moments earlier and knows which meaning applies;
+- **library code must never retry a 415.** There it is a final answer, and retrying would
+  hammer the API over a permissions problem no retry can fix.
+
+The suite now provisions **one** identity per run and settles for ten seconds, rather than
+one per example — fewer test people in a shared environment, and one wait instead of three.
+
+
 ---
 
 ## 7. Divergences from DESIGN.md
