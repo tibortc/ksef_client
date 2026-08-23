@@ -31,6 +31,30 @@ gem version for which API state".
 - The serializer reads element order from the generated metadata rather than hand-listing
   it, and raises on element names the schema does not define at that position instead of
   dropping them silently.
+- **Live integration specs, and the nightly schedule enabled.**
+  `spec/integration/auth_flow_spec.rb` exercises the real authentication flow against TEST.
+  Opt-in twice over — tagged `:integration` *and* excluded unless `KSEF_INTEGRATION=1`,
+  because RSpec ANDs exclusion filters with CLI inclusions, so a tag alone would either
+  always run or never run. WebMock is re-enabled around each example rather than globally,
+  so a failure cannot leave the network open for whatever runs next.
+
+  **DESIGN.md §12.4 is resolved.** Running the bootstrap against TEST established what no
+  offline test could: KSeF accepts the XAdES-BES signature this gem produces, the 2.0
+  namespace is correct, `/testdata/person` really is unauthenticated, and a self-signed
+  certificate is accepted on TEST. Recorded at `docs/REFERENCE.md` §6a.4.
+- **`rake auth:bootstrap`** — provisions a TEST credential end to end, retiring the
+  workaround `docs/REFERENCE.md` §6a.2 used to describe (a one-time out-of-band mint via
+  the official C# client). It invents a checksum-valid NIP and PESEL, registers them
+  through the **unauthenticated** `/testdata/person` endpoint — the only reason the chain
+  is not circular, since `POST /tokens` needs a session — authenticates by XAdES with a
+  self-signed certificate, and mints the token. A real qualified certificate can be
+  supplied instead.
+
+  It lives in `tasks/`, so it is never packaged, but it is **not** an untested script:
+  every method is covered against stubs. A checksum bug would otherwise surface as an
+  opaque rejection from a remote server. It refuses any environment whose `test_data_api?`
+  capability is false, so DEMO is refused as well as PROD, and the guard is on the
+  capability rather than the name so a `custom` environment cannot slip past.
 - **`Ksef::Auth::Client`** — the six HTTP calls of the authentication flow, with typed
   responses (`Challenge`, `Initiation`, `OperationStatus`, `Tokens`, `TokenInfo`) and a
   poller. Deliberately thin: it maps requests and responses and nothing else. Only
@@ -152,6 +176,19 @@ expressions are implicitly anchored, and `^` / `$` are literal characters, not a
   decide. This gem now does the same, and sends 2.0. The Java client even ships its own
   edited copy of the 2.0 schema with the IP patterns repaired but `TNipVatUE` and
   `TPeppolId` left broken, which independently confirms those two are defective.
+- **PESEL is a structured identifier and KSeF enforces it** (§6a.3) — the first fact in the
+  ledger whose source is the API's own behaviour rather than a document or a reference
+  client. A checksum-perfect PESEL was rejected with `400 [21405] Invalid PESEL format`;
+  the first six digits encode a birth date with the century folded into the month field.
+  Nothing upstream states this, and no amount of offline verification would have found it.
+- **A missing OpenSSL CA bundle looks like a broken server certificate** (§6a.5). Recorded
+  because the error names the wrong thing entirely and the tempting fix — disabling
+  verification — is a hard-rule violation.
+- **The PESEL checksum is now recorded** at §6a.3 — needed to invent a test person, and
+  confirmed the way §6a.1 confirmed the NIP algorithm: it validates every PESEL the
+  upstream documentation ships and rejects those values with the check digit altered.
+  §6a.3 also states the NIP check digit precisely, because it is easy to get backwards —
+  it *is* the weighted sum `mod 11`, not `11 - (sum mod 11)`.
 - **The authentication status codes are now recorded** at `docs/REFERENCE.md` §4.8, from
   the reference implementation — the Ministry's prose names only two of the eleven and says
   the rest "will be available in the endpoint's technical documentation". This narrows, but

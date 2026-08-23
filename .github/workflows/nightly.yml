@@ -3,16 +3,20 @@ name: nightly
 # Live integration against the KSeF TEST environment. Never runs per-PR (DESIGN.md §9):
 # it consumes shared TEST-environment state and is subject to the API's rate limits.
 on:
-  # The schedule is deliberately disabled until the `ksef-test` environment has
-  # KSEF_TEST_NIP / KSEF_TEST_TOKEN — that needs a provisioned TEST NIP (DESIGN.md §12.4).
-  # Restore this line once the secrets exist; without them the job can only fail, and a
-  # permanently-red nightly teaches everyone to ignore CI.
+  # Enabled 2026-08-23. `rake auth:bootstrap` minted the credential (DESIGN.md §12.4,
+  # resolved); KSEF_TEST_NIP and KSEF_TEST_TOKEN are then stored as **environment** secrets
+  # on `ksef-test`, not repository secrets. That scoping is the point: a repository secret
+  # is readable by every workflow in the repo, so `release.yml` — or anything added later —
+  # could read a live KSeF credential. Only a job declaring this environment can.
+  #
+  # The environment is further restricted to the `main` branch. Without that, any
+  # pushed branch could carry a workflow declaring `environment: ksef-test` and read the
+  # token. Both triggers below run on `main`, so the restriction costs nothing.
   #
   # 02:30 UTC is deliberately outside 16:00-18:00 local, when the Ministry runs scheduled
-  # maintenance on the test environments (docs/REFERENCE.md §2).
-  #
-  # schedule:
-  #   - cron: "30 2 * * *"
+  # maintenance on the test environments (docs/REFERENCE.md §11.3).
+  schedule:
+    - cron: "30 2 * * *"
   workflow_dispatch:
 
 jobs:
@@ -43,8 +47,11 @@ jobs:
         run: bundle exec rake verify:artifacts
 
       - name: Run live integration specs
+        # KSEF_INTEGRATION lifts the exclusion filter; --tag then selects only these specs.
+        # Both are needed: RSpec ANDs exclusion filters with CLI inclusions.
         run: bundle exec rspec --tag integration
         env:
           KSEF_ENV: test
+          KSEF_INTEGRATION: "1"
           KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
           KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}

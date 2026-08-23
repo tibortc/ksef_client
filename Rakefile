@@ -65,4 +65,31 @@ namespace :fa3 do
 end
 
 # Mirrors what CI runs, so `rake` locally means the same thing as a green matrix leg.
+namespace :auth do
+  desc "Provision a TEST credential: register a NIP, authenticate by XAdES, mint a KSeF token"
+  task :bootstrap do
+    require "ksef_client"
+    require_relative "tasks/ksef_bootstrap"
+
+    env = (ENV["KSEF_ENV"] || "test").to_sym
+    abort "Refusing to run against #{env}. This task is TEST-only (a hard rule)." unless env == :test
+
+    result = KsefBootstrap::Runner.new(configuration: Ksef::Configuration.new(env: env)).call
+
+    puts <<~OUT
+
+      Done. Store these as repository secrets — nightly.yml reads both:
+
+        KSEF_TEST_NIP    #{result.fetch(:nip)}
+        KSEF_TEST_TOKEN  #{result.fetch(:token)}
+
+      The token is a confidential credential. Put it straight into GitHub secrets;
+      do not write it to a file in this repository. The PESEL used was
+      #{result.fetch(:pesel)} — recorded only so the context can be re-provisioned,
+      and note that re-creating test data under the same identifier needs a LATER
+      createdDate than the previous one (docs/REFERENCE.md §6a.1).
+    OUT
+  end
+end
+
 task default: %i[verify:artifacts fa3:verify spec rubocop]

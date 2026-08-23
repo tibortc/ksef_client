@@ -24,12 +24,13 @@ submitted.
 > invoice — via the `Ksef::FA3.build` DSL or the value objects directly — to schema-valid
 > XML.
 >
-> **Partly there:** authentication. The `AuthTokenRequest` document and its XAdES-BES
-> signature are implemented and verified offline; the HTTP calls that would exchange them
-> for a token are not.
+> **Certificate authentication works, against the real TEST environment.** The
+> `AuthTokenRequest` document, its XAdES-BES signature and all six auth calls are
+> implemented, and this gem has minted a KSeF token end to end with no external client.
 >
-> **Not yet:** those auth calls, encryption, sessions — so nothing can actually be *sent* to
-> KSeF yet — and the other six invoice types. See [Roadmap](#roadmap).
+> **Not yet:** authenticating *with* a KSeF token (needs the encryption layer), encryption,
+> sessions — so no invoice can be *sent* yet — and the other six invoice types. See
+> [Roadmap](#roadmap).
 >
 > In the quickstart below, **everything up to and including `Ksef::FA3.build` runs
 > today**; the `client` calls do not exist yet.

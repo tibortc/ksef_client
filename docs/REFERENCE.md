@@ -724,7 +724,7 @@ needs no prior credentials. (They exist on TEST only; see §2.)
 `createdDate` caveat: when re-creating test data under the same identifier, the date must
 be **later** than the previous one — not equal, not earlier.
 
-### 6a.2 The token needs a one-time XAdES authentication — this blocks DESIGN.md §12.4 for 0.1
+### 6a.2 The token needs a one-time XAdES authentication — which is why XAdES is in 0.1
 
 `tokeny-ksef.md`: *"Wygenerowanie tokena KSeF jest możliwe wyłącznie po jednorazowym
 uwierzytelnieniu się podpisem elektronicznym (XAdES)."* — a KSeF token can be generated
@@ -739,15 +739,128 @@ XAdES from 0.3 into 0.1 (DESIGN.md §6.3, decided 2026-08-22). A token-only clie
 issue its own first credential, which would have forced every user — and our own nightly
 CI — to bootstrap via somebody else's client.
 
-Until the certificate flow is implemented, the interim workaround is a one-time
-out-of-band mint via the official `ksef-client-csharp`, using a self-signed certificate
-(permitted on TEST; see `auth/testowe-certyfikaty-i-podpisy-xades.md`). Once DESIGN.md §6.3's
-certificate flow lands, this gem mints its own and the workaround is retired.
+**Retired 2026-08-22.** This section used to say the interim workaround was a one-time
+out-of-band mint via the official C# client. That is no longer necessary — the certificate
+flow has landed, and `rake auth:bootstrap` does the whole chain in this gem. See §6a.3.
+
+### 6a.3 `rake auth:bootstrap`
+
+Implemented in `tasks/ksef_bootstrap.rb` — outside `lib/`, so never packaged, but covered
+by `spec/tasks/ksef_bootstrap_spec.rb` against stubs rather than left as an untested
+script. A checksum bug here would otherwise surface as an opaque rejection from a remote
+server.
+
+What it does, in order:
+
+1. invents a NIP and a PESEL, both checksum-valid, the NIP also shaped to satisfy the auth
+   schema's `TNIP` pattern (§4.1);
+2. `POST /testdata/person` — unauthenticated, which is the only reason the chain is not
+   circular;
+3. generates a self-signed certificate carrying `serialNumber=PNOPL-<pesel>` (§4.4), or
+   uses a real qualified certificate if one is supplied;
+4. runs the full §4.2 flow: challenge → sign → submit → poll → redeem;
+5. `POST /tokens` with the access token, requesting `InvoiceRead` and `InvoiceWrite`;
+6. prints `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN`, which are stored as **environment**
+   secrets on `ksef-test` — not repository secrets. A repository secret is readable by
+   every workflow in the repo, which for a live KSeF credential is more exposure than
+   it needs; only a job declaring the environment can read an environment secret. The
+   environment is also restricted to the `main` branch, so a pushed branch cannot
+   claim it and read the token.
+
+**PESEL checksum**, needed for step 1 and not previously ledgered: weights
+`1,3,7,9,1,3,7,9,1,3` across the first ten digits; the eleventh is `(10 - sum % 10) % 10`.
+Confirmed the way §6a.1 confirmed the NIP algorithm — it validates every PESEL the upstream
+documentation ships (`15062788702`, `30112206276`, `38092277125`, `88102341294`) and
+rejects those values with the check digit altered.
+
+**PESEL is a structured identifier, and KSeF enforces it.** Learned from the API itself,
+2026-08-23 — `POST /testdata/person` rejected a checksum-perfect PESEL with:
+
+```
+400 [21405] Żądanie jest nieprawidłowe. Invalid PESEL format.
+```
+
+The first six digits encode a **birth date**, with the century folded into the month field:
+
+| Month field | Century |
+|---|---|
+| 01–12 | 1900s |
+| 21–32 | 2000s |
+| 41–52 | 2100s |
+| 61–72 | 2200s |
+| 81–92 | 1800s |
+
+Confirmed by decoding every PESEL the upstream docs ship: `15062788702` → 1915-06-27,
+`30112206276` → 1930-11-22, `38092277125` → 1938-09-22, `88102341294` → 1988-10-23. All
+four are plain 1900s dates.
+
+Nothing upstream *states* this. `dane-testowe-scenariusze.md` shows PESELs in examples but
+never describes their structure, and the OpenAPI schema types the field as `string`. **This
+is the first fact in this ledger whose source is the API's own behaviour** rather than a
+document or a reference implementation — a strictly more reliable tier than anything above
+it, and the only one that cannot be obtained offline.
+
+The generator draws births from 1950–1999; the validator accepts the full scheme range,
+because 1800s and 2000s PESELs are legitimate even if implausible for a test person.
+
+**NIP checksum, stated precisely** because it is easy to get backwards: the check digit
+*is* the weighted sum `mod 11`, **not** `11 - (sum mod 11)`. Confirmed against four NIPs
+from the upstream docs. A sum of 10 is unrepresentable, so that draw is discarded.
+
+The task refuses any environment whose `test_data_api?` capability is false, so DEMO is
+refused as well as PROD — the `/testdata/*` endpoints exist on TEST only, and the guard is
+on the capability rather than the name so a `custom` environment cannot slip past.
 
 Tokens are minted in a `Nip` or `InternalId` context with a fixed permission set chosen at
 creation — changing permissions requires a new token. For this gem's integration suite,
 `InvoiceRead` and `InvoiceWrite` are the relevant ones. Treat the token as a confidential
 secret (`tokeny-ksef.md` says so explicitly).
+
+### 6a.4 Verified against live TEST, 2026-08-23
+
+`rake auth:bootstrap` completed against the TEST environment and produced a usable KSeF
+token. Because a token can only be minted with an `accessToken`, which requires a redeemed
+authentication, which requires status `200`, that single outcome establishes several things
+that no amount of offline testing could:
+
+- **KSeF accepts the XAdES-BES signature this gem produces.** The combination chosen in
+  §4.3 — enveloped, exclusive c14n, `rsa-sha256`, `xmlenc#sha256`, with the ETSI `Type` URI
+  on the `SignedProperties` reference — is accepted in practice, not merely permitted by
+  the allow-list.
+- **The 2.0 namespace is correct** (§14.4). The document was sent with
+  `xmlns="http://ksef.mf.gov.pl/auth/token/2.0"` and was not rejected. Whether 2.1 would
+  also be accepted remains unverified; there is now no reason to find out.
+- **`/testdata/person` really is unauthenticated**, as §6a.1 read from the contract.
+- **A self-signed certificate is accepted on TEST** (§4.6), carrying the PESEL as
+  `serialNumber=PNOPL-<pesel>` (§4.4).
+- **The whole §4.2 flow works as ledgered**, including polling on `StatusInfo.code` and
+  single-use redemption.
+
+Two failures on the way there, both bugs on this side rather than upstream: a local OpenSSL
+trust store with no CA bundle (see §6a.5), and the PESEL structure above.
+
+### 6a.5 A missing CA bundle looks like a broken server certificate
+
+Also learned the hard way, 2026-08-23. On a machine where Homebrew's `openssl@3` is
+installed but `/usr/local/etc/openssl@3/cert.pem` is absent, Ruby has **no trust store at
+all**, and the failure reads:
+
+```
+certificate verify failed (self-signed certificate in certificate chain)
+```
+
+which points at the wrong thing entirely. KSeF's chain is genuine —
+`*.ksef.mf.gov.pl` → `GeoTrust TLS RSA CA G1` → `DigiCert Global Root G2` — and the "self-signed
+certificate" being complained about is that DigiCert root, self-signed as every root is.
+With no store to chain to, OpenSSL reports the last certificate it saw.
+
+`curl` succeeds throughout, because it uses Apple's store rather than OpenSSL's, so a
+reachability check proves nothing about what Ruby will do.
+
+Fix without weakening anything: point OpenSSL at a real bundle,
+`SSL_CERT_FILE=/usr/local/etc/ca-certificates/cert.pem`, or reinstall Homebrew's
+`ca-certificates` to restore the symlink. **Never by disabling verification** — that is a
+hard rule, and the misleading error message makes it a tempting one to break.
 
 ---
 
@@ -914,7 +1027,7 @@ identical so the §1 digests keep verifying.
 ## 9. Still unverified
 
 Carried forward; must be resolved before the code that depends on them is written
-(DESIGN.md §0.2). Reviewed 2026-08-22.
+(DESIGN.md §0.2). Reviewed 2026-08-23.
 
 - **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7). The only genuinely
   open blocker of the original set. `faktury/weryfikacja-faktury.md` is the next place to
@@ -928,8 +1041,12 @@ Carried forward; must be resolved before the code that depends on them is writte
   the corresponding areas the same way when those subsystems are built.
 - **Nightly higher rate limits** (§6.1) — the 20:00–06:00 values are explicitly
   unpublished pending production tuning. Do not hard-code a nightly multiplier.
-- **`upo.pages[].downloadUrl` path prefix** — see §14.2. Recorded as a divergence rather
-  than a blocker, since the workaround (construct the path, ignore the field) is safe.
+- **Whether `upo.pages[].downloadUrl` arrives absolute or host-relative** — see §14.2.
+  `srodowiska.md` states only that a returned URL's *host* matches the environment called,
+  so the code must resolve a relative value against that host and use an absolute one as
+  is. Needs a live session to settle. (An earlier revision of this bullet said the field
+  should simply be ignored; that was the superseded reading, corrected in §14.2 — the link
+  is unmetered and hash-verified, so ignoring it costs something real.)
 
 ### 9.1 Resolved
 
