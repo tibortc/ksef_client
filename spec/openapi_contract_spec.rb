@@ -12,10 +12,14 @@ require "json"
 #
 # These cover the sections whose conclusions had no code to protect them when they were
 # ledgered. §14.3 and §14.4 were always guarded by executable assertions, because the
-# schemas they concern are in use. §14.1 is now implemented by `Ksef::Crypto` and guarded
-# there too, so these assertions are its second line of defence; **§14.2 still has no code
-# at all**, and until the session layer lands these are the only thing keeping it from
-# rotting into a stale conclusion someone later implements.
+# schemas they concern are in use; §14.1 is now implemented by `Ksef::Crypto` and §14.2 by
+# `Ksef::UPO::Client`, both with their own specs. So these assertions are no longer the only
+# line of defence for any of the four — they are the one that fails if *upstream* changes
+# rather than if we do, which is the failure the rest of the suite cannot see.
+#
+# §14.6 is the exception, and the reason to keep reading: it asserts a **negative** — that
+# the contract says nothing about a header both reference clients send. Nothing else can
+# notice if that stops being true.
 RSpec.describe "the pinned OpenAPI contract" do
   let(:spec) do
     JSON.parse(File.read(File.expand_path("fixtures/openapi/open-api.json", __dir__), encoding: "UTF-8"))

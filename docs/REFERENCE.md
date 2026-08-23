@@ -1154,7 +1154,11 @@ Carried forward; must be resolved before the code that depends on them is writte
   recomputes both from the real certificates.
 - **Nightly higher rate limits** (§6.1) — the 20:00–06:00 values are explicitly
   unpublished pending production tuning. Do not hard-code a nightly multiplier.
-- **Whether `upo.pages[].downloadUrl` arrives absolute or host-relative** — see §14.2.
+- **Whether `upo.pages[].downloadUrl` arrives absolute or host-relative** — see §14.2. Still
+  unverified, but **no longer blocking**: `Ksef::UPO::Client` handles both, resolving a
+  relative value against the API host and using an absolute one untouched (§12.3). A live
+  session settles which is actually sent; until then neither branch is dead code, because
+  either could be the real one.
   `srodowiska.md` states only that a returned URL's *host* matches the environment called,
   so the code must resolve a relative value against that host and use an absolute one as
   is. Needs a live session to settle. (An earlier revision of this bullet said the field
@@ -1509,6 +1513,31 @@ fixed 1/s (§6.1 caps `GET /sessions/{ref}` at 1200/h, which 60 polls per invoic
 quickly), and a 60-second ceiling is too short for a large session. Their *terminal condition*
 is right though, and is what we adopt: poll while the code is `150`, treat everything else as
 final.
+
+### 12.3 Decisions this gem made about UPO retrieval, that upstream does not state
+
+The third of these tables, after §10.3 (crypto) and §11.2a (sessions). Implemented
+2026-08-23 in `lib/ksef/upo/`.
+
+| Decision | Value | Why |
+|---|---|---|
+| **A separate, credential-free connection** | `HTTP::Connection.storage` — no bearer, no `base_url` | §14.2 forbids sending the access token to a `downloadUrl`. A rule nobody can break beats a rule everybody must remember — see below |
+| **No parsed form on `Document`** | holds the received `String`; no `#to_xml`, no re-encode, `#write` uses `binwrite` | The Ministry's XAdES signature covers **octets**. A lossless XML round-trip can still yield a document that no longer verifies, so the parsed form is simply not offered |
+| `Ksef::IntegrityError` | a new branch of DESIGN.md §6.7 | A hash mismatch means *fetch it again* — nothing is wrong with the request, the credentials or the document. Not a `ValidationError` (the caller's data is fine) nor an `ApiError` (the response was a success) |
+| `#verifiable?` separate from `#verified?` | two booleans, not one tri-state | The metered route publishes no hash. Folding "nothing to check" into "check failed" would make every API-route fetch look corrupt |
+| `#fetch` prefers the link | falls back to the metered route on expiry or absence | §14.2's resolution, in one call: the link is unmetered and hash-verified, and `GET /sessions` already allows only 10/min |
+| A relative `downloadUrl` is resolved | against the API host; an absolute one used untouched | §9 still carries which form the live API sends as unverified, so both are handled rather than one guessed at |
+| KSeF numbers parsed before use | `for_ksef_number` runs §13's CRC-8 first | A mistyped number fails locally instead of as an opaque 404 |
+
+**Why the connection split is the mechanism and not just tidiness.** A `downloadUrl` is a
+pre-signed Azure Blob URI that carries its own authorisation in the query string. Sending
+the KSeF access token to it would hand a live credential to third-party storage, and the
+contract says so explicitly — *"nie należy wysyłać tokenu dostępowego"*. That is a rule
+about something absent, and absences are exactly what code review misses: nobody notices
+the header that was not removed. Putting those requests on a connection that has no bearer
+to attach turns "we remembered" into "we cannot", which is the same reasoning as binding the
+encryptor to the session (§11.2a) and having `Encryptor#seal` produce both digests at once
+(§10.3).
 
 Reference numbers share a shape: `YYYYMMDD-XX-<hex>-<hex>-CC`, where `XX` is a kind tag
 (`CR` challenge, `SB` batch session, `EU` UPO) and `CC` looks like the same CRC-8 checksum

@@ -14,6 +14,34 @@ gem version for which API state".
 
 ### Added
 
+- **`Ksef::UPO` — retrieval, over a connection that has no credential.** A UPO is the legal
+  proof that KSeF received an invoice, fetched over an unauthenticated storage link, and
+  three properties follow from that.
+
+  **The access token is never sent to a `downloadUrl`.** Those links are pre-signed Azure
+  Blob URIs carrying their own authorisation in the query string, and the contract says
+  outright not to send the token — it would hand a live KSeF credential to third-party
+  storage. Rather than remembering that per call site, `Ksef::HTTP::Connection.storage`
+  builds a second connection with **no bearer and no base URL**, so no code path can leak
+  one. It also omits JSON encoding and parsing, since a UPO is XML that must survive as the
+  exact bytes received.
+
+  **The bytes are archived verbatim.** The Ministry's XAdES signature covers octets, not an
+  abstract tree, so even a lossless XML round-trip can produce a document that no longer
+  verifies. `UPO::Document` holds the received string and offers no parsed form, no
+  `#to_xml` and no re-encode; `#write` uses `binwrite` so a newline translation cannot
+  corrupt an archive.
+
+  **`x-ms-meta-hash` is verified** — the only integrity check available on bytes fetched
+  outside the API. `#fetch` prefers the unmetered, hash-verified link and falls back to the
+  metered route when it expires, which is §14.2's resolution after an earlier reading had it
+  backwards. `for_ksef_number` parses the number first, so a mistyped one fails on its CRC-8
+  locally rather than as an opaque 404.
+- **`Ksef::IntegrityError`** — raised when downloaded bytes do not match the published hash.
+  Its own class because the right response is unlike every other error here: *fetch it
+  again*. Nothing is wrong with the request, the credentials or the document — the transfer
+  was corrupted. Silently archiving corrupt bytes as proof of receipt is the one outcome
+  worth refusing loudly.
 - **`Ksef::Sessions::Status`** — single-shot session and per-invoice reads, plus
   deadline-bounded waits. Capped exponential backoff (1s, 2s, 4s … 30s, five-minute
   deadline) rather than the reference clients' fixed 1s × 60: at 1/s a single wait spends 60

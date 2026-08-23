@@ -36,9 +36,12 @@ submitted.
 > submits invoices, and closes it; `Ksef::Sessions::Status` reads and waits on session and
 > per-invoice status.
 >
-> **Not yet:** UPO retrieval, and the `Ksef::Client` facade that ties the pieces together —
-> so the twenty-line quickstart below does not run yet, even though everything under it
-> does. Also outstanding: validator tiers 1 and 3 (only the XSD tier exists), and the other
+> **UPO retrieval works** as well, over a connection deliberately built without a
+> credential: the download links are third-party storage URIs, so the access token must
+> never reach them.
+>
+> **Not yet:** the `Ksef::Client` facade that ties the pieces together — so the twenty-line
+> quickstart below does not run yet, even though everything under it does. Also outstanding: validator tiers 1 and 3 (only the XSD tier exists), and the other
 > six invoice types. See [Roadmap](#roadmap).
 >
 > In the quickstart below, everything except `Ksef::Client` runs today — including the
