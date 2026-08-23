@@ -14,6 +14,36 @@ gem version for which API state".
 
 ### Added
 
+- **`Ksef::Sessions::Status`** — single-shot session and per-invoice reads, plus
+  deadline-bounded waits. Capped exponential backoff (1s, 2s, 4s … 30s, five-minute
+  deadline) rather than the reference clients' fixed 1s × 60: at 1/s a single wait spends 60
+  of the 1200 requests an hour a context gets, and a 60-second ceiling is far too short for
+  a large session. A timeout says the operation has **not failed but outlasted the wait**,
+  because conflating the two invites a needless resend.
+
+  **It exposes no list-sessions call at all.** `GET /sessions` is 10 req/min — the tightest
+  budget in the API — against 1200/h for the two endpoints polling should use. Omitting the
+  method is the simplest way to make that mistake impossible rather than merely discouraged.
+
+  `InvoiceState` surfaces what the endpoint already returns instead of making callers fetch
+  it twice: the per-invoice UPO link, and on a duplicate the **original** submission's KSeF
+  number and session reference, which is what makes a resend reconcilable. `UpoPage` keeps
+  its pre-signed URL out of `#inspect` and `#to_s` — the link carries its own authorisation
+  in the query string, so it is a credential — while still exposing it to a caller that asks.
+- **Corrected: both `100` and `150` mean "keep polling"**, not `150` alone. The earlier
+  reading came from `OnlineSessionUtils.cs`, whose poller returns as soon as the code is
+  anything but `150`, and it is wrong on the contract's own wording — `100` is *"przyjęta do
+  dalszego przetwarzania"*, accepted for **further** processing, so an invoice sitting there
+  is undecided and has no KSeF number. A poller that stops at `100` reports a pending
+  invoice as though it were settled.
+
+  The rule is now `code < 200 is in progress` rather than a list of intermediate codes, so a
+  code upstream adds later behaves correctly by default. This is deliberately the inverse of
+  the treat-the-unknown-as-terminal rule used for *authentication* status, and the asymmetry
+  is justified in both places: auth polls without a deadline so it must not loop for ever,
+  while session polling is bounded — and "unresolved" is a more honest answer about an
+  invoice than "prematurely final". The same rule makes `170` → `200` work for sessions,
+  where closing starts asynchronous UPO generation and "closed" is one step short of done.
 - **`Ksef::Sessions::Online` — open, send, close.** Stateless and thin, like
   `Auth::Client`: it maps requests and responses and holds no session of its own. Both
   official clients do the same, threading the reference through as a parameter.

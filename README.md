@@ -32,8 +32,14 @@ submitted.
 > and the session layer share: `Ksef::Crypto` fetches and selects the Ministry's published
 > keys, wraps a symmetric key with RSA-OAEP, and encrypts payloads with AES-256-CBC.
 >
-> **Not yet:** sessions — so no invoice can be *sent* yet — validator tiers 1 and 3 (only
-> the XSD tier exists), and the other six invoice types. See [Roadmap](#roadmap).
+> **The session layer works** too: `Ksef::Sessions::Online` opens a session, encrypts and
+> submits invoices, and closes it; `Ksef::Sessions::Status` reads and waits on session and
+> per-invoice status.
+>
+> **Not yet:** UPO retrieval, and the `Ksef::Client` facade that ties the pieces together —
+> so the twenty-line quickstart below does not run yet, even though everything under it
+> does. Also outstanding: validator tiers 1 and 3 (only the XSD tier exists), and the other
+> six invoice types. See [Roadmap](#roadmap).
 >
 > In the quickstart below, everything except `Ksef::Client` runs today — including the
 > `Ksef::Auth::Token` credential. **`Ksef::Client` itself does not exist yet**, so the three

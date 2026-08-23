@@ -209,8 +209,14 @@ RSpec.describe "the pinned OpenAPI contract" do
     let(:invoice_status) { schemas.dig("SessionInvoiceStatusResponse", "properties", "status", "description") }
     let(:session_status) { schemas.dig("SessionStatusResponse", "properties", "status", "description") }
 
-    it "makes 150 the only per-invoice code that means keep polling" do
+    # Both are intermediate: 100 is "accepted for *further* processing", so an invoice
+    # sitting there is undecided. The reference clients poll only while 150, which is why
+    # §12.1 now states the rule as `code < 200` — see InvoiceCodes.
+    it "declares two intermediate per-invoice codes, not one" do
+      expect(invoice_status).to match(/^\| 100 \| Faktura przyjęta do dalszego przetwarzania/)
       expect(invoice_status).to match(/^\| 150 \| Trwa przetwarzanie/)
+      expect(Ksef::Sessions::InvoiceCodes).to be_in_progress(100)
+      expect(Ksef::Sessions::InvoiceCodes).to be_in_progress(150)
     end
 
     # The code a §14.1 mistake produces: prefix the IV to the ciphertext and this comes back.

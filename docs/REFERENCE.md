@@ -1448,8 +1448,8 @@ worst one timeout — and "unresolved" is a more honest answer about an invoice 
 
 | Code | Meaning | Notes |
 |---|---|---|
-| 100 | accepted for further processing | not terminal |
-| **150** | **processing** | the only "poll again" code |
+| **100** | **accepted for further processing** | **not terminal — keep polling** |
+| **150** | **processing** | **not terminal — keep polling** |
 | 200 | success | terminal, and the invoice has a KSeF number |
 | 405 | processing cancelled because the session failed | |
 | 410 | invalid permission scope | |
