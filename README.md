@@ -40,13 +40,18 @@ submitted.
 > credential: the download links are third-party storage URIs, so the access token must
 > never reach them.
 >
-> **Not yet:** the `Ksef::Client` facade that ties the pieces together — so the twenty-line
-> quickstart below does not run yet, even though everything under it does. Also outstanding: validator tiers 1 and 3 (only the XSD tier exists), and the other
-> six invoice types. See [Roadmap](#roadmap).
+> **`Ksef::Client` ties it together, and the quickstart below is now real code** — a spec
+> drives that exact snippet end to end, from `Ksef::FA3.build` through `send_invoice`,
+> `wait_until_accepted` and `upo`.
 >
-> In the quickstart below, everything except `Ksef::Client` runs today — including the
-> `Ksef::Auth::Token` credential. **`Ksef::Client` itself does not exist yet**, so the three
-> lines that call it are the 0.1.0 target rather than working code.
+> **The honest caveat:** all of it above except the certificate flow is verified against
+> stubbed HTTP, not against KSeF. **No session has ever been opened against the real
+> service.** The nightly TEST job is what will settle that, and until it has run, treat the
+> transport layer as "believed correct" rather than "proven".
+>
+> **Not yet:** validator tiers 1 and 3 (only the XSD tier exists), and six of the seven
+> invoice types — `VAT` builds, `KOR`/`ZAL`/`ROZ`/`UPR` and the two `KOR_` combinations do
+> not. See [Roadmap](#roadmap).
 
 ## Installation
 
@@ -62,16 +67,17 @@ require "ksef_client"   # defines Ksef, Ksef::FA3, Ksef::Auth, Ksef::Crypto, ...
 
 ## Quickstart
 
-The `Ksef::FA3.build` block runs today and produces schema-valid FA(3) XML. The `client`
-calls around it are the target API for 0.1.0 and are **not implemented yet**.
+All of this runs. `spec/ksef/client_spec.rb` drives this snippet against stubbed HTTP, so it
+cannot drift from the code — though see the status note above on what stubs do and do not
+prove.
 
 ```ruby
-client = Ksef::Client.new(                       # ← Ksef::Client: not yet
+client = Ksef::Client.new(
   env:  :test,
   auth: Ksef::Auth::Token.new(context_nip: "9999999999", token: ENV["KSEF_TOKEN"])
-)                                                # ← the credential itself works today
+)
 
-invoice = Ksef::FA3.build do |f|                 # ← this part works
+invoice = Ksef::FA3.build do |f|
   f.seller nip: "9999999999", name: "ACME sp. z o.o.",
            address: { street: "Prosta 1", city: "Warszawa", postal_code: "00-001", country: "PL" }
   f.buyer  nip: "1111111111", name: "Klient S.A.",
@@ -81,14 +87,28 @@ invoice = Ksef::FA3.build do |f|                 # ← this part works
   f.line name: "Consulting", qty: 10, unit: "godz.", net_unit_price: 150, vat: "23"
 end
 
-invoice.validate!                              # ← works: offline, against the bundled XSD
-invoice.to_xml                                 # ← works
+invoice.validate!                              # offline, against the bundled XSD
+invoice.to_xml
 
-result = client.send_invoice(invoice)          # ← not yet: validate! → encrypt → submit
+result = client.send_invoice(invoice)          # validate! → encrypt → session → submit
 status = client.wait_until_accepted(result.reference)
-status.ksef_number                             # => "9999999999-20260822-…-AF"
-upo    = client.upo(result.reference)          # signed UPO XML — archive this verbatim
+status.ksef_number                             # => "9999999999-20260823-…-3F"
+upo    = client.upo(result.reference)          # signed UPO — archive the bytes verbatim
+upo.write("upo/#{status.ksef_number}.xml")     # binwrite: the MF signature covers octets
 ```
+
+`send_invoice` opens a session of its own, submits, and closes it. Sending many invoices?
+Use a block, so they share one session instead of opening thirty:
+
+```ruby
+receipts = client.session do |batch|
+  invoices.map { |invoice| batch.send_invoice(invoice) }
+end                                            # ← closed here, which starts the collective UPO
+```
+
+`result.reference` is the pair of references — session and invoice — because every status
+and UPO endpoint is keyed on both. That is why it can be passed straight to
+`wait_until_accepted` and `upo`.
 
 The DSL accepts English shorthand (`qty:`, `vat:`) and coerces a plain Hash into an
 address. A misspelled key raises and tells you what was permitted, rather than quietly

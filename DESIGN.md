@@ -212,7 +212,8 @@ lib/
     │   ├── document.rb       # verbatim bytes; no parsed form on purpose
     │   └── validator.rb, validation.rb
     ├── ksef_number.rb        # the 35-character invoice identifier + CRC-8 (§13)
-    ├── invoices/             # download by KSeF number; query/export in 0.2 — NOT YET WRITTEN
+    │   └── client.rb         # download by KSeF number; query/export in 0.2
+    ├── client.rb             # the §8 facade; receipt.rb + session.rb beside it
     ├── models/               # response objects — **not built as a directory**; each
     │                         # subsystem keeps its own, following the auth precedent
     └── fa3/
@@ -456,7 +457,17 @@ Build the **certificate flow first**: it is the only one that can bootstrap a cr
 
 **Both auth flows and the crypto module have since landed** (`Ksef::Crypto`, `Ksef::Auth::Token`, `POST /auth/ksef-token`). One correction to §6.4 while doing it: the golden vectors it asks for **do not exist upstream** — neither reference client commits plaintext/ciphertext pairs — so the primitives are pinned to NIST SP 800-38A and FIPS 180-4 instead, and the OAEP digest and MGF1 digest are pinned behaviourally rather than by trusting an option name. `docs/REFERENCE.md` §10.1 records what replaced them and why it is at least as strong.
 
-Still outstanding: sessions and invoice send, validator tiers, and six of the seven invoice types — so the first and third gates are not met.
+**The session layer, UPO handling and the `Ksef::Client` facade have landed too**, so §8's snippet now runs end to end — `spec/ksef/client_spec.rb` drives it verbatim. **But it runs against stubs.** The first gate says "against TEST", and no session has ever been opened against the real service, so it is *not* met: the nightly TEST job is what will settle it.
+
+Gate status, precisely:
+
+| Gate | State |
+|---|---|
+| §8 contract runs against TEST | **not met** — runs against stubs; awaiting a live session |
+| A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
+| All seven types build, validate, round-trip | **not met** — only `VAT`; validator tiers 1 and 3 outstanding |
+
+Remaining for Phase 2: validator tiers 1 and 3, then the six other invoice types starting with KOR (§7.4).
 
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.

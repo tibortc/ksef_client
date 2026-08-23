@@ -14,6 +14,34 @@ gem version for which API state".
 
 ### Added
 
+- **`Ksef::Client` — the facade, and DESIGN.md §8's snippet now runs.** A spec drives that
+  snippet as written, from `Ksef::FA3.build` through `send_invoice`, `wait_until_accepted`
+  and `upo`, so the README's headline example can no longer drift from the code.
+
+  **`Receipt#reference` returns `self`,** and that is not a trick. §8 reads
+  `client.wait_until_accepted(result.reference)`, which looks like it wants a string — but
+  every status and UPO endpoint is keyed on **both** the session and the invoice, so an
+  invoice reference alone looks nothing up. Rather than bend §8 into two arguments, or cache
+  the session on a client that has to stay thread-safe, the pair *is* the reference.
+
+  **`#upo` uses the metered per-invoice route**, against §14.2's stated preference —
+  deliberately, and only there. Obtaining the unmetered pre-signed link costs a metered
+  status call first, so for one invoice the direct route is one request rather than two. The
+  link earns its keep on collective UPOs, which is what `#collective_upo` uses it for.
+
+  Thread-safe by construction rather than by promise (DESIGN.md §5.2): frozen configuration,
+  stateless connections, and the only mutable state — the memoised credential — behind one
+  mutex. **No session is ever held on the client**, which was the deciding argument for
+  opening a fresh one per send: a cached session would be mutable state two threads could
+  submit into at once. A spec runs six concurrent sends and asserts one authentication.
+
+  Authentication is lazy: constructing a client performs no I/O, and the first call needing
+  a credential runs the whole KSeF-token flow.
+- **`Ksef::Invoices::Client`** — `GET /invoices/ksef/{ksefNumber}`, returning the invoice
+  verbatim. 8 req/s but only **64 req/h**, one of the tightest ceilings in the API: it is a
+  per-document fetch, so a month of invoices exhausts the hourly allowance long before the
+  per-second limit bites, and the 0.2 package export is the bulk route. The number is
+  CRC-checked locally rather than spending one of those 64 requests on a 404.
 - **`Ksef::UPO` — retrieval, over a connection that has no credential.** A UPO is the legal
   proof that KSeF received an invoice, fetched over an unauthenticated storage link, and
   three properties follow from that.
