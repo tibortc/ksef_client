@@ -21,9 +21,14 @@ module Ksef
           Faraday.new(url: config.base_url, headers: default_headers(config)) do |f|
             f.request :json
 
-            # Registration order is load-bearing. Faraday runs `on_complete` callbacks
-            # innermost-first, so the JSON parser must be registered *after* the error
-            # handler for the handler to see a decoded body rather than a raw string.
+            # Registration order is load-bearing, in two directions. Faraday runs
+            # `on_complete` callbacks innermost-first, so the JSON parser must be registered
+            # *after* the error handler for the handler to see a decoded body rather than a
+            # raw string. And {Retry} must sit *outside* the error handler — so it catches
+            # typed exceptions rather than re-deciding what a status means — while staying
+            # *inside* `request :json`, so a retry re-sends the encoded body instead of
+            # encoding it twice.
+            f.use Retry, policy: config.retry_policy, logger: config.logger
             f.use ErrorHandler
             f.use SystemWarning, logger: config.logger
             f.response :json, content_type: JSON_CONTENT_TYPE
@@ -51,6 +56,10 @@ module Ksef
         # @return [Faraday::Connection]
         def storage(config)
           Faraday.new(headers: { "User-Agent" => config.user_agent }) do |f|
+            # Retried on the same terms: a UPO download is a GET, and this path is unmetered,
+            # so a transient storage failure should not cost the caller their proof of
+            # receipt. Still GET/HEAD-only — the policy decides, not this connection.
+            f.use Retry, policy: config.retry_policy, logger: config.logger
             f.use ErrorHandler
             apply_transport_options(f, config)
             f.adapter config.adapter

@@ -3,7 +3,12 @@
 RSpec.describe Ksef::HTTP::Connection do
   subject(:connection) { described_class.build(config) }
 
-  let(:config) { Ksef::Configuration.new(env: :test) }
+  # Retries are disabled here on purpose. These examples test how {Ksef::HTTP::ErrorHandler}
+  # *maps* statuses, and several of them stub a 429 carrying `Retry-After: 30` or a +45s
+  # HTTP-date on a GET — which {Ksef::HTTP::Retry} now correctly honours, unclamped, by
+  # actually sleeping. Isolating the unit keeps this file about mapping and off the clock;
+  # `retry_spec.rb` covers the retrying itself with an injected sleeper.
+  let(:config) { Ksef::Configuration.new(env: :test, retry: Ksef::RetryPolicy.none) }
   let(:base) { "https://api-test.ksef.mf.gov.pl/v2" }
 
   describe "connection shape" do

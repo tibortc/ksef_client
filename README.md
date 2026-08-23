@@ -251,7 +251,8 @@ integrators.
   string.
 - **`BigDecimal` everywhere for money.** `Float` is forbidden in any monetary path.
 - **Invoice submission is never auto-retried.** A duplicate invoice in KSeF is a real tax
-  problem. Idempotent GETs retry with backoff; a failed submission surfaces to you.
+  problem. Idempotent GETs retry with capped exponential backoff, honouring `Retry-After`
+  unclamped; every POST surfaces its error to you, so re-sending is always your decision.
 - **Thread-safe by requirement.** Configuration is frozen at construction, and a single
   client will be shareable across threads (Sidekiq is the expected habitat) — a stated
   constraint on `Ksef::Client`, which is not written yet, not a claim about shipped code.

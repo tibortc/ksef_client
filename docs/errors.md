@@ -44,7 +44,7 @@ as that proof is the one failure worth refusing loudly (§14.2, §12.3).
 | Status | Class | Notes |
 |---|---|---|
 | 400 | `Ksef::ApiError` | Carries `errors[]`; `#code` is the KSeF error code |
-| 401 | `Ksef::AuthenticationError` | Refresh and replay once, for idempotent requests only |
+| 401 | `Ksef::AuthenticationError` | **Not** retried. The refresh-and-replay of DESIGN.md §6.3 is not implemented; re-authenticate yourself |
 | 403 | `Ksef::AuthorizationError` | Check `#reason_code` before retrying anything |
 | 410 | `Ksef::ResourceGoneError` | The resource existed but is gone |
 | 429 | `Ksef::RateLimitedError` | Honour `#retry_after` |
