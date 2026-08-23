@@ -724,7 +724,7 @@ needs no prior credentials. (They exist on TEST only; see §2.)
 `createdDate` caveat: when re-creating test data under the same identifier, the date must
 be **later** than the previous one — not equal, not earlier.
 
-### 6a.2 The token needs a one-time XAdES authentication — this blocks DESIGN.md §12.4 for 0.1
+### 6a.2 The token needs a one-time XAdES authentication — which is why XAdES is in 0.1
 
 `tokeny-ksef.md`: *"Wygenerowanie tokena KSeF jest możliwe wyłącznie po jednorazowym
 uwierzytelnieniu się podpisem elektronicznym (XAdES)."* — a KSeF token can be generated
@@ -1023,7 +1023,7 @@ identical so the §1 digests keep verifying.
 ## 9. Still unverified
 
 Carried forward; must be resolved before the code that depends on them is written
-(DESIGN.md §0.2). Reviewed 2026-08-22.
+(DESIGN.md §0.2). Reviewed 2026-08-23.
 
 - **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7). The only genuinely
   open blocker of the original set. `faktury/weryfikacja-faktury.md` is the next place to
@@ -1037,8 +1037,12 @@ Carried forward; must be resolved before the code that depends on them is writte
   the corresponding areas the same way when those subsystems are built.
 - **Nightly higher rate limits** (§6.1) — the 20:00–06:00 values are explicitly
   unpublished pending production tuning. Do not hard-code a nightly multiplier.
-- **`upo.pages[].downloadUrl` path prefix** — see §14.2. Recorded as a divergence rather
-  than a blocker, since the workaround (construct the path, ignore the field) is safe.
+- **Whether `upo.pages[].downloadUrl` arrives absolute or host-relative** — see §14.2.
+  `srodowiska.md` states only that a returned URL's *host* matches the environment called,
+  so the code must resolve a relative value against that host and use an absolute one as
+  is. Needs a live session to settle. (An earlier revision of this bullet said the field
+  should simply be ignored; that was the superseded reading, corrected in §14.2 — the link
+  is unmetered and hash-verified, so ignoring it costs something real.)
 
 ### 9.1 Resolved
 
