@@ -457,7 +457,7 @@ Build the **certificate flow first**: it is the only one that can bootstrap a cr
 
 **Both auth flows and the crypto module have since landed** (`Ksef::Crypto`, `Ksef::Auth::Token`, `POST /auth/ksef-token`). One correction to §6.4 while doing it: the golden vectors it asks for **do not exist upstream** — neither reference client commits plaintext/ciphertext pairs — so the primitives are pinned to NIST SP 800-38A and FIPS 180-4 instead, and the OAEP digest and MGF1 digest are pinned behaviourally rather than by trusting an option name. `docs/REFERENCE.md` §10.1 records what replaced them and why it is at least as strong.
 
-**The session layer, UPO handling and the `Ksef::Client` facade have landed too**, so §8's snippet now runs end to end — `spec/ksef/client_spec.rb` drives it verbatim. **But it runs against stubs.** The first gate says "against TEST", and no session has ever been opened against the real service, so it is *not* met: the nightly TEST job is what will settle it.
+**The session layer, UPO handling and the `Ksef::Client` facade have landed too**, so §8's snippet now runs end to end — `spec/ksef/client_spec.rb` drives it verbatim. **But it runs against stubs.** The first gate says "against TEST", and no session has ever been opened against the real service, so it is *not* met. `spec/integration/session_flow_spec.rb` is what will settle it — written 2026-08-23, and **not yet run against TEST**. Until this file existed, three documents said "the nightly will settle it" while the nightly contained no session spec at all: the claim was empty, and a documentation review caught it.
 
 Gate status, precisely:
 

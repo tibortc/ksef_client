@@ -46,7 +46,7 @@ submitted.
 >
 > **The honest caveat:** all of it above except the certificate flow is verified against
 > stubbed HTTP, not against KSeF. **No session has ever been opened against the real
-> service.** The nightly TEST job is what will settle that, and until it has run, treat the
+> service.** `spec/integration/session_flow_spec.rb` is what settles it, run by the nightly; until that has run green, treat the
 > transport layer as "believed correct" rather than "proven".
 >
 > **Not yet:** validator tiers 1 and 3 (only the XSD tier exists), and six of the seven
