@@ -80,6 +80,7 @@ mirrored under `docs/upstream/`, preserving upstream paths, at the **same commit
 | `sesja-interaktywna.md` | §11 — online session semantics |
 | `faktury/sesje/sesja-sprawdzenie-stanu-i-pobranie-upo.md` | §12 — status and UPO retrieval |
 | `faktury/numer-ksef.md` | §13 — KSeF number structure and CRC-8 |
+| `faktury/weryfikacja-faktury.md` | §15 — invoice admission checks; the tier-1 specification |
 | `limity/limity-api.md`, `limity/limity.md` | §6, §6.1 — rate and size limits |
 | `srodowiska.md` | §2, §11.3 — environments, accepted schema versions |
 | `dane-testowe-scenariusze.md` | §6a — TEST data provisioning |
@@ -104,6 +105,44 @@ illustrating the same NIP-plus-`certificateSubject` request. That is not a downl
 (batch → 0.2), and the PEF / RR / FA(2) schemas. Prose churns on editorial fixes, and a
 `verify:artifacts` failure should mean *a fact changed*, not that someone corrected a
 typo — so only documents this milestone actually derives facts from are in the manifest.
+
+### 1.4 The FA(3) sample corpus comes from two *other* repositories
+
+DESIGN.md §7.6 requires the parser's round-trip law to run against "Ministry-published
+FA(3) sample files". **There are none in `ksef-api`** — its `faktury/` tree holds schemas,
+prose and UPO examples, and not one example invoice. The samples exist, in two sibling
+CIRFMF repositories, and were pinned 2026-08-24:
+
+| Local path (under `spec/fixtures/fa3/`) | Source | Why this one |
+|---|---|---|
+| `ksef-pdf-generator/invoice.xml` | `CIRFMF/ksef-pdf-generator` @ `2b7c1da`, `assets/invoice.xml` | The primary sample: 13 KB, richly populated, and **the only candidate with no placeholders** |
+| `ksef-client-csharp/invoice-template-fa-3.xml` | `CIRFMF/ksef-client-csharp` @ `406904d`, `KSeF.Client.Tests.Core/Templates/` | The minimal case |
+| `ksef-client-csharp/invoice-template-fa-3-with-custom-Subject3.xml` | same | Carries `Podmiot3`, which our model cannot represent — the fixture that proves the parser does not silently drop it |
+| `ksef-client-csharp/invoice-template-fa-3-with-disallowed-unicode-characters.xml` | same | XSD-valid and rejected by KSeF; the whole argument for tier 1 (§15.1) |
+
+**All four validate against our pinned FA(3) schema** (measured 2026-08-24, zero errors),
+which is worth more than it looks: our XSD rewriting (§8.3) and our validator agree with
+upstream's own test corpus.
+
+Three practical notes:
+
+- **The C# ones are templates, not documents.** They contain `#nip#`, `#nipOdbiorca#` and
+  `#invoice_number#` placeholders, and `#nip#` is not a legal `TNrNIP`. The pinned bytes
+  stay verbatim so their digests verify; substitution happens in the spec helper, which
+  keeps the two concerns apart. The pdf-generator sample needs no substitution.
+- **They are test-only, so §1.2's first question settles the location**: `spec/fixtures/`,
+  never `lib/`, and the gemspec's `docs/*.md` + `lib/**` file list does not package them.
+- **Licences differ, and one differs in substance.** `ksef-client-csharp` is MIT
+  © 2025 Ministerstwo Finansów; `ksef-pdf-generator` is MIT © 2025 **CIRF** — a different
+  copyright holder from every other artifact here. Both texts are retained beside the
+  fixtures as `LICENSE.ksef-client-csharp.txt` and `LICENSE.ksef-pdf-generator.txt`, as MIT
+  requires of a redistributor. Neither is in the digest manifest: a licence changing is a
+  legal event, not a changed fact about KSeF, and it should not read as an upstream
+  data change.
+
+Being outside `ksef-api`, these four are **not** covered by §1's single-commit pin. Each
+row above carries its own repository and commit, and a `verify:artifacts` failure on one of
+them means that repository moved.
 
 ---
 
@@ -1101,6 +1140,72 @@ Also mandatory and easy to miss, all inside `Fa/Adnotacje`: `P_16`, `P_17`, `P_1
 `PMarzy` — each of which is one of the four types whose root compositor is a choice
 (§8.1), so exactly one branch of each must be present.
 
+### 8.2a The two subjects are not symmetric, and the buyer's name is optional
+
+Read straight from the schema while writing the parser (2026-08-24), because upstream's own
+corpus contains a document that only makes sense if this is true.
+
+`TPodmiot1` — the seller's identity — is a plain sequence of two mandatory elements:
+
+```
+NIP, Nazwa
+```
+
+`TPodmiot2` — the buyer's — is a **four-way choice** followed by an *optional* name:
+
+```
+choice( NIP | (KodUE, NrVatUE) | ([KodKraju], NrID) | BrakID )
+sequence minOccurs="0" ( Nazwa )
+```
+
+Three consequences, and each one bit:
+
+- **A buyer may have no `Nazwa` at all.** `invoice-template-fa-3-with-disallowed-unicode-characters.xml`
+  has exactly that, and a parser that treats the name as mandatory rejects a document
+  upstream ships as valid. `Ksef::FA3::Subject` therefore allows a nil name, and refuses one
+  only for a seller — enforced in `#to_fa3`, which is the only place that knows the role.
+- **An absent name must be omitted, not written empty.** `Nazwa` is `TZnakowy512`, so
+  `<Nazwa/>` fails its minimum length: emitting an empty element would turn a legal buyer
+  into an invalid document.
+- **A buyer need not have a NIP.** `NrVatUE` covers an EU counterparty, `NrID` a
+  non-EU one, and `BrakID` an unidentified buyer. This model carries a NIP only, so the
+  parser reports the other three as a **limitation of the model** rather than as a malformed
+  document — the distinction matters, because the invoice is fine and it is us who cannot
+  hold it.
+
+### 8.2b FA(3) has no structured address, and neither does this model
+
+`TAdres` is `KodKraju` + `AdresL1` + optional `AdresL2` + optional `GLN`, where both address
+lines are free text of up to 512 characters. There is no street, no city, no postal code.
+
+**Checked against the only official code that reads an FA(3) address**, per DESIGN.md §0's
+rule about the reference clients: `ksef-pdf-generator`'s `src/lib-public/generators/FA3/Adres.ts`
+renders exactly `AdresL1`, `AdresL2`, `KodKraju` and `GLN` — nothing else exists to render.
+Neither the C# nor the Java client models FA(3) at all; both take the document as bytes. So
+the flat shape is upstream's, not a simplification of it.
+
+`Ksef::FA3::Address` still *accepts* `street:`, `city:` and `postal_code:`, because that is
+how an address arrives from a human or an ERP. It does not **retain** them: they compose into
+`line1` at construction and the parts are gone. That is a deliberate rule, and it now applies
+to three types:
+
+| Type | Stores | Not stored |
+|---|---|---|
+| `Address` | `line1`, `line2`, `country` | `street`, `city`, `postal_code` — composed on the way in |
+| `Line` | `BigDecimal` amounts | the `Integer`/`String` they arrived as |
+| `Invoice` | `issued_at` as the document's own string | the `Time` it may have been given |
+
+**The rule: the model stores the document's representation, not the caller's input.** Two
+things fall out of it. A `Float` or a malformed address is refused at construction, where the
+caller can see what it passed, instead of at serialisation. And an invoice built from
+structured parts is genuinely `==` to the same invoice parsed back from XML — which is what
+lets DESIGN.md §7.6's round-trip law be stated as an equality rather than as a vaguer
+"equivalence". Retaining the inputs would invent distinctions FA(3), KSeF and every reader of
+the invoice are all blind to.
+
+`GLN` is not carried. It is optional, nothing needs it yet, and a parsed document that has
+one reports it through `Invoice#unmapped_elements` rather than losing it silently.
+
 ### 8.3 Import chain and offline validation
 
 ```
@@ -1127,9 +1232,14 @@ identical so the §1 digests keep verifying.
 Carried forward; must be resolved before the code that depends on them is written
 (DESIGN.md §0 rule 2). Reviewed 2026-08-23 (second pass, after the crypto module).
 
-- **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7). The only genuinely
-  open blocker of the original set. `faktury/weryfikacja-faktury.md` is the next place to
-  look; not yet pinned.
+- **Business-rule catalogue** for validation tier 3 (DESIGN.md §7.7). Still the only
+  genuinely open blocker of the original set, and now **known to be absent rather than
+  merely unread**. This bullet used to say `faktury/weryfikacja-faktury.md` was the next
+  place to look. It was pinned 2026-08-24 and it is not that document: it specifies
+  *technical admission* checks, which turned out to be the missing first-tier source for
+  tier **1**. See §15 for what it does settle, and §15.6 for the search that establishes no
+  file at commit `1c34fe27` states a reconciliation rule — plus the three possible
+  groundings for tier 3 and which of them is safe to build on.
 - **Error-code catalogue.** Still open, but **narrowed again**: the *authentication
   operation* status codes are recorded at §4.8 **from the pinned contract** — not, as this
   bullet used to say, from the reference implementation; see §4.8 for why that distinction
@@ -1207,6 +1317,11 @@ retrieved 2026-08-22. Where a line number is cited below it is from the C# file.
 | Key and IV generation | CSPRNG | 32 and 16 bytes respectively (`:498`, `:507`) |
 
 A fresh symmetric key per session is **recommended** by the docs, not required.
+
+`faktury/weryfikacja-faktury.md` states the same parameters as an admission requirement —
+a fifth witness, and the first from first-tier prose (§15.5). It writes the wrapping as
+"RSAES-OAEP (SHA-256/MGF1)", pairing the two digests in one breath, which is exactly the
+distinction the MGF1 row below exists to defend.
 
 Java uses the JCE name `AES/CBC/PKCS5Padding`; for a 16-byte block PKCS#5 and PKCS#7 are
 the same padding, so this is not a divergence.
@@ -1328,6 +1443,11 @@ plaintext and the encrypted document, plus the Base64 ciphertext:
 
 Computing either hash over the wrong artifact is an easy and silent mistake; both must be
 covered by tests.
+
+Independently confirmed by `faktury/weryfikacja-faktury.md`, which lists "computing and
+verifying the hash of the invoice together with the file size" and the same for the
+encrypted invoice among the checks KSeF performs (§15.5). All four values are the
+service's, not ours to interpret.
 
 ### 11.2 Session open request
 
@@ -1863,3 +1983,158 @@ Being contract-silent, this is the least certain fact in this section: it cannot
 offline, only observed. `spec/integration/session_flow_spec.rb` asserts that a live session's
 UPO really is 4.3 — written 2026-08-23 and **not yet run against TEST**, so the header stays
 *believed* rather than *verified*, and §9 carries it as such.
+
+---
+
+## 15. Invoice verification — what KSeF checks on submission
+
+Source: `faktury/weryfikacja-faktury.md` (dated 09.04.2026), pinned 2026-08-24 at the same
+`ksef-api` commit `1c34fe27` as everything else in §1.3.
+
+**Read this first: it is not the document §9 said it was.** §9 named this file as the place
+to look for the **tier-3 business-rule catalogue** (DESIGN.md §7.7 — line sums against rate
+summaries against `P_15`, correction references for `KOR`). It contains none of that. It is
+a list of *technical admission* checks: XML shape, uniqueness, size, crypto, permissions.
+§9 has been corrected, and §15.6 records where tier 3's catalogue actually is and is not.
+
+What it does deliver is unexpectedly valuable in a different place: **tier 1 was the tier
+with no first-tier source at all**, assembled from the schema plus judgement, and this
+document specifies it exactly.
+
+### 15.1 XML admission rules — and not one of them is a schema check
+
+An invoice must satisfy all six. The right-hand column is the point of the table:
+
+| Rule | Can the XSD catch it? |
+|---|---|
+| Well-formed XML per XML 1.0 | Yes — parsing fails first |
+| UTF-8 **without BOM** (no leading `EF BB BF`) | **No** — a BOM parses fine |
+| Conforms to the schema declared at session open | Yes — this *is* tier 2 |
+| An XML prolog is optional, but if present must not declare a non-UTF-8 encoding | **No** |
+| **No processing instructions** | **No** — PIs are legal XML |
+| No discouraged Unicode characters: `[#x7F-#x84]`, `[#x86-#x9F]`, `[#xFDD0-#xFDEF]`, and `[#xNFFFE-#xNFFFF]` for every plane `N` = 0…10₁₆ | **No** |
+
+Failing any one of them rejects the invoice.
+
+**Four of the six are invisible to tier 2**, which is the argument for tier 1 existing at
+all — and it is not hypothetical. The C# client's own test corpus ships
+`invoice-template-fa-3-with-disallowed-unicode-characters.xml`, now pinned to
+`spec/fixtures/fa3/` (§1.4). Measured 2026-08-24:
+
+- it is **XSD-valid** against our pinned FA(3) schema — `Ksef::FA3::Validator` returns zero
+  errors, so tier 2 passes it;
+- it carries **U+0087** and **U+009B**, both inside the forbidden `[#x86-#x9F]` range.
+
+A schema-only validator ships that invoice; KSeF rejects it. One fixture, and it settles
+whether tier 1 is worth building.
+
+**Where those characters come from matters more than the rule.** The offending text reads
+`iloĹ›Ä‡` — that is `ilość` encoded as UTF-8 and then decoded as Latin-1. **Double-encoded
+UTF-8 is the practical source of forbidden C1 characters**, not deliberate abuse. Any ERP
+export that has been through one bad encoding conversion hits this, which makes it a
+likely real-world rejection rather than an exotic one.
+
+### 15.2 Duplicate detection is a three-field key, held for ten years
+
+KSeF detects duplicates **globally**, not per session, on the combination:
+
+1. seller NIP — `Podmiot1/DaneIdentyfikacyjne/NIP`
+2. invoice kind — `RodzajFaktury`
+3. invoice number — `P_2`
+
+A duplicate returns per-invoice code **440** (§12.1's table, confirmed here from prose).
+Uniqueness is retained for **ten full calendar years** counted from the end of the year of
+issue.
+
+Two consequences worth stating, because both are easy to get wrong:
+
+- **`RodzajFaktury` is part of the key.** The same `P_2` under `VAT` and under `KOR` is not
+  a duplicate. A correction therefore does not need a distinct number from the invoice it
+  corrects.
+- **The key is the seller's, not the issuer's.** Where branches, local-government units or
+  authorised third parties invoice on behalf of one NIP, upstream says explicitly they must
+  agree a numbering scheme between themselves. Nothing in the API prevents a collision;
+  it surfaces as a 440 after submission.
+
+### 15.3 NIP checksums are validated **in production only**
+
+The sharpest fact in the document, and it is stated twice — once for
+`Podmiot1`/`Podmiot2`/`Podmiot3`/`PodmiotUpowazniony`, and once for the NIP embedded in
+`Podmiot3`'s `InternalId`. Both say *"Dotyczy tylko środowiska produkcyjnego"* — applies to
+the production environment only.
+
+Three consequences:
+
+- **It explains `rake auth:bootstrap`.** §6a.1 invents a NIP and the flow works on TEST.
+  That is not tolerance of a malformed identifier — checksum validation simply is not
+  running there. (The bootstrap generates checksum-valid values anyway, which is why this
+  never surfaced as a puzzle.)
+- **A green TEST run proves nothing about NIP validity.** No integration spec can cover
+  this rule, in either direction: TEST will not reject a bad NIP, and PROD is off limits
+  from any test (a hard rule). It is verifiable by reasoning about the document and by unit
+  tests of our own checksum, and by nothing else.
+- **Keep `Ksef::FA3::NIP.validate!` running in every environment.** It is deliberately
+  *stricter* than TEST. Do not add an environment check to relax it: production is where
+  the rejection would land, and a gem that lets a bad NIP through on TEST has simply moved
+  the failure to the worst possible moment.
+
+### 15.4 The issue date may not be in the future
+
+`P_1` must not be later than the date KSeF accepts the document.
+
+Offline this can only be approximated: the comparison is against *KSeF's* acceptance date,
+which is not knowable at build time, and a document issued today and submitted today sits
+exactly on the boundary. So tier 1's rule is the safe half — **reject an issue date in the
+future** — and the same-day boundary is left to the service. Do not implement this as an
+equality against `Date.today` in the local zone; a client in a western timezone would
+reject perfectly good invoices around midnight in Warsaw.
+
+### 15.5 Four facts already in this ledger, now confirmed from first-tier prose
+
+None of these change anything. They are recorded because each previously rested on the
+contract or the reference clients alone, and an independent witness is worth having.
+
+| Fact | Where it lives | What this document adds |
+|---|---|---|
+| AES-256-CBC, 256-bit key, 128-bit IV, PKCS#7; symmetric key under RSAES-OAEP **SHA-256/MGF1** | §10.1 | A **fifth** witness, and the first from first-tier prose. Note it writes "SHA-256/MGF1" as one unit, pairing the two digests exactly as §10.1 requires |
+| Hash **and size** of both the plaintext and the encrypted invoice | §11.1 | Confirms all four values, and that the check is KSeF's, not decoration |
+| 1 MB without attachments, 3 MB with; 10 000 invoices per session | §6.2 | Identical, plus batch: 50 ZIP files, 100 MB each before encryption, 5 GB per package |
+| Attachments are **batch-only** | DESIGN.md §7.4 | Confirms it, with one exception — an offline *technical correction* may use an interactive session — and adds that attachments require prior opt-in in `e-Urząd Skarbowy`. Both are 0.2/0.3 concerns; recorded so the exception is not rediscovered |
+
+### 15.6 Tier 3's catalogue is in none of the 77 files
+
+Searched at commit `1c34fe27`: no document in `ksef-api` states a reconciliation rule.
+Nothing says `P_15` equals the sum of the rate buckets, nothing constrains a `KOR`
+document's references to the invoice it corrects, nothing gives an error code for an
+arithmetic mismatch. The closest thing to a rule catalogue is this section, and it is
+technical rather than semantic.
+
+The FA(3) XSD does carry **686 `xsd:documentation` annotations** — every field described in
+Polish, with citations to the VAT Act. They are a genuine first-tier source for what a
+field *means* (that is where §8.1a's rate buckets came from). They state no equalities:
+`P_13_1` is documented as "the sum of net sales values under the basic rate" and `P_15` as
+"the total amount due", and the arithmetic relating them is left to the reader.
+
+So tier 3 has three possible groundings, and they are not equal:
+
+1. **Arithmetic that follows from the field definitions.** That `P_13_1` is a *sum* of the
+   lines taxed at the basic rate is what the annotation says; checking it is not policy.
+   This is the part that can be built now, and it needs no external catalogue.
+2. **The Ministry's FA(3) brochure** (`broszura informacyjna`), published on
+   `podatki.gov.pl` and **not** in any CIRFMF repository. This is where the published
+   business-rule list DESIGN.md §7.7 asks for would come from. Pinning it means taking an
+   artifact from outside the repositories §1 covers, under a licence nobody here has read.
+3. **Observation against TEST.** Reliable, slow, and it only ever finds rules we thought to
+   probe for.
+
+**Recommendation, for the human to decide (DESIGN.md §12):** build tier 3's engine now on
+grounding 1, where the rule *is* the field definition, and let the catalogue grow — which
+is what DESIGN.md §7.7 already anticipates with "the catalog grows over the gem's life".
+Do not synthesise rules from Polish VAT law and record them as verified facts; that is
+inference wearing a citation. Grounding 2 is a licensing and scope question, not a coding
+one.
+
+**§9's characterisation of this as "the next place to look" was reasonable and wrong.** The
+lesson is the same one §1.3 already carries, pointed the other way: listing the upstream
+tree found 73 unread files, and reading them resolved most of §9 — but it also means a
+remaining gap is now much more likely to be genuinely absent than merely unread.

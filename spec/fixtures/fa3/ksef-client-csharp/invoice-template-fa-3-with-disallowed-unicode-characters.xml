@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Faktura xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:etd="http://crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/DefinicjeTypy/" xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+    <Naglowek>
+        <KodFormularza kodSystemowy="FA (3)" wersjaSchemy="1-0E">FA</KodFormularza>
+        <WariantFormularza>3</WariantFormularza>
+        <DataWytworzeniaFa>2026-04-23T18:27:21.6291869Z</DataWytworzeniaFa>
+        <SystemInfo>Generator danych</SystemInfo>
+    </Naglowek>
+    <Podmiot1>
+        <DaneIdentyfikacyjne>
+            <NIP>#nip#</NIP>
+            <Nazwa>Broda and Sons iloĹÄ</Nazwa>
+        </DaneIdentyfikacyjne>
+        <Adres>
+            <KodKraju>PL</KodKraju>
+            <AdresL1>ul. JaniU+0104ak &#243; 14194</AdresL1>
+            <AdresL2>31-273 Zambrów</AdresL2>
+        </Adres>
+        <DaneKontaktowe>
+            <Email>Ewa.Nowak@example.net</Email>
+            <Telefon>91-268-23-25</Telefon>
+        </DaneKontaktowe>
+    </Podmiot1>
+    <Podmiot2>
+        <DaneIdentyfikacyjne>
+            <NIP>3756977049</NIP>
+        </DaneIdentyfikacyjne>
+        <Adres>
+            <KodKraju>PL</KodKraju>
+            <AdresL1>ul. WasiiloĹÄak 7217</AdresL1>
+            <AdresL2>25-615 Dalej</AdresL2>
+        </Adres>
+        <DaneKontaktowe>
+            <Telefon>56-330-18-90</Telefon>
+        </DaneKontaktowe>
+        <JST>2</JST>
+        <GV>2</GV>
+    </Podmiot2>
+    <Fa>
+        <KodWaluty>PLN</KodWaluty>
+        <P_1>2026-03-20</P_1>
+        <P_1M>Nekla</P_1M>
+        <P_2>FA/XPSU+0104FK-188ilo78047199/04/2026-#invoice_number#</P_2>
+        <P_6>2026-03-16</P_6>
+        <P_13_1>5714.59</P_13_1>
+        <P_14_1>1314.36</P_14_1>
+        <P_15>7028.95</P_15>
+        <Adnotacje>
+            <P_16>2</P_16>
+            <P_17>2</P_17>
+            <P_18>2</P_18>
+            <P_18A>2</P_18A>
+            <Zwolnienie>
+                <P_19N>1</P_19N>
+            </Zwolnienie>
+            <NoweSrodkiTransportu>
+                <P_22N>1</P_22N>
+            </NoweSrodkiTransportu>
+            <P_23>2</P_23>
+            <PMarzy>
+                <P_PMarzyN>1</P_PMarzyN>
+            </PMarzy>
+        </Adnotacje>
+        <RodzajFaktury>VAT</RodzajFaktury>
+        <FaWiersz>
+            <NrWierszaFa>1</NrWierszaFa>
+            <P_7>Handcrafted Wooden Cheese Unbranded Granite Pants Intelligent Rubber Salad Refined Steel Cheese Sleek Metal Pants Incredible Granite Computer Incredible Metal Pants Generic Granitile Bacon Rustic Steel Cheese Small Granite Bacon Licensed Steel Fish Tasty Frozen Table Unbranded Concrete Bike Rustic Metal Ball Generic Wooden Bike Unbranded Granite Salad Licensed Granite Mouse Refined Plastic Shirt Generic Concrete Pants Intelligent Granite Chicken Fantastic Rubber Keyboard Licensed Rubber Shirt Tast</P_7>
+            <P_8A>szt.</P_8A>
+            <P_8B>7</P_8B>
+            <P_9A>428.19</P_9A>
+            <P_11>2997.33</P_11>
+            <P_12>23</P_12>
+        </FaWiersz>
+        <FaWiersz>
+            <NrWierszaFa>2</NrWierszaFa>
+            <P_7>Handcrafted Wooden Cheese Unbranded &#243;Granite Pants Intelligent Rubber Salad Refined Steel Cheese Sleek Metal Pants Incredible Granite Computer Incredible Metal Pants GenericU+0104 Granite Bacon Rustic Steel Cheese Small Granite Bacon Licensed Steel Fish Tasty Frozen Table Unbranded Concrete Bike Rustic Metal Ball Generic Wooden Bike Unbranded Granite Salad Licensed Granite Mouse Refined Plastic Shirt Generic Concrete Pants Intelligent Granite Chicken Fantastic Rubber Keyboard Licensed Rubber Shirt Tast</P_7>
+            <P_8A>szt.</P_8A>
+            <P_8B>6</P_8B>
+            <P_9A>325.52</P_9A>
+            <P_11>1953.12</P_11>
+            <P_12>23</P_12>
+        </FaWiersz>
+        <FaWiersz>
+            <NrWierszaFa>3</NrWierszaFa>
+            <P_7>Handcrafted Wooden Cheese Unbranded Granite Pants Intelligent Rubber Salad Refined Steel Cheese Sleek Metal Pants Incredible Granite Computer Incredible Metal Pan&#243;ts Generic Granite Bacon Rustic Steel Cheese Small Granite Bacon Licensed Steel Fish Tasty Frozen Table Unbranded Concrete Bil Rustic Metal Ball Generic Wooden Bike Unbranded Granite Salad Licensed Granite Mouse Refined Plastic Shirt Generic Concrete Pants Intelligent Granite Chicken Fantastic Rubber Keyboard Licensed Rubber Shirt Tast</P_7>
+            <P_8A>szt.</P_8A>
+            <P_8B>2</P_8B>
+            <P_9A>382.07</P_9A>
+            <P_11>764.14</P_11>
+            <P_12>23</P_12>
+        </FaWiersz>
+        <Platnosc>
+            <Zaplacono>1</Zaplacono>
+            <DataZaplaty>2026-03-05</DataZaplaty>
+            <FormaPlatnosci>1</FormaPlatnosci>
+        </Platnosc>
+    </Fa>
+</Faktura>

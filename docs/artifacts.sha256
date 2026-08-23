@@ -33,3 +33,8 @@ d259ff94deb36a6729c5cc13b974539532e6a1abb808b76d4680d6de991ddf1a  spec/fixtures/
 a4f726bcf8cc3f7d9ffa4dab99e005535a8e8b60dced1e5d94578d2e05afa96e  spec/fixtures/xades/UBL-XAdESv132-2.1.xsd
 1fa4625e9cefcb7a9abb5ac1b64315547450031eece8a55bd584e4ba4b79dbc1  spec/fixtures/xades/UBL-XAdESv141-2.1.xsd
 93a98c8bab035b6841df1106bd70f963531d91cb4bad483d53eb4e4d24104ca3  spec/fixtures/xades/UBL-xmldsig-core-schema-2.1.xsd
+bfc616349151d379214895fbacf448906bbb825e4720a9666a161a7acd1ebf78  docs/upstream/faktury/weryfikacja-faktury.md
+9057355fdf2143415a3f4a6639a0664c203eb5fa7505da8439800802316b876b  spec/fixtures/fa3/ksef-client-csharp/invoice-template-fa-3.xml
+91fa7cea12035b93745559bbb18e803cdf2718758dba9ceca93f5a22f2109fad  spec/fixtures/fa3/ksef-client-csharp/invoice-template-fa-3-with-custom-Subject3.xml
+0a4254ea37367ec409fb57821ec8ce61b099a960489594631746bbb67b168e5c  spec/fixtures/fa3/ksef-client-csharp/invoice-template-fa-3-with-disallowed-unicode-characters.xml
+3a613953d723bc853aa5cdf22f76f15740fdea1b5e0d30b031d07481a2792a13  spec/fixtures/fa3/ksef-pdf-generator/invoice.xml
