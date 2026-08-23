@@ -343,6 +343,42 @@ RSpec.describe Ksef::Client do
     end
   end
 
+  # docs/REFERENCE.md §10.2's documented recovery, which had no callers until 2026-08-23:
+  # certificates are cached for an hour, so an emergency rotation inside that window makes the
+  # cached publicKeyId unknown and the open fails 21470. Not a forbidden POST retry — a 21470
+  # means the request was declined outright, so there is no session to duplicate.
+  describe "key rotation during the cache window" do
+    before { stub_authentication }
+
+    def unknown_key_body
+      JSON.dump("status" => 400, "title" => "Bad Request",
+                "errors" => [{ "code" => 21_470, "description" => "Klucz nieznany" }])
+    end
+
+    it "re-fetches the certificate list and opens again on a 21470" do
+      stub_request(:post, "#{base}/sessions/online").to_return(
+        { status: 400, body: unknown_key_body, headers: { "Content-Type" => "application/problem+json" } },
+        json({ "referenceNumber" => session_ref, "validUntil" => "2026-08-24T00:00:00Z" }, status: 201)
+      )
+      stub_request(:post, "#{base}/sessions/online/#{session_ref}/invoices")
+        .to_return(json({ "referenceNumber" => invoice_ref }, status: 202))
+      stub_request(:post, "#{base}/sessions/online/#{session_ref}/close").to_return(status: 204)
+
+      expect(client.send_invoice(invoice_xml).invoice_reference).to eq(invoice_ref)
+      expect(a_request(:get, "#{base}/security/public-key-certificates")).to have_been_made.twice
+    end
+
+    it "surfaces any other 400 without re-fetching" do
+      stub_request(:post, "#{base}/sessions/online").to_return(
+        status: 400, body: JSON.dump("status" => 400, "errors" => [{ "code" => 21_405 }]),
+        headers: { "Content-Type" => "application/problem+json" }
+      )
+
+      expect { client.send_invoice(invoice_xml) }.to raise_error(Ksef::ApiError)
+      expect(a_request(:get, "#{base}/security/public-key-certificates")).to have_been_made.once
+    end
+  end
+
   describe "thread safety" do
     before do
       stub_authentication

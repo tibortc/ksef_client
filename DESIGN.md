@@ -16,7 +16,7 @@
 2. **[VERIFY]** items MUST be confirmed against the authoritative sources in §2 *before* the code that depends on them is written. Record every verified fact (value + source URL + date) in `docs/REFERENCE.md` in the repo. Never invent endpoint paths, XML element names, namespace URIs, or cryptographic parameters — if a detail is not in this document and not verifiable from §2 sources, stop and flag it.
 3. Work in the milestone order of §11. Each milestone has acceptance criteria; do not start the next until the current one's criteria pass.
 4. The code snippet in §8 is the public API contract. It must run verbatim (env vars aside) against the KSeF TEST environment before 0.1.0 ships.
-5. Prohibitions summary (details throughout): no dependency additions beyond §4.3 without flagging; no upper bound on `required_ruby_version`; no secrets in logs or VCR cassettes; no auto-retry of non-idempotent requests; no hand edits to `lib/ksef/fa3/generated/`; never point tests at the PROD environment.
+5. Prohibitions summary (details throughout): no dependency additions beyond §4.3 without flagging; no upper bound on `required_ruby_version`; no secrets in logs or VCR cassettes; no auto-retry of non-idempotent requests (sole exception: the opt-in `21470` key-rotation remediation, `docs/REFERENCE.md` §10.2); no hand edits to `lib/ksef/fa3/generated/`; never point tests at the PROD environment.
 
 ---
 
@@ -184,19 +184,19 @@ lib/
 ├── ksef_client.rb            # entry point: requires ksef.rb
 ├── ksef.rb                   # module Ksef; Zeitwerk loader setup; VERSION
 └── ksef/
-    ├── client.rb             # facade
+    ├── client.rb             # the §8 facade (parts under client/)
     ├── configuration.rb      # env, adapter, timeouts, logger, retry policy
-    ├── environments.rb       # TEST / DEMO / PROD base URLs [VERIFY values]
+    ├── environments.rb       # TEST / DEMO / PROD base URLs (REFERENCE §2)
     ├── errors.rb             # full hierarchy (§6.7)
-    ├── http/                 # Faraday connection factory, middleware, instrumentation
-    ├── auth/
+    ├── http/                 # connection factory (API + credential-free storage), retry,
+    │                         # error mapping, X-System-Warning
+    ├── auth/                 # the two flows live in client.rb, not in separate *_flow files
     │   ├── challenge.rb
     │   ├── token.rb          # credential object (context NIP + KSeF token)
-    │   ├── token_flow.rb     # challenge → RSA-OAEP → JWT
-    │   ├── xades_flow.rb     # 0.1; AuthTokenRequest → sign → submit → redeem
-    │   ├── signer.rb         # pluggable signer interface + built-in XAdES-BES signer
+    │   ├── client.rb         # the six endpoint calls of docs/REFERENCE.md §4.2
+    │   ├── token_request.rb, signer.rb, signature_template.rb, xades.rb, validator.rb
     │   ├── schema/           # pinned AuthTokenRequest XSD v2-0 / v2-1
-    │   └── access_token.rb   # JWT storage, expiry, refresh
+    │   └── access_token.rb   # expiry from validUntil, proactive refresh under a mutex
     ├── crypto/
     │   ├── public_keys.rb    # fetch + cache KSeF certificates, select by usage
     │   ├── encryptor.rb      # session symmetric key gen, payload encryption, RSA-OAEP wrap
@@ -205,15 +205,18 @@ lib/
     │   ├── online.rb         # open → send → close
     │   ├── batch.rb          # 0.2
     │   ├── status.rb         # polling with backoff; blocking wait_* helpers
-    │   ├── invoice_codes.rb, session_codes.rb        # the two status tables (§12.1)
+    │   ├── invoice_codes.rb, session_codes.rb        # status tables (REFERENCE §12.1)
     │   └── invoice_state.rb, session_state.rb, upo_page.rb   # response objects
-    ├── upo/                  # retrieval, integrity, diagnostic validation (§12.3, §14.3)
+    ├── upo/                  # retrieval, integrity, validation (REFERENCE §12.3, §14.3)
     │   ├── client.rb         # pre-signed link + metered fallback
     │   ├── document.rb       # verbatim bytes; no parsed form on purpose
     │   └── validator.rb, validation.rb
-    ├── ksef_number.rb        # the 35-character invoice identifier + CRC-8 (§13)
+    ├── ksef_number.rb        # the invoice identifier + CRC-8 (docs/REFERENCE.md §13, §13.1)
+    ├── invoices/
     │   └── client.rb         # download by KSeF number; query/export in 0.2
-    ├── client.rb             # the §8 facade; receipt.rb + session.rb beside it
+    ├── client/               # the §8 facade's parts
+    │   ├── receipt.rb        # what send_invoice returns; #reference is the pair
+    │   └── session.rb        # the handle client.session { } yields
     ├── models/               # response objects — **not built as a directory**; each
     │                         # subsystem keeps its own, following the auth precedent
     └── fa3/
@@ -249,7 +252,7 @@ Ksef::Client.new(env: :test, auth: ..., logger: nil, timeout: {open: 10, read: 6
                  retry: Ksef::RetryPolicy.default, adapter: :net_http)
 ```
 
-`environments.rb` holds the three base URLs **[VERIFY]** plus a `custom:` escape hatch (base_url override) for future-proofing. `env: :prod` requires no extra ceremony but integration specs must refuse it (§4.5).
+`environments.rb` holds the three base URLs (**[VERIFY] resolved:** `docs/REFERENCE.md` §2, each read from that environment's own OpenAPI document) plus a `custom:` escape hatch (base_url override) for future-proofing. `env: :prod` requires no extra ceremony but integration specs must refuse it (§4.5).
 
 ### 6.2 HTTP layer
 
@@ -262,7 +265,7 @@ KSeF 2.0 offers exactly two authentication methods (`uwierzytelnianie.md`, verif
 **Scope change, 2026-08-22.** XAdES was originally deferred to 0.3. It moves into **0.1**, for three reasons:
 
 1. **The token flow cannot be bootstrapped without it.** A KSeF token can only be generated after a one-time XAdES authentication (`tokeny-ksef.md`; `POST /tokens` requires `Bearer`, `/auth/xades-signature` requires nothing). Shipping token-only auth means every new user must first obtain a token using somebody else's client. See `docs/REFERENCE.md` §6a.2.
-2. It is what unblocks §12.4 — the nightly TEST integration cannot otherwise mint its own credentials. (Done: §12.4 resolved 2026-08-23.)
+2. It is what unblocks §12 item 4 — the nightly TEST integration cannot otherwise mint its own credentials. (Done: §12 item 4 resolved 2026-08-23.)
 3. `ksef-rb` already ships certificate auth (§1). Token-only is not a viable 0.1.
 
 **Shared prologue.** `POST /auth/challenge` → `{challenge, timestamp, timestampMs, clientIp}`. Challenge lifetime is **10 minutes** *(verified: `uwierzytelnianie.md`)*.
@@ -270,12 +273,12 @@ KSeF 2.0 offers exactly two authentication methods (`uwierzytelnianie.md`, verif
 **Token flow:**
 
 1. `GET /security/public-key-certificates` → select the token-encryption certificate by declared usage; cache with TTL.
-2. Build plaintext `"#{token}|#{timestampMs}"`, encrypt with RSA-OAEP (digest/MGF per docs **[VERIFY]**) using OpenSSL `PKey#encrypt` with explicit `rsa_padding_mode: "oaep"`, `rsa_oaep_md`, `rsa_mgf1_md` options.
+2. Build plaintext `"#{token}|#{timestampMs}"`, encrypt with RSA-OAEP — SHA-256 with MGF1-SHA-256 (**[VERIFY] resolved:** `docs/REFERENCE.md` §10.1) using OpenSSL `PKey#encrypt` with explicit `rsa_padding_mode: "oaep"`, `rsa_oaep_md`, `rsa_mgf1_md` options.
 3. `POST /auth/ksef-token`.
 
 **Certificate / XAdES flow:**
 
-1. Build an `AuthTokenRequest` XML against the pinned auth XSD (`lib/ksef/auth/schema/`, namespace `http://ksef.mf.gov.pl/auth/token/**2.0**` — corrected 2026-08-23; this said 2.1, which `docs/REFERENCE.md` §4.1 and §14.4 established was an inference, and 2.0 is what live TEST accepted per §6a.4): `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` (`certificateSubject` or `certificateFingerprint`), optional `AuthorizationPolicy` restricting client IPs.
+1. Build an `AuthTokenRequest` XML against the pinned auth XSD (`lib/ksef/auth/schema/`, namespace `http://ksef.mf.gov.pl/auth/token/**2.0**` — corrected 2026-08-23; this said 2.1, which `docs/REFERENCE.md` §4.1 and §14.4 established was an inference, and 2.0 is what live TEST accepted per `docs/REFERENCE.md` §6a.4): `Challenge`, `ContextIdentifier`, `SubjectIdentifierType` (`certificateSubject` or `certificateFingerprint`), optional `AuthorizationPolicy` restricting client IPs.
 2. Sign it as XAdES via `Ksef::Auth::Signer` — `#sign(xml_string) -> signed_xml_string`. The interface stays, so users with an external signing service or HSM can supply their own; 0.1 additionally ships a built-in enveloped XAdES-BES signer (Nokogiri C14N + OpenSSL) taking a keypair and certificate. Detached form must be rejected with a clear error *(verified: API rejects detached)*.
 3. `POST /auth/xades-signature` with `Content-Type: application/xml`.
 
@@ -287,18 +290,18 @@ Self-signed certificates are accepted on **TEST only** — never DEMO or PROD.
 
 ### 6.4 Crypto module
 
-- Per-session symmetric key: AES-256, random key + IV via `OpenSSL::Cipher` / `SecureRandom`. Mode/padding/IV convention **[VERIFY]** (expected CBC + PKCS#7 with documented IV placement).
-- Key wrapped with RSA-OAEP using the designated KSeF public certificate **[VERIFY parameters]**.
-- `digest.rb` produces the SHA-256 (+ size) metadata the API requires for payloads **[VERIFY exact fields/encoding]**.
+- Per-session symmetric key: AES-256, random key + IV via `OpenSSL::Cipher` / `SecureRandom`. Mode/padding/IV convention: **[VERIFY] resolved** — AES-256-CBC with PKCS#7, and the IV is a *discrete request field*, not a ciphertext prefix (`docs/REFERENCE.md` §10.1, §14.1).
+- Key wrapped with RSA-OAEP using the designated KSeF public certificate — **[VERIFY] resolved:** RSAES-OAEP, SHA-256 + MGF1-SHA-256, selected by `usage` (`docs/REFERENCE.md` §10.1, §10.2).
+- `digest.rb` produces the SHA-256 (+ size) metadata the API requires for payloads — **[VERIFY] resolved:** four values per invoice, hash *and* size of both plaintext and ciphertext (`docs/REFERENCE.md` §11.1).
 - **Golden vectors:** ~~port at least three encryption test vectors from the official C# client's tests~~ — **superseded 2026-08-23. Those vectors do not exist**: neither reference client commits plaintext/ciphertext pairs. The backstop is instead NIST SP 800-38A and FIPS 180-4 for the primitives, plus behavioural pinning of the two parameters that could silently go wrong. See §11 and `docs/REFERENCE.md` §10.1.
 
 ### 6.5 Sessions
 
 **Online (0.1):** open (submits encryption info: wrapped key, IV, cipher metadata) → send N encrypted invoices → close → poll session/invoice status → fetch UPO. Expose both granular calls and a happy-path composite.
 
-**Session-reuse semantics — [VERIFY] resolved 2026-08-23, decided by the human.** The facts came back permissive: a session lives 12 hours, may carry up to 10 000 invoices, and concurrent sessions are allowed (`docs/REFERENCE.md` §11). Neither official client makes the choice for us — **neither offers a composite at all**, so there was no upstream semantics to inherit (§14.6's investigation notes).
+**Session-reuse semantics — [VERIFY] resolved 2026-08-23, decided by the human.** The facts came back permissive: a session lives 12 hours, may carry up to 10 000 invoices, and concurrent sessions are allowed (`docs/REFERENCE.md` §11). Neither official client makes the choice for us — **neither offers a composite at all**, so there was no upstream semantics to inherit (`docs/REFERENCE.md` §14.6's investigation notes).
 
-The decision is **a fresh session per `send_invoice`**, with an explicit `client.session { |s| ... }` block when a caller wants one session to carry many invoices. Reasoning: a reused session is mutable state on a client that §5.2 requires to be thread-safe; an opened-but-unused session is cancelled with status `440` so speculative opening is not free; and the API going out of its way to return the *original's* KSeF number on a duplicate (§12.1) suggests resends are an expected hazard, not one to make likelier by hiding session state. Batching stays available, but as a deliberate act rather than a default. Recorded with the rest of the session-layer decisions at `docs/REFERENCE.md` §11.2a.
+The decision is **a fresh session per `send_invoice`**, with an explicit `client.session { |s| ... }` block when a caller wants one session to carry many invoices. Reasoning: a reused session is mutable state on a client that §5.2 requires to be thread-safe; an opened-but-unused session is cancelled with status `440` so speculative opening is not free; and the API going out of its way to return the *original's* KSeF number on a duplicate (`docs/REFERENCE.md` §12.1) suggests resends are an expected hazard, not one to make likelier by hiding session state. Batching stays available, but as a deliberate act rather than a default. Recorded with the rest of the session-layer decisions at `docs/REFERENCE.md` §11.2a.
 
 **Batch (0.2):** build ZIP of invoices → split into parts → encrypt parts → open batch session → upload parts to returned storage URLs (plain HTTP PUT to object storage — likely bypasses the Faraday auth stack **[VERIFY]**) → close → poll → collect **per-invoice** results *(verified: per-invoice error model)*.
 
@@ -318,12 +321,12 @@ Ksef::Error
 ├── Ksef::ApiError                   (has #status, #code, #details, #raw)
 │   ├── Ksef::InvoiceRejectedError   (schema/business rejection by KSeF)
 │   ├── Ksef::SessionError
-│   ├── Ksef::RateLimitedError       (retryable; honors Retry-After [VERIFY])
+│   ├── Ksef::RateLimitedError       (retryable; honours Retry-After — REFERENCE §5.5)
 │   └── Ksef::ServerError            (5xx; retryable per policy)
 └── Ksef::TimeoutError / Ksef::ConnectionError (wrapping Faraday)
 ```
 
-Map the official error-code catalog **[VERIFY from OpenAPI/docs]** into `#code` + human message; keep the full catalog table in `docs/errors.md`. **Retry policy:** idempotent GETs and rate-limit/5xx responses retryable with backoff; **invoice submission (POST) is never auto-retried** — surface the error and let the caller decide (duplicate submission is a real-world tax problem).
+Map the official error-code catalog into `#code` + human message — **[VERIFY] partially resolved:** the authentication status codes are at `docs/REFERENCE.md` §4.8 and the session/invoice ones at §12.1, both from the pinned contract; the per-endpoint `ExceptionResponse` codes remain open (§9), collectable from each operation's own `400` description; keep the full catalog table in `docs/errors.md`. **Retry policy:** idempotent GETs and rate-limit/5xx responses retryable with backoff; **invoice submission (POST) is never auto-retried** — surface the error and let the caller decide (duplicate submission is a real-world tax problem).
 
 ---
 
@@ -351,7 +354,7 @@ Hand-written models/DSL sit **on top of** generated metadata; they consume it (f
 ### 7.3 Money & VAT computation
 
 - Line: quantity, unit, unit net price, VAT rate code → line net/VAT/gross computed.
-- Invoice: per-rate-bucket summaries (`P_13_x`/`P_14_x` **[VERIFY bucket↔rate mapping from schema]**) and `P_15` computed from lines.
+- Invoice: per-rate-bucket summaries (`P_13_x`/`P_14_x` — **[VERIFY] resolved:** `docs/REFERENCE.md` §8.1a, read from the XSD's own documentation) and `P_15` computed from lines.
 - **Rounding strategy is explicit config** on `build`: `rounding: :per_line` (default) or `:per_summary` — Polish VAT law permits both; silently choosing one creates 1-grosz mismatches with users' ERPs. Both strategies round half-up to 2 dp at the documented point.
 - Every computed value is **overridable** (ERP-as-source-of-truth users); when overridden, tier-3 validation (§7.7) still checks reconciliation and reports — with a documented `strict: false` escape.
 
@@ -361,7 +364,7 @@ Seven types share a common core: `VAT`, `KOR`, `ZAL`, `ROZ`, `UPR`, `KOR_ZAL`, `
 
 ### 7.5 Serializer
 
-Nokogiri-based; consumes generated ordering; formatting rules centralized: BigDecimal → schema-conformant decimal strings (no scientific notation, correct scale), dates ISO-8601, correct root namespace + `KodFormularza`/`WariantFormularza` header **[VERIFY values]**, UTF-8 declaration. Property: serializer output for every fixture validates against the pinned XSD.
+Nokogiri-based; consumes generated ordering; formatting rules centralized: BigDecimal → schema-conformant decimal strings (no scientific notation, correct scale), dates ISO-8601, correct root namespace + `KodFormularza`/`WariantFormularza` header (**[VERIFY] resolved:** `docs/REFERENCE.md` §8 — the element is `FA`, `FA (3)` is the `kodSystemowy`, note the space), UTF-8 declaration. Property: serializer output for every fixture validates against the pinned XSD.
 
 ### 7.6 Parser
 
@@ -372,7 +375,7 @@ Nokogiri-based; consumes generated ordering; formatting rules centralized: BigDe
 `invoice.validate!` (and `#valid?` / `#errors`) runs:
 
 1. **Model tier (Ruby):** required fields per invoice type, enum membership, NIP checksums, date sanity — fast, readable, field-addressed errors.
-2. **Schema tier (XSD):** Nokogiri validation against the pinned XSD — confirm the XSD's redistribution terms **[VERIFY]**; if redistribution is disallowed, ship a first-run fetch-and-cache with pinned checksum instead of bundling.
+2. **Schema tier (XSD):** Nokogiri validation against the pinned XSD — **[VERIFY] resolved** — MIT, so the schemas are bundled (`docs/REFERENCE.md` §1.2); if redistribution is disallowed, ship a first-run fetch-and-cache with pinned checksum instead of bundling.
 3. **Business tier:** reconciliation rules that pass XSD but bounce at KSeF — line sums vs rate summaries vs `P_15`, rate-bucket consistency, correction references present for KOR types. Seed from Ministry guidance **[VERIFY published business-rule list]**; the catalog grows over the gem's life.
 
 Transport's `send_invoice` runs `validate!` by default (`validate: false` opt-out).
@@ -412,7 +415,7 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Unit | RSpec + WebMock | request shaping, crypto primitives, models, serializer, validator | every push, full matrix |
 | Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **planned, not yet built** — no cassette exists as of 2026-08-23; WebMock stubs cover this ground for now |
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors — NIST/FIPS, not C#, see §6.4 | every push |
-| Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning | **nightly** CI + pre-release, never per-PR |
+| Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning. Three specs exist — auth, crypto, session — and **none has run green against TEST yet** | **nightly** CI + pre-release, never per-PR |
 
 **Coverage gate (ratcheted 2026-08-22):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 99, branch 95, method 100**.
 
@@ -449,11 +452,11 @@ Transport: **both auth flows** — KSeF token *and* certificate/XAdES (§6.3) �
 
 The DSL is listed explicitly because it was previously implied only by the "Done when" gate below — §8's snippet opens with `Ksef::FA3.build`, so the gate could not pass without it, but no scope list named it. Build it **first** in this phase: it is small now that the models exist, its shape is fixed by §8, and until it exists the README's headline example is aspirational.
 
-Build the **certificate flow first**: it is the only one that can bootstrap a credential from nothing, so it is what makes the nightly TEST suite self-sufficient and unblocks §12.4. (Both done as of 2026-08-23.) The token flow then has something to authenticate with when minting its first token.
+Build the **certificate flow first**: it is the only one that can bootstrap a credential from nothing, so it is what makes the nightly TEST suite self-sufficient and unblocks §12 item 4. (Both done as of 2026-08-23.) The token flow then has something to authenticate with when minting its first token.
 
 **Done when:** §8 contract runs against TEST; a KSeF token can be minted end-to-end by this gem with no external client; all seven types build, validate, round-trip.
 
-**In progress, 2026-08-23.** The DSL is done — §8's snippet runs verbatim and validates. **The certificate flow is complete and verified against live TEST**: request document, XAdES-BES signer, and the four §4.2 endpoints the bootstrap exercises — challenge, `xades-signature`, `GET /auth/{ref}` and `redeem`. **`refresh` and `ksef-token` are implemented but have never run live** (corrected 2026-08-23: this claimed all six calls were live-verified, which the bootstrap's call list does not support). A KSeF token has been minted end to end by this gem with no external client, which satisfies the second "Done when" gate and resolves §12.4.
+**In progress, 2026-08-23.** The DSL is done — §8's snippet runs verbatim and validates. **The certificate flow is complete and verified against live TEST**: request document, XAdES-BES signer, and the four `docs/REFERENCE.md` §4.2 endpoints the bootstrap exercises — challenge, `xades-signature`, `GET /auth/{ref}` and `redeem`. **`refresh` and `ksef-token` are implemented but have never run live** (corrected 2026-08-23: this claimed all six calls were live-verified, which the bootstrap's call list does not support). A KSeF token has been minted end to end by this gem with no external client, which satisfies the second "Done when" gate and resolves §12 item 4.
 
 **Both auth flows and the crypto module have since landed** (`Ksef::Crypto`, `Ksef::Auth::Token`, `POST /auth/ksef-token`). One correction to §6.4 while doing it: the golden vectors it asks for **do not exist upstream** — neither reference client commits plaintext/ciphertext pairs — so the primitives are pinned to NIST SP 800-38A and FIPS 180-4 instead, and the OAEP digest and MGF1 digest are pinned behaviourally rather than by trusting an option name. `docs/REFERENCE.md` §10.1 records what replaced them and why it is at least as strong.
 

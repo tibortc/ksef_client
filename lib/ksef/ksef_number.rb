@@ -28,10 +28,17 @@ module Ksef
 
   # Reopened rather than using a `Data.define` block so the constants land on the class.
   class KsefNumber
+    # Both lengths the contract accepts. 35 is what KSeF 2.0 generates; 36 is the KSeF
+    # 1.0-era form, kept accepted for backward compatibility, with a hyphen splitting the
+    # technical part 6-6 (§13.1).
     LENGTH = 35
+    LEGACY_LENGTH = 36
+    LENGTHS = [LENGTH, LEGACY_LENGTH].freeze
 
-    # Uppercase hex only, in both the technical part and the checksum.
-    FORMAT = /\A(\d{10})-(\d{8})-([0-9A-F]{12})-([0-9A-F]{2})\z/
+    # Uppercase hex only, in both the technical part and the checksum. The optional hyphen
+    # is what admits the legacy form — taken from the contract's own pattern rather than
+    # invented.
+    FORMAT = /\A(\d{10})-(\d{8})-([0-9A-F]{6})-?([0-9A-F]{6})-([0-9A-F]{2})\z/
 
     # CRC-8 with polynomial `0x07`, initial value `0x00`, no input or output reflection and
     # no final XOR — computed over the **first 32 characters**, i.e. everything before the
@@ -48,14 +55,17 @@ module Ksef
       def parse(value)
         text = value.to_s
         match = FORMAT.match(text) or raise ValidationError, malformed(text)
-        nip, date, technical, checksum = match.captures
+        nip, date, first, second, checksum = match.captures
 
-        verify_checksum!(text, checksum)
+        # Only the 35-character form has a known checksum rule (§13.1), so only it is
+        # verified. Guessing the legacy rule would reject numbers the API accepts.
+        verify_checksum!(text, checksum) if text.length == LENGTH
+
         new(
           value: text,
           nip: nip,
           assigned_on: parse_date(date, text),
-          technical: technical,
+          technical: "#{first}#{second}",
           checksum: checksum
         )
       end
@@ -114,11 +124,21 @@ module Ksef
       end
 
       def malformed(text)
-        "KSeF number #{text.inspect} is malformed (#{text.length} characters, expected #{LENGTH}). " \
-          "The form is NIP-YYYYMMDD-<12 uppercase hex>-<2 uppercase hex>, " \
-          "e.g. 5265877635-20250826-0100001AF629-AF."
+        "KSeF number #{text.inspect} is malformed (#{text.length} characters, expected " \
+          "#{LENGTHS.join(" or ")}). The form is NIP-YYYYMMDD-<12 uppercase hex>-<2 uppercase hex>, " \
+          "e.g. 5265877635-20250826-0100001AF629-AF — or the KSeF 1.0 form with the technical " \
+          "part split 6-6, e.g. 5265877635-20250826-010000-1AF629-AF (docs/REFERENCE.md §13.1)."
       end
     end
+
+    # True for the KSeF 1.0-era 36-character form, which the API still accepts but never
+    # generates (§13.1).
+    def legacy? = value.length == LEGACY_LENGTH
+
+    # Whether the CRC-8 was actually checked. False for a legacy number: §13's "first 32
+    # characters" rule describes the 35-character layout, and nothing upstream states the
+    # input for the longer one — so it is accepted for lookup but not vouched for.
+    def checksum_verified? = !legacy?
 
     # The date KSeF accepted the invoice, which is its **official receipt date** — not the
     # date it was downloaded, and not the invoice's own issue date.

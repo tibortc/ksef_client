@@ -62,7 +62,13 @@ module Ksef
         document = Nokogiri::XML(xml)
         raise ValidationError, "Cannot sign: the document has no root element" if document.root.nil?
 
-        Validator.validate!(xml) if validate
+        # `TokenRequest` knows whether its own context type can be meaningfully validated
+        # (§14.4: two of the four have defective upstream patterns), and carries the advisory
+        # explaining a failure that is not the caller's fault. Delegating to it means a
+        # `NipVatUe` or `PeppolId` request fails with the reason rather than a bare schema
+        # error — and can still be signed with `validate: false`, which is the resolution
+        # §14.4 arrived at.
+        validate!(input, xml) if validate
 
         # Computed before the signature exists, which is exactly what the
         # enveloped-signature transform reproduces for the verifier.
@@ -91,6 +97,14 @@ module Ksef
         signed_info = at(document, "//ds:SignedInfo")
         at(document, "//ds:SignatureValue").content =
           encode(@key.sign("SHA256", signed_info.canonicalize(C14N_MODE)))
+      end
+
+      # Uses the request's own advisory when there is one, so the error names the upstream
+      # defect instead of implying bad input.
+      def validate!(input, xml)
+        return input.validate! if input.respond_to?(:validate!)
+
+        Validator.validate!(xml)
       end
 
       def at(document, xpath)

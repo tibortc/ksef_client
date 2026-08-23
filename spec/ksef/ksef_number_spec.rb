@@ -97,6 +97,51 @@ RSpec.describe Ksef::KsefNumber do
     end
   end
 
+  # §13.1. The contract declares minLength 35 / maxLength 36 and an optional hyphen splitting
+  # the technical part 6-6, for KSeF 1.0 backward compatibility. This gem enforced 35 until
+  # 2026-08-23, which made legacy numbers unlookupable — `download_invoice` and
+  # `for_ksef_number` both parse before use, so it failed locally where the API answers 200.
+  describe "the 36-character legacy form" do
+    subject(:legacy) { described_class.parse("5265877635-20250826-010000-1AF629-AF") }
+
+    it "is accepted" do
+      expect(legacy.value.length).to eq(36)
+      expect(legacy).to be_legacy
+    end
+
+    it "normalises the technical part, so both forms agree" do
+      expect(legacy.technical).to eq(described_class.parse(documented).technical)
+      expect(legacy.nip).to eq("5265877635")
+      expect(legacy.assigned_on).to eq(Date.new(2025, 8, 26))
+    end
+
+    # The CRC input rule for this form is unverified — §13's "first 32 characters" describes
+    # the 35-character layout. Accepting without vouching beats guessing and rejecting a
+    # number the API would honour.
+    it "is not checksum-verified, and says so" do
+      expect(legacy.checksum_verified?).to be(false)
+    end
+
+    it "is accepted even with a checksum the 35-char rule would reject" do
+      expect { described_class.parse("5265877635-20250826-010000-1AF629-00") }.not_to raise_error
+    end
+
+    it "still rejects a malformed legacy number" do
+      expect { described_class.parse("5265877635-20250826-01000-01AF629-AF") }
+        .to raise_error(Ksef::ValidationError, /malformed/)
+    end
+
+    it "names both accepted lengths when it rejects" do
+      expect { described_class.parse("nonsense") }
+        .to raise_error(Ksef::ValidationError, /expected 35 or 36/)
+    end
+  end
+
+  it "reports the 2.0 form as checksum-verified" do
+    expect(described_class.parse(documented).checksum_verified?).to be(true)
+    expect(described_class.parse(documented)).not_to be_legacy
+  end
+
   describe ".valid?" do
     it "is true for the documented example" do
       expect(described_class).to be_valid(documented)

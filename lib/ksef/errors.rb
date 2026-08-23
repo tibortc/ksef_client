@@ -26,7 +26,15 @@ module Ksef
   # Challenge, KSeF-token, signature or JWT problems, including HTTP 401.
   class AuthenticationError < Error; end
 
-  # Raised locally by the FA(3) validator (DESIGN.md §7.7), never by the transport layer.
+  # Any locally-detected problem with the caller's input, before or instead of a request.
+  #
+  # The FA(3) validator (DESIGN.md §7.7) is the largest source, but **not the only one**, and
+  # an earlier version of this comment said "never by the transport layer" — which this gem
+  # then made false. It is also raised for a malformed KSeF number, a session or invoice
+  # reference that could alter a URL path, a challenge in the wrong format, a missing KSeF
+  # token, an unknown form code, and a malformed UPO download URL. Seventeen files raise it.
+  #
+  # So rescue it as "something I passed in is wrong", not as "my invoice is schema-invalid".
   class ValidationError < Error; end
 
   # Downloaded bytes did not match the hash the server published for them

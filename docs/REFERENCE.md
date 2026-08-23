@@ -300,7 +300,7 @@ numbered lists stop at 3; there is no step 4 to cite.)
 
 | Token | Lifetime | Notes |
 |---|---|---|
-| `accessToken` | short, expiry in the JWT `exp` claim (docs say "kilkanaście minut") | sent as `Authorization: Bearer` |
+| `accessToken` | short (docs say "kilkanaście minut"). **Read expiry from the response's `validUntil`, not the JWT `exp`** — the contract's `TokenInfo` requires `token` + `validUntil` precisely so no decoding is needed, and DESIGN.md §4.3 excludes the `jwt` dependency | sent as `Authorization: Bearer` |
 | `refreshToken` | **up to 7 days**, reusable | renews the access token without re-authenticating |
 
 **Revocation is not immediate.** An `accessToken` stays valid until its `exp` even if the
@@ -1291,7 +1291,7 @@ Implemented 2026-08-23 in `lib/ksef/crypto/`.
 | `publicKeyId` | **always sent**, though the contract marks it nullable | It names *which* published key did the wrapping. Omitting it turns a key rotation from a `21470` you can remediate into an undecryptable payload with nothing to diagnose |
 | Unparseable `validFrom`/`validTo` | the certificate becomes **unselectable** | Fail closed. A nil window must not read as "no constraint" — that would wrap a payload under a key KSeF may already have withdrawn |
 | Unknown `usage` string | raises, rather than selecting nothing | A typo would otherwise present as "the Ministry publishes no such key", sending the reader to look for a rotation that never happened |
-| `Ksef::CryptoError` | a new branch of the DESIGN.md §6.7 hierarchy | Neither an `ApiError` (the request succeeded; the list has nothing usable) nor a `ConfigurationError` (documented as local and pre-request). The same reasoning that added `AuthorizationError` and `ResourceGoneError` (§7.4) |
+| `Ksef::CryptoError` | a new branch of the DESIGN.md §6.7 hierarchy | Neither an `ApiError` (the request succeeded; the list has nothing usable) nor a `ConfigurationError` (documented as local and pre-request). The same reasoning that added `AuthorizationError` and `ResourceGoneError` (§7 item 4) |
 | Wrapping is done **by** the certificate | `Certificate#encrypt` | Keeps the public key and the OAEP parameters in one place, so no caller can wrap with the right key under the wrong padding |
 
 One more, and it is the one worth stating: `Encryptor#seal` returns the ciphertext **and**
@@ -1487,7 +1487,7 @@ those fields.
 | 435 | — | error decrypting archive parts |
 | 440 | cancelled — no invoices sent | cancelled — send window exceeded, or no invoices sent |
 | 445 | verification error, no valid invoices | verification error, no valid invoices |
-| 500 | unknown error | unknown error |
+| 500 | — (batch only) | unknown error |
 
 Three consequences for the online session layer:
 
@@ -1510,9 +1510,11 @@ DESIGN.md §6.5 specifies capped exponential backoff instead — 1s, 2s, 4s … 
 five-minute default deadline. Keep ours, for two reasons the reference clients do not have to
 care about: a library shared across many callers should not spend a per-hour rate budget at a
 fixed 1/s (§6.1 caps `GET /sessions/{ref}` at 1200/h, which 60 polls per invoice would eat
-quickly), and a 60-second ceiling is too short for a large session. Their *terminal condition*
-is right though, and is what we adopt: poll while the code is `150`, treat everything else as
-final.
+quickly), and a 60-second ceiling is too short for a large session. Their *terminal condition* needed
+correcting too — see §12.1: **`code < 200` is in progress**, because `100` means "accepted for
+further processing" and a poller stopping there reports a pending invoice as settled. This
+sentence said "poll while the code is `150`" until 2026-08-23, the fourth copy of that claim
+to survive a correction pass.
 
 ### 12.3 Decisions this gem made about UPO retrieval, that upstream does not state
 
@@ -1528,6 +1530,7 @@ The third of these tables, after §10.3 (crypto) and §11.2a (sessions). Impleme
 | `#fetch` prefers the link | falls back to the metered route on expiry or absence | §14.2's resolution, in one call: the link is unmetered and hash-verified, and `GET /sessions` already allows only 10/min |
 | A relative `downloadUrl` is resolved | against the API host; an absolute one used untouched | §9 still carries which form the live API sends as unverified, so both are handled rather than one guessed at |
 | KSeF numbers parsed before use | `for_ksef_number` runs §13's CRC-8 first | A mistyped number fails locally instead of as an opaque 404 |
+| `Ksef::Client#upo` uses the **metered** route | against this section's own preference for the link | Deliberate, and only for a single invoice: obtaining the unmetered link costs a metered status call first, so the direct route is one request against two. `#collective_upo` and `UPO::Client#fetch` prefer the link, where it pays |
 
 **Why the connection split is the mechanism and not just tidiness.** A `downloadUrl` is a
 pre-signed Azure Blob URI that carries its own authorisation in the query string. Sending
@@ -1548,7 +1551,8 @@ algorithm** without verifying it first.
 
 ## 13. KSeF number structure — verified with a working example
 
-Source: `faktury/numer-ksef.md`. Format, always **exactly 35 characters**:
+Source: `faktury/numer-ksef.md` for the structure, **corrected against the pinned contract
+2026-08-23** for the length — see §13.1. The 2.0 format, 35 characters:
 
 ```
 9999999999-RRRRMMDD-FFFFFFFFFFFF-FF
@@ -1565,6 +1569,50 @@ Verified locally 2026-08-22 against the documented example — CRC-8 of
 `5265877635-20250826-0100001AF629` is `0xAF`, matching the published
 `5265877635-20250826-0100001AF629-AF`. This doubles as the golden vector for the
 implementation.
+
+### 13.1 A 36-character legacy form exists, and the prose does not mention it
+
+Found 2026-08-23, by a documentation review checking the code against the contract rather
+than against this section. **`components.schemas.KsefNumber` declares
+`minLength: 35, maxLength: 36`**, with the pattern
+
+```
+…-([0-9A-F]{6})-?([0-9A-F]{6})-([0-9A-F]{2})$
+```
+
+— an **optional hyphen splitting the technical part 6-6** — and says outright: *"Numer KSeF
+o długości 36 znaków jest akceptowany, by zachować kompatybilność wsteczną z KSeF 1.0. W
+KSeF 2.0 numery są generowane wyłącznie w formacie 35-znakowym."*
+
+So both forms are accepted on input; only the 35-character form is ever *generated*. The
+prose this section was built from says "always exactly 35", and the contract outranks it
+(§0 rule 2). This was a real defect, not just drift: `KsefNumber.parse` enforced 35, and
+both `Invoices::Client#download` and `UPO::Client#for_ksef_number` parse before use — so a
+KSeF 1.0-era number could not be looked up at all, failing locally where the API would have
+answered 200.
+
+**The CRC input rule for the 36-character form is unverified.** §13's rule is "the first 32
+characters, everything before the final hyphen", which is specific to the 35-character
+layout; for the longer form that span is 33 characters and includes an extra hyphen, and
+nothing upstream says whether the checksum covers the hyphenated or the de-hyphenated text.
+Two consequences, both implemented:
+
+- `KsefNumber.parse` accepts both forms, so a lookup is possible either way.
+- It **verifies the checksum only on the 35-character form**, where the rule is known, and
+  reports `#checksum_verified?` so a caller can tell a checked number from an accepted one.
+  Guessing the legacy rule and rejecting on a mismatch would turn an unverified assumption
+  into a hard failure on numbers the API accepts.
+
+The pattern also carries facts §13 never recorded: the NIP part is *structural*
+(`[1-9](\d[1-9]|[1-9]\d)\d{7}` — first digit non-zero, positions 2–3 not both zero) and
+the date part constrains year, month and day ranges. Both are stricter than this gem's
+`\d{10}` and `\d{8}`, though `Date.strptime` already rejects impossible dates.
+
+**Fourth time prose has lost to the contract in this project** — after the `480` auth status
+code (§4.8), the `formCode` table (§11.3) and the `100`/`150` polling rule (§12.1). The
+standing lesson, now stated once here rather than rediscovered a fifth time: **when a fact
+comes from upstream prose, check the OpenAPI schema for the same field before ledgering it.**
+The prose is a summary; the contract is the interface.
 
 One business fact worth surfacing in the API: per `limity/limity-api.md`, **the invoice's
 official receipt date is the date its KSeF number was assigned**, not the date the client
@@ -1812,6 +1860,6 @@ validation is delicate enough — TEST's own examples fail upstream's own schema
 adding version drift to it.
 
 Being contract-silent, this is the least certain fact in this section: it cannot be checked
-offline, only observed. The live session integration spec should assert that the UPO a session
-produces really is 4.3, and until it has run, treat the header as *believed* rather than
-*verified*.
+offline, only observed. `spec/integration/session_flow_spec.rb` asserts that a live session's
+UPO really is 4.3 — written 2026-08-23 and **not yet run against TEST**, so the header stays
+*believed* rather than *verified*, and §9 carries it as such.

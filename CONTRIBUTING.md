@@ -21,8 +21,12 @@ produces rejected invoices, or worse, silently malformed ones. So:
 
 1. Every externally sourced fact goes in [`docs/REFERENCE.md`](docs/REFERENCE.md) with its
    value, source URL and retrieval date, *before* the code depending on it is written.
-2. The authoritative sources, in order: the integrator documentation portal, the
-   `CIRFMF/ksef-api` repository, the pinned OpenAPI spec, the pinned FA(3) XSD.
+2. The authoritative sources, **in precedence order**: the pinned OpenAPI spec, the pinned
+   FA(3) XSD, then `CIRFMF/ksef-api`'s prose, then the integrator documentation portal. This
+   order is the opposite of what an earlier version of this list said, and it is not a
+   preference — the ledger records four occasions where upstream prose contradicted the
+   contract and the contract was right (`docs/REFERENCE.md` §4.8, §11.3, §12.1, §13.1). Read
+   the schema for a field before trusting a sentence about it.
 3. If a detail is not in the ledger and not verifiable from those sources, **stop and ask**
    rather than guessing.
 4. When the pinned artifacts and the design document disagree, the artifacts win. Update

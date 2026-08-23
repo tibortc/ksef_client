@@ -6,12 +6,12 @@
 Ksef::Error                        #problem → Ksef::ProblemDetails or nil
 ├── Ksef::ConfigurationError       raised locally, before any request
 ├── Ksef::AuthenticationError      challenge / token / JWT problems, and HTTP 401
-├── Ksef::ValidationError          raised locally by the FA(3) validator
+├── Ksef::ValidationError          any local input check: FA(3), identifiers, references
 ├── Ksef::CryptoError              no usable published key, or bad key material
 ├── Ksef::IntegrityError           downloaded bytes did not match the published hash
 ├── Ksef::ApiError                 #status #code #details #trace_id #raw
 │   ├── Ksef::InvoiceRejectedError schema or business rejection by KSeF
-│   ├── Ksef::SessionError         session could not be opened, used or closed
+│   ├── Ksef::SessionError         defined, not yet raised — see below
 │   ├── Ksef::AuthorizationError   403 — #reason_code, #security
 │   ├── Ksef::ResourceGoneError    410
 │   ├── Ksef::RateLimitedError     429 — #retry_after
@@ -30,6 +30,16 @@ Two branches have no HTTP status behind them.
 needed, or that key material is the wrong size. The first is worth acting on: after an
 emergency key rotation it is transient, and `Ksef::Crypto::PublicKeys#refresh!` is the
 remedy (docs/REFERENCE.md §10.2, §10.3).
+
+`Ksef::SessionError` is **defined but never raised**, as of 2026-08-23. A session that
+cannot be opened, used or closed currently surfaces as a plain `Ksef::ApiError` carrying the
+status. Do not `rescue Ksef::SessionError` expecting to catch that — it will catch nothing.
+
+`Ksef::TimeoutError` has **two** meanings, and the second matters more. The first is an open
+or read timeout. The second is a **polling deadline** passing in `wait_until_accepted` or
+`wait_for_session`, where it means the operation has *not failed* — it has outlasted the
+wait. Resending there is precisely the duplicate-invoice hazard the gem works to avoid;
+poll again, or raise the `deadline:` option.
 
 `Ksef::IntegrityError` means a downloaded UPO did not match the `x-ms-meta-hash` the
 storage link published for it. **The right response is to fetch it again** — nothing is
@@ -74,7 +84,7 @@ deprecated envelope, `#trace_id` falls back to `referenceNumber`, its closest an
 
 ```ruby
 begin
-  client.invoice(ksef_number)
+  client.download_invoice(ksef_number)
 rescue Ksef::RateLimitedError => e
   sleep e.retry_after if e.retry_after
   retry

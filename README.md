@@ -55,8 +55,19 @@ submitted.
 
 ## Installation
 
+**0.1.0 is not released yet.** Only `0.1.0.rc1` is on RubyGems — a name-claiming
+placeholder that deliberately contains none of the API below — and Bundler will not select a
+prerelease for an unconstrained requirement, so `gem "ksef_client"` fails outright. Until
+0.1.0 ships, install from git:
+
 ```ruby
-gem "ksef_client"
+gem "ksef_client", github: "tibortc/ksef_client"
+```
+
+After release, the usual line will work:
+
+```ruby
+gem "ksef_client"   # once 0.1.0 is published
 ```
 
 The gem is named `ksef_client`; the namespace is `Ksef`.
@@ -67,9 +78,10 @@ require "ksef_client"   # defines Ksef, Ksef::FA3, Ksef::Auth, Ksef::Crypto, ...
 
 ## Quickstart
 
-All of this runs. `spec/ksef/client_spec.rb` drives this snippet against stubbed HTTP, so it
-cannot drift from the code — though see the status note above on what stubs do and do not
-prove.
+All of this runs. `spec/ksef/client_spec.rb` drives the same sequence against stubbed HTTP, so
+an API change here breaks a test — though the snippet is mirrored by hand rather than
+extracted, so the *prose* can still drift from the spec. And see the status note above on what
+stubs do and do not prove.
 
 ```ruby
 client = Ksef::Client.new(
@@ -94,6 +106,7 @@ result = client.send_invoice(invoice)          # validate! → encrypt → sessi
 status = client.wait_until_accepted(result.reference)
 status.ksef_number                             # => "9999999999-20260823-…-3F"
 upo    = client.upo(result.reference)          # signed UPO — archive the bytes verbatim
+Dir.mkdir("upo") unless Dir.exist?("upo")      # #write does not create directories
 upo.write("upo/#{status.ksef_number}.xml")     # binwrite: the MF signature covers octets
 ```
 
@@ -134,7 +147,9 @@ conn = Ksef::HTTP::Connection.build(config)
 conn.get("rate-limits")
 ```
 
-Errors from the API arrive as a typed hierarchy carrying the Ministry's own diagnostics:
+Errors from the API arrive as a typed hierarchy carrying the Ministry's own diagnostics.
+[`docs/errors.md`](docs/errors.md) is the full reference — the class hierarchy, the status
+mapping, the 403 reason codes, and what the rate limits actually are:
 
 ```ruby
 begin
@@ -180,9 +195,9 @@ invoice = Ksef::FA3::Invoice.new(
   ]
 )
 
-invoice.net_total    # => 1500
+invoice.net_total    # => 1500  (a BigDecimal; #inspect shows 0.15e4)
 invoice.vat_total    # => 345
-invoice.gross_total  # => 1845
+invoice.gross_total  # => 1845   — use .to_s("F") for a plain decimal string
 
 invoice.validate!    # against the bundled XSD, no network
 invoice.to_xml       # => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>..."
@@ -254,8 +269,11 @@ integrators.
   problem. Idempotent GETs retry with capped exponential backoff, honouring `Retry-After`
   unclamped; every POST surfaces its error to you, so re-sending is always your decision.
 - **Thread-safe by requirement.** Configuration is frozen at construction, and a single
-  client will be shareable across threads (Sidekiq is the expected habitat) — a stated
-  constraint on `Ksef::Client`, which is not written yet, not a claim about shipped code.
+  client **is** shareable across threads (Sidekiq is the expected habitat), and that is
+  shipped rather than aspirational: the configuration is frozen at construction, the
+  connections are stateless, the only mutable state is a memoised credential behind one
+  mutex, and no session is ever held on the client — which is why `send_invoice` opens a
+  fresh one. A spec drives six concurrent sends and asserts a single authentication.
 - **Secrets never logged.** Tokens, JWTs, symmetric keys and IVs are redacted from
   `#inspect` output.
 
@@ -263,7 +281,7 @@ integrators.
 
 | Version | Scope |
 |---|---|
-| 0.1.0 | **Both auth methods** — certificate/XAdES *and* KSeF token — crypto, online sessions, send/status/UPO/download, full FA(3) builder for all seven invoice types |
+| 0.1.0 | **Both auth methods** — certificate/XAdES *and* KSeF token — crypto, online sessions, send/status/UPO/download, **three-tier validation** (model, XSD, business), full FA(3) builder for all seven invoice types |
 | 0.2 | Batch sessions, invoice query/search, package export, hardened error catalogue |
 | 0.3 | KSeF certificate lifecycle endpoints, permissions API, offline QR codes |
 | 1.0 | After sustained production use; API stability promise begins |

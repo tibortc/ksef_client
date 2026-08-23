@@ -12,6 +12,12 @@ gem version for which API state".
 
 **Targets:** KSeF API 2.0 · FA(3) `1-0E` · upstream `CIRFMF/ksef-api@1c34fe27`
 
+> **What "works" means in this section.** Only the certificate/XAdES authentication flow has
+> ever run against the live KSeF TEST service, and only four of its endpoints. Everything
+> else below — sessions, encryption, UPO, invoice download, the facade — is verified against
+> **WebMock stubs**: no session has ever been opened against the real service.
+> `spec/integration/session_flow_spec.rb` is what will settle that, and it has not run yet.
+
 ### Added
 
 - **`Ksef::Client` — the facade, and DESIGN.md §8's snippet now runs.** A spec drives that
@@ -347,7 +353,7 @@ gem version for which API state".
 - `spec/openapi_contract_spec.rb` — asserts the ledger's claims against the pinned
   contract, rather than only that the contract has not changed. It covers the two findings
   that had **no code when they were ledgered** — §14.1's discrete IV field, since
-  implemented by `Ksef::Crypto`, and §14.2's pre-signed link, which still has none — because
+  implemented by `Ksef::Crypto`, and §14.2's pre-signed link, since implemented by `Ksef::UPO::Client` — because
   those are the ones that would otherwise rot unnoticed until someone implemented crypto
   or session handling from a stale conclusion.
 - Coverage is now gated on three criteria rather than one, at **line 99, branch 95,

@@ -254,7 +254,7 @@ RSpec.describe "the pinned OpenAPI contract" do
 
   # docs/REFERENCE.md §7 item 2, which `lib/ksef/environments.rb` cites directly. Recorded
   # here because it is what made the old §14.2 reading look plausible.
-  describe "§7.2 — no path carries an /api prefix" do
+  describe "§7 item 2 — no path carries an /api prefix" do
     it "declares every path bare, with /v2 living in the server URL" do
       expect(spec.fetch("paths").keys.grep(%r{\A/api})).to be_empty
     end

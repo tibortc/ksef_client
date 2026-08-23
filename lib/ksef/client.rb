@@ -51,8 +51,9 @@ module Ksef
     # Sends one invoice, in a session of its own.
     #
     # Fresh session per call is the decided default (§11.2a). For more than a handful of
-    # invoices use {#session}, which opens one session for all of them — the rate budget
-    # allows 30 session opens a minute against 180 invoice sends.
+    # invoices use {#session}, which opens one session for all of them. The budgets to compare
+    # are the hourly ones: 120 session opens an hour against 180 invoice sends (§6.1). Per
+    # minute both are 30, so the saving is real but smaller than it first looks.
     #
     # @param invoice [#to_xml, String] an FA(3) document
     # @param validate [Boolean] run the FA(3) validator first
@@ -69,12 +70,21 @@ module Ksef
     # @yieldparam batch [Session]
     # @return the block's value
     def session(form_code: Sessions::DEFAULT_FORM_CODE, upo_version: Sessions::UPO_VERSION)
-      opened = sessions.open(
-        encryptor: Crypto::Encryptor.generate,
-        certificate: public_keys.symmetric_key_encryption,
-        form_code: form_code,
-        upo_version: upo_version
-      )
+      # Wrapped in the §10.2 remediation: certificates are cached for an hour, so an
+      # emergency key rotation inside that window makes the cached `publicKeyId` unknown and
+      # the open fails with `21470`. `with_key_rotation` re-fetches and re-selects, and the
+      # certificate is chosen *inside* the block so the second attempt uses the new key.
+      #
+      # This is not a retry of a POST in the sense the hard rule forbids: a 21470 means the
+      # request was declined outright, so there is no session to duplicate.
+      opened = public_keys.with_key_rotation do
+        sessions.open(
+          encryptor: Crypto::Encryptor.generate,
+          certificate: public_keys.symmetric_key_encryption,
+          form_code: form_code,
+          upo_version: upo_version
+        )
+      end
       yield Session.new(self, opened)
     ensure
       sessions.close(opened) if opened
@@ -173,7 +183,7 @@ module Ksef
     #
     # @return [Ksef::Auth::AccessToken]
     def credential
-      @mutex.synchronize { @credential ||= authenticate! }
+      @mutex.synchronize { @credential ||= authenticate_with_rotation! }
     end
 
     def inspect = "#<Ksef::Client env=#{config.environment.name.inspect}>"
@@ -197,6 +207,13 @@ module Ksef
       credential_token.authentication_request(
         challenge: auth.challenge, certificate: public_keys.token_encryption
       )
+    end
+
+    # Authentication consumes a published key too, so it gets the same remediation. The
+    # challenge is re-fetched on the second attempt as well, which is correct: challenges are
+    # single-use, so replaying one would fail for a different reason.
+    def authenticate_with_rotation!
+      public_keys.with_key_rotation { authenticate! }
     end
 
     # A usable credential, or a message saying where one comes from — the failure a caller

@@ -239,4 +239,28 @@ RSpec.describe Ksef::Auth::Signer do
         .to include("<ds:SignatureValue>")
     end
   end
+
+  # §14.4: `NipVatUe` and `PeppolId` cannot hold their real values under the pinned schema's
+  # patterns, which are defective upstream. Signing delegates to the request's own
+  # `#validate!`, so the failure names that rather than reading as bad input from the caller.
+  describe "a context type whose schema pattern is defective upstream" do
+    # A method rather than a `let`: the enclosing group is already at the memoised-helper
+    # limit, and this is cheap to rebuild.
+    def defective
+      Ksef::Auth::TokenRequest.new(
+        challenge: "20250604-CR-461EA5B000-537A6BA15D-D7",
+        context_type: :nip_vat_ue, context_value: "5265877635-ATU12345678"
+      )
+    end
+
+    it "explains that the failure may be upstream's fault, not the caller's" do
+      expect { signer.sign(defective) }
+        .to raise_error(Ksef::ValidationError, /defective upstream/)
+    end
+
+    # The §14.4 resolution: emit the natural value and let the server decide.
+    it "still signs it with validate: false" do
+      expect(signer.sign(defective, validate: false)).to include("SignatureValue")
+    end
+  end
 end

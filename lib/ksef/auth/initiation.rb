@@ -7,7 +7,7 @@ module Ksef
     #
     # The token here is the short-lived *authentication* token, not an access token. It
     # authorises exactly two follow-up calls: checking the operation's status, and redeeming
-    # it for the real pair. Confusing the two is the obvious mistake in this flow (§4.2).
+    # it for the real pair. Confusing the two is the obvious mistake in this flow (docs/REFERENCE.md §4.2).
     Initiation = Data.define(:reference_number, :authentication_token) do
       def self.from(payload)
         new(

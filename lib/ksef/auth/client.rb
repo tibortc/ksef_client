@@ -10,7 +10,7 @@ module Ksef
     #
     # Deliberately thin: it maps requests and responses and does nothing else. Deciding
     # *which* credential to present, and caching the result, belongs a layer up in
-    # {Ksef::Client}, which does not exist yet.
+    # {Ksef::Client}, which does exactly that.
     #
     # Namespaced `Ksef::Auth::Client` rather than folded into `Ksef::Client` so that each
     # subsystem's endpoints stay together, matching how the official clients are organised.
