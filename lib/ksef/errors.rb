@@ -29,6 +29,20 @@ module Ksef
   # Raised locally by the FA(3) validator (DESIGN.md §7.7), never by the transport layer.
   class ValidationError < Error; end
 
+  # Downloaded bytes did not match the hash the server published for them
+  # (docs/REFERENCE.md §14.2).
+  #
+  # Its own class because the right response is specific and different from every other
+  # error here: **fetch it again**. Nothing is wrong with the request, the credentials or
+  # the document — the transfer was corrupted. It is not a {ValidationError}, which says
+  # the caller's own data is malformed, and it is not an {ApiError}, since the response was
+  # a success.
+  #
+  # It exists at all because the artifact this guards is a UPO: the legal proof that an
+  # invoice was received, fetched over an unauthenticated storage link. Silently archiving
+  # corrupt bytes as proof of receipt is the one outcome worth a dedicated error.
+  class IntegrityError < Error; end
+
   # Encryption could not proceed: no published KSeF certificate is valid for the usage
   # needed, or key material is the wrong size (docs/REFERENCE.md §10).
   #
