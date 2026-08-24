@@ -20,6 +20,72 @@ gem version for which API state".
 > UPO retrieved and hash-verified. What is still **WebMock stubs** only: token refresh, the
 > KSeF-token auth call, invoice download, and anything batch.
 
+### Fixed
+
+- **A correction built without stated totals derived its summary from the rows, counting
+  `StanPrzed` rows as sales.** `docs/REFERENCE.md` §8.4 says a correction's summaries are read
+  and never computed; that held in the parser and not in the serializer, which fell back to
+  the line-derived buckets whenever no `Totals` was given. A `StanPrzed` row is the position
+  *as it was before the correction* — already invoiced on the original document — so summing
+  it counts the amount twice with the wrong sign. The Ministry's Przykład 2, built through
+  this gem's own DSL without `f.totals`, declared `P_15 = 3799.98` for a correction worth
+  `-200.00`: a refund emitted as a charge, XSD-valid, with `invoice.errors` empty and
+  `#unmapped_elements` showing nothing. **Tier 1 now requires stated totals whenever a line is
+  marked `state_before`** — scoped to the marker rather than to the invoice type, because a
+  correction whose rows already *are* the deltas computes correctly, and Przykład 3 is exactly
+  that shape.
+
+- **`NrWierszaFa` was read as octal.** `Formatting.integer` called `Integer(value)` with no
+  base, so Ruby honoured a leading zero. `<NrWierszaFa>010</NrWierszaFa>` is schema-valid and
+  means ten; it parsed as **eight** and re-serialised as `8` — in the one field that pairs a
+  correction's before/after rows once `UU_ID` is dropped. `"08"` failed the other way, raising
+  on a document the schema accepts. A `Float` is now refused rather than truncated.
+
+- **Tier 1 rejected KSeF numbers the FA(3) schema allows.** It judged a referenced
+  `NrKSeFFaKorygowanej` with `Ksef::KsefNumber::FORMAT`, which comes from the **OpenAPI
+  contract** and admits only the NIP issuer form; the **XSD** additionally admits `M\d{9}` and
+  `[A-Z]{3}\d{7}`. The two artifacts are both right about their own domain — the contract
+  governs lookup URLs, the XSD governs documents — so tier 1 no longer checks the format and
+  tier 2 owns it (`docs/REFERENCE.md` §8.4b).
+
+- **Silent drops and silent rewrites**, each found by the same audit:
+  - A **symbol-keyed** element passed the serializer's own unknown-key check, which compares
+    `keys.map(&:to_s)`, and was then dropped by a write loop asking `key?(name)` for a String.
+  - An **absent `Adnotacje`** was read as the defaults, emitting eight affirmative tax
+    declarations the document never made. It now reads as "nothing declared".
+  - A **`DaneFaKorygowanej` stating neither branch** of the schema's choice was re-serialised
+    with `NrKSeFN`, asserting the corrected invoice had been issued outside KSeF. Refused.
+  - `Ksef::FA3::Totals` **dropped a bucket** given under two spellings (`:P_13_1` and
+    `"P_13_1"`); it now refuses the collision.
+  - The `Adnotacje` key check reached one level deep while the serializer recurses, so a bad
+    nested key passed the model and raised on the way out.
+
+- **Round-trip equality** held for fewer invoices than documented. `Ksef::FA3.parse(x.to_xml)
+  == x` now survives `number: 123`, `vat: 23`, a buyer flag given as `"1"`, and a
+  `row_number` that merely repeats its position — all of which describe exactly the document
+  their canonical spellings do. Text bound for an `xsd:token` element is canonicalised on the
+  way in, which also closed a case where `vat_rate: " 23 "` passed tier 1 and then made
+  `#to_xml` raise.
+
+- **Errors that escaped this gem's hierarchy.** `Invoice#errors` is documented to answer
+  rather than raise; it raised for a mojibake NIP, for a mojibake KSeF number, and for a
+  `totals:` or `correction:` of the wrong class (the duck-typed guards accepted this gem's
+  *other* value objects, then called methods they do not have). `Formatting.date_time` raised
+  `NoMethodError` for a non-time, `Builder#totals` for `net: nil`, and `Correction.new` mangled
+  a Hash into pairs. All now `Ksef::ValidationError`.
+
+- **`Formatting.to_date` guessed.** `Date.parse("junk")` answers the first of June, and
+  `"12"` answers the twelfth of the current month — a value that changes with the clock.
+  A String must now be ISO-8601, which is the only form an FA(3) document can carry.
+
+- **`BigDecimal("-0.00")` broke the `==`/`hash` contract**, comparing equal to `0.00` while
+  hashing differently, so a line whose net arrived as `"-0.00"` failed as a Hash key. Negative
+  zero is normalised.
+
+- **Frozen state.** `Ksef::FA3::Correction` no longer freezes the caller's own array, and
+  `Totals#buckets` and `Invoice#lines` are frozen, so an invariant cannot be edited around
+  after construction.
+
 ### Added
 
 - **`KOR`, the correction — building, parsing and validating** (DESIGN.md §7.4,

@@ -51,7 +51,19 @@ RSpec.describe Ksef::FA3::Parser do
     XML
   end
 
-  def fa(*body) = "<Fa><KodWaluty>PLN</KodWaluty><P_1>2026-08-24</P_1><P_2>FV/1</P_2>#{body.join}</Fa>"
+  # `Adnotacje` is minOccurs="1", so a realistic Fa carries one — and several examples here
+  # assert that what comes back out is schema-valid, which it cannot be without it.
+  def annotations
+    "<Adnotacje><P_16>2</P_16><P_17>2</P_17><P_18>2</P_18><P_18A>2</P_18A>" \
+      "<Zwolnienie><P_19N>1</P_19N></Zwolnienie>" \
+      "<NoweSrodkiTransportu><P_22N>1</P_22N></NoweSrodkiTransportu>" \
+      "<P_23>2</P_23><PMarzy><P_PMarzyN>1</P_PMarzyN></PMarzy></Adnotacje>"
+  end
+
+  def fa(*body, annotations: self.annotations)
+    "<Fa><KodWaluty>PLN</KodWaluty><P_1>2026-08-24</P_1><P_2>FV/1</P_2>" \
+      "#{body.join}#{annotations}</Fa>"
+  end
 
   def one_row(overrides = {})
     row = { "NrWierszaFa" => 1, "P_7" => "Item", "P_8A" => "szt.", "P_8B" => "1",
@@ -496,10 +508,21 @@ RSpec.describe Ksef::FA3::Parser do
       expect(Ksef::FA3::Validator.errors_for(parsed.to_xml)).to be_empty
     end
 
-    it "falls back to the defaults when the element is absent" do
-      parsed = described_class.parse(document(subjects, fa(one_row)))
+    # **Absent is read as "nothing declared", never as the defaults.** `Adnotacje` is
+    # mandatory, so such a document is schema-invalid — but defaulting it emitted eight
+    # affirmative declarations the document never made, and the element paths match either
+    # way, so `#unmapped_elements` could not see it. Invalid in, invalid out, and tier 2 says
+    # which element. The defaults remain a builder convenience.
+    it "reads an absent element as nothing declared, rather than inventing the defaults" do
+      parsed = described_class.parse(document(subjects, fa(one_row, annotations: "")))
 
-      expect(parsed.annotations).to eq(Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS)
+      expect(parsed.annotations).to eq({})
+      expect(Ksef::FA3::Validator.errors_for(parsed.to_xml).join)
+        .to match(/Adnotacje.*Missing child element/)
+    end
+
+    it "still defaults them for an invoice nobody supplied any for" do
+      expect(built.annotations).to eq(Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS)
     end
   end
 

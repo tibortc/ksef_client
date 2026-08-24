@@ -44,9 +44,30 @@ module Ksef
       # roles make both optional.
       NAMED_PARTIES = %i[seller previous_seller].freeze
 
+      # Every field is canonicalised to what the document will carry (§8.2b). The two flags
+      # in particular: {SubjectReader} reads them back through {Formatting.unflag} as
+      # booleans, so a caller passing `"1"` — which tier 1 used to bless — built an invoice
+      # that could never equal its own parsed form.
       def initialize(nip:, address: nil, name: nil, local_government_unit: false,
                      vat_group_member: false, buyer_id: nil)
-        super
+        super(
+          address: address,
+          nip: self.class.normalized_nip(nip),
+          name: Formatting.text(name),
+          buyer_id: Formatting.text(buyer_id),
+          local_government_unit: Formatting.unflag(local_government_unit),
+          vat_group_member: Formatting.unflag(vat_group_member)
+        )
+      end
+
+      # `NIP.normalize` accepts the written forms an ERP sends — "123-456-32-18", "PL…" — so
+      # canonicalising here is what makes those equal to the ten digits a document carries.
+      # Text tagged UTF-8 that is not passes through untouched, for the reason
+      # {Formatting.text} explains: `strip` raises on it, and tier 1 is what reports it.
+      def self.normalized_nip(value)
+        return value if value.nil? || !value.to_s.valid_encoding?
+
+        NIP.normalize(value)
       end
 
       # @param role [Symbol] `:seller`, `:buyer`, `:previous_seller` or `:previous_buyer`

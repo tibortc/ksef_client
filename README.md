@@ -246,6 +246,8 @@ correction = Ksef::FA3.build do |f|
   f.issue_date Date.new(2026, 8, 22)
   f.invoice_type "KOR"
 
+  # `effect` is TypKorekty: when the correction takes effect in the VAT register — 1 at the
+  # corrected invoice's date, 2 at this one's, 3 at some other date.
   f.correction reason: "obniżka ceny o 200 zł", effect: 3
   f.corrects number: "FV/2026/02/150", issue_date: "2026-02-15",
              ksef_number: "5265877635-20250826-0100001AF629-AF"
@@ -262,10 +264,14 @@ end
 
 **The totals are stated, not computed**, and that is deliberate. A correction's summary
 buckets are deltas, and FA(3) does not require its rows to determine them — three of the
-Ministry's five worked corrections have no usable rows at all, one of them no `FaWiersz`
-whatsoever. Deriving the figures would invent a tax base the document already states, so
-`f.totals` is how a correction says what it does. It takes rate codes, like `f.line`, and maps
-them to summary buckets for you.
+Ministry's five worked corrections have no usable rows at all, and **two of those carry no
+`FaWiersz` whatsoever**. Deriving the figures would invent a tax base the document already
+states, so `f.totals` is how a correction says what it does. It takes rate codes, like
+`f.line`, and maps them to summary buckets for you.
+
+`f.totals` is **required** once a row is marked `state_before`: such a row shows the position
+as it was, so adding it up counts an amount that was already invoiced. `invoice.errors` says
+so rather than letting the document out.
 
 Omit `ksef_number` when the invoice being corrected was issued outside KSeF; the document then
 carries the `NrKSeFN` marker instead. If the buyer's details are what changed, pass the old

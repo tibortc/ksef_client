@@ -68,7 +68,8 @@ module Ksef
             *subject_errors(invoice.buyer, "buyer", role: :buyer),
             *header_errors(invoice),
             *annotation_errors(invoice.annotations),
-            *totals_errors(invoice.totals),
+            *totals_errors(invoice),
+            *before_state_errors(invoice),
             *correction_errors(invoice.correction),
             *correcting_type_errors(invoice),
             *invoice.lines.each_with_index.flat_map { |line, index| line_errors(line, index) }
@@ -88,26 +89,45 @@ module Ksef
 
         # `annotations` is a public constructor field the model tier used to ignore entirely, so
         # an unknown key passed the model and then made the serializer raise — the one hole in
-        # this module's contract that a 2026-08-24 review could still find. Names are checked
-        # against the generated schema metadata, one level deep, which is as far as the
-        # serializer's own key check reaches per element.
-        def annotation_errors(annotations)
-          return [Issue.new(field: "annotations", message: "must be a Hash")] unless annotations.is_a?(Hash)
+        # this module's contract that a 2026-08-24 review could still find.
+        #
+        # **It recurses**, because the serializer does. Checking one level deep left
+        # `Zwolnienie => { "P_19X" => "1" }` passing the model and raising on the way out; the
+        # nested type is resolved through {Serializer.child_type_key}, the same call the
+        # serializer makes, so the two cannot disagree about what belongs where.
+        def annotation_errors(annotations, type_key = ANNOTATIONS_TYPE, field = "annotations")
+          return [Issue.new(field: field, message: "must be a Hash")] unless annotations.is_a?(Hash)
 
-          permitted = Generated::Types.ordered_elements(ANNOTATIONS_TYPE).map { |particle| particle[:name] }
+          known = Generated::Types.ordered_elements(type_key)
           # An empty list means the generated metadata no longer keys this type by the path
           # above — a codegen change, not a caller's mistake, and no reason to reject their
           # annotations.
-          return [] if permitted.empty?
+          return [] if known.empty?
 
-          (annotations.keys.map(&:to_s) - permitted).map do |unknown|
-            Issue.new(field: "annotations", message: "#{unknown.inspect} is not an element of Adnotacje")
+          named = annotations.transform_keys(&:to_s)
+          unknown_annotations(named, known, type_key, field) + nested_annotation_errors(named, known, type_key, field)
+        end
+
+        def unknown_annotations(named, known, type_key, field)
+          (named.keys - known.map { |particle| particle[:name] }).map do |unknown|
+            Issue.new(field: field,
+                      message: "#{unknown.inspect} is not an element of #{type_key.split("/").last}")
+          end
+        end
+
+        def nested_annotation_errors(named, known, type_key, field)
+          known.flat_map do |particle|
+            value = named[particle[:name]]
+            next [] unless value.is_a?(Hash)
+
+            annotation_errors(value, Serializer.child_type_key(type_key, particle),
+                              "#{field}.#{particle[:name]}")
           end
         end
 
         def line_errors(line, index)
           field = "lines[#{index}]"
-          return [Issue.new(field: field, message: "is not a Ksef::FA3::Line")] unless line.respond_to?(:vat_rate)
+          return [Issue.new(field: field, message: "is not a Ksef::FA3::Line")] unless line.is_a?(Line)
 
           [
             *text_errors(line.name, "#{field}.name", LONG_TEXT),

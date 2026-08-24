@@ -509,7 +509,7 @@ Gate status, precisely:
 |---|---|
 | §8 contract runs against TEST | **met**, verified live 2026-08-24 (nightly run `32692339217`) |
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
-| All seven types build, validate, round-trip | **not met** — only `VAT`. Round-trip and **validator tier 1** are both met for `VAT` as of 2026-08-24; tier 3 and the six other types remain |
+| All seven types build, validate, round-trip | **not met** — `VAT` and `KOR` do, as of 2026-08-24, round-trip and **validator tier 1** included. Tier 3 and the five other types remain |
 
 Remaining for Phase 2: validator tier 3, then the five other invoice types (§7.4). **Tier 1 landed 2026-08-24**, split into the model and document halves §7.7 now describes; **`KOR` landed the same day**, built against the Ministry's five worked corrections (`docs/REFERENCE.md` §8.4) — the only examples of a non-`VAT` type in existence.
 

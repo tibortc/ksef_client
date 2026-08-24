@@ -28,12 +28,13 @@ module Ksef
       # `#with` must re-run the constructor; on Ruby 3.2 it otherwise skips every invariant.
       include Canonical
 
-      # The `RodzajFaktury` values these elements belong to. The XSD does not relate the two —
-      # the correction group sits in the same sequence whatever the type — but its own
-      # documentation does: `PrzyczynaKorekty` is *"przyczyna korekty **dla faktur
-      # korygujących**"*, and the three correcting types are the ones `TRodzajFaktury`
-      # documents as such. A `VAT` invoice carrying `DaneFaKorygowanej` is schema-valid and
-      # means nothing, so {ModelValidator} says so (docs/REFERENCE.md §8.4).
+      # The `RodzajFaktury` values these elements belong to — **stated by the XSD itself**, in
+      # the annotation on the anonymous sequence that holds them: *"Dane dla przypadków, gdy
+      # pole RodzajFaktury przyjmuje wartości KOR, KOR_ZAL lub KOR_ROZ"*.
+      #
+      # What the schema cannot do is *enforce* it: the group sits in the same sequence whatever
+      # the type, so a `VAT` invoice carrying `DaneFaKorygowanej` validates clean. That gap is
+      # tier 1's, and {ModelValidator} fills it (docs/REFERENCE.md §8.4).
       CORRECTING_TYPES = %w[KOR KOR_ZAL KOR_ROZ].freeze
 
       NAMES_NOTHING = "A correction must name at least one corrected invoice. " \
@@ -59,19 +60,32 @@ module Ksef
       # @raise [Ksef::ValidationError] if no corrected invoice is named
       def initialize(corrected:, reason: nil, effect: nil, period: nil, corrected_number: nil,
                      previous_seller: nil, previous_buyers: [])
-        entries = Array(corrected)
+        entries = self.class.wrap(corrected)
         raise ValidationError, NAMES_NOTHING if entries.empty?
 
         super(
-          reason: reason, period: period, corrected_number: corrected_number,
           previous_seller: previous_seller,
-          corrected: entries.freeze,
-          previous_buyers: Array(previous_buyers).freeze,
+          reason: Formatting.text(reason),
+          period: Formatting.text(period),
+          corrected_number: Formatting.text(corrected_number),
+          # `dup` before freezing: `Array(x)` returns `x` itself when it is already an Array,
+          # so freezing in place froze the *caller's* array and made their next `<<` raise.
+          corrected: entries.dup.freeze,
+          previous_buyers: self.class.wrap(previous_buyers).dup.freeze,
           # `TypKorekty` restricts `xsd:integer`, whose value space is integers — so `"03"`
           # and `3` denote the same thing and the model stores the value, not the lexical
           # form (§8.2b). Contrast {Line#vat_rate}, a token whose value space *is* strings.
           effect: effect.nil? ? nil : Formatting.integer(effect)
         )
+      end
+
+      # `Array()` is not usable here: it splats a Hash into an array of pairs, so
+      # `Correction.new(corrected: { number: ..., issue_date: ... })` — a natural mistake —
+      # was accepted and then made `#to_xml` raise `NoMethodError` on an Array.
+      def self.wrap(value)
+        return [] if value.nil?
+
+        value.is_a?(Array) ? value : [value]
       end
 
       def to_fa3

@@ -19,11 +19,12 @@ module Ksef
 
       private
 
+      # `is_a?`, not a `respond_to?` pair. Checking two of the methods and then calling five
+      # more meant an object answering only those two made `errors_for` raise `NoMethodError`
+      # — the very symptom this guard exists to prevent. The message promises a class.
       def subject_errors(subject, field, role:)
         return [Issue.new(field: field, message: "is required")] if subject.nil?
-        unless subject.respond_to?(:nip) && subject.respond_to?(:address)
-          return [Issue.new(field: field, message: "is not a Ksef::FA3::Subject")]
-        end
+        return [Issue.new(field: field, message: "is not a Ksef::FA3::Subject")] unless subject.is_a?(Subject)
 
         [
           *nip_errors(subject.nip, "#{field}.nip"),
@@ -34,25 +35,39 @@ module Ksef
         ]
       end
 
-      # `JST` and `GV` are written through {Formatting.flag}, which raises on anything that is
-      # not boolean-ish. Only a buyer carries them — `Podmiot2K` has no such elements — so
-      # only a buyer is checked.
+      # **A field the chosen role cannot carry is silently dropped by {Subject#to_fa3}**, so
+      # tier 1 names it. `JST`/`GV` exist only on `Podmiot2`; `IDNabywcy` only on `Podmiot2`
+      # and `Podmiot2K`. Everywhere else the serializer simply does not write them, which in a
+      # codebase that otherwise raises on anything it cannot represent is the wrong kind of
+      # quiet — a caller who set `local_government_unit: true` on a `Podmiot1K` meant it.
+      #
+      # Only a *set* flag is reported. Both default to false, and false is also "not
+      # applicable", so a defaulted flag on a seller says nothing and must not be complained
+      # about. The values themselves are canonicalised by {Subject#initialize}, which is why
+      # this no longer checks them: an unreadable flag cannot reach a constructed object.
       def flag_errors(subject, field, role:)
-        return [] unless role == :buyer
+        return [] if role == :buyer
 
         { "local_government_unit" => subject.local_government_unit,
           "vat_group_member" => subject.vat_group_member }.filter_map do |name, value|
-          next if [true, false, nil, "1", "2", 1, 2].include?(value)
+          next unless value
 
-          Issue.new(field: "#{field}.#{name}", message: "#{value.inspect} is not a yes/no value")
+          Issue.new(field: "#{field}.#{name}",
+                    message: "is set on a #{role}, whose element carries no JST/GV; " \
+                             "only Podmiot2 does, so it would be dropped silently")
         end
       end
 
       # `IDNabywcy` is written by both buyer roles and by neither seller role.
       def buyer_id_errors(subject, field, role:)
-        return [] if Subject::NAMED_PARTIES.include?(role)
+        unless Subject::NAMED_PARTIES.include?(role)
+          return text_errors(subject.buyer_id, "#{field}.buyer_id", BUYER_ID_TEXT)
+        end
+        return [] if subject.buyer_id.nil?
 
-        text_errors(subject.buyer_id, "#{field}.buyer_id", BUYER_ID_TEXT)
+        [Issue.new(field: "#{field}.buyer_id",
+                   message: "is set on a #{role}, whose element carries no IDNabywcy; " \
+                            "only Podmiot2 and Podmiot2K do, so it would be dropped silently")]
       end
 
       # Checked here as well as in {Subject#to_fa3} on purpose. Serialisation raises, which
@@ -62,7 +77,15 @@ module Ksef
       # Note this is **stricter than TEST**, deliberately: KSeF validates NIP checksums in
       # production only (docs/REFERENCE.md §15.3), so a green TEST run proves nothing here
       # and relaxing the check would move the failure to the worst possible moment.
+      # The encoding check comes first for the reason {FieldChecks} gives: `NIP.normalize`
+      # calls `strip` and `gsub`, both of which raise `Encoding::CompatibilityError` on text
+      # tagged UTF-8 that is not — outside this gem's hierarchy, and so outside
+      # {Invoice#errors}' rescue. A mojibake NIP out of an ERP is exactly the case §15.1 calls
+      # the likely one.
       def nip_errors(nip, field)
+        bad_encoding = encoding_issue(nip, field)
+        return [bad_encoding] if bad_encoding
+
         NIP.validate!(nip, field: field)
         []
       rescue ValidationError => e

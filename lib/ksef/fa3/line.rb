@@ -54,7 +54,12 @@ module Ksef
       def initialize(name:, quantity:, unit:, net_unit_price:, vat_rate:, net_amount: nil,
                      row_number: nil, state_before: false)
         super(
-          name: name, unit: unit, vat_rate: vat_rate,
+          # `TZnakowy`/`TStawkaPodatku` are token types, so these are canonicalised the way
+          # every other field is (§8.2b). `vat_rate` matters most: {VatRate.bucket} looks the
+          # code up exactly, so an uncollapsed `" 23 "` passed tier 1 — which collapses before
+          # checking membership — and then made `#to_xml` raise.
+          name: Formatting.text(name), unit: Formatting.text(unit),
+          vat_rate: Formatting.text(vat_rate),
           quantity: self.class.scaled(quantity, Formatting::QUANTITY_SCALE),
           net_unit_price: self.class.scaled(net_unit_price, Formatting::AMOUNT_SCALE),
           net_amount: self.class.scaled(net_amount, Formatting::AMOUNT_SCALE),

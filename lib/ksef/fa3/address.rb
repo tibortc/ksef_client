@@ -40,7 +40,8 @@ module Ksef
         # surfacing it later from `#to_fa3` on an invoice that looks complete.
         raise ValidationError, "Address needs either line1, or street/city/postal_code" if composed.nil?
 
-        super(line1: composed, line2: line2, country: country)
+        super(line1: Formatting.text(composed), line2: Formatting.text(line2),
+              country: Formatting.text(country))
       end
 
       def to_fa3

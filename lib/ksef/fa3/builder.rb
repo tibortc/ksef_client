@@ -102,8 +102,10 @@ module Ksef
       # @param vat [Hash{String => Object}] rate code => tax amount
       def totals(gross:, net: {}, vat: {})
         buckets = {}
-        net.each { |code, amount| accumulate(buckets, VatRate.bucket(code).first, amount) }
-        vat.each { |code, amount| accumulate(buckets, tax_element(code), amount) }
+        # `nil` reads as "no buckets of this kind", which is what a caller who has only one
+        # side of the summary naturally passes. Left alone it raised a bare NoMethodError.
+        (net || {}).each { |code, amount| accumulate(buckets, VatRate.bucket(code).first, amount) }
+        (vat || {}).each { |code, amount| accumulate(buckets, tax_element(code), amount) }
         @fields[:totals] = Totals.new(buckets: buckets, gross: gross)
       end
 

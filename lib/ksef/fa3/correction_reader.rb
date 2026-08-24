@@ -56,10 +56,24 @@ module Ksef
           CorrectedInvoice.new(
             number: text!(node, "NrFaKorygowanej"),
             issue_date: text!(node, "DataWystFaKorygowanej"),
-            # Absent means `NrKSeFN` — the corrected invoice was issued outside KSeF. The
-            # schema's choice makes the two mutually exclusive, so reading one is enough.
-            ksef_number: text(node, "NrKSeFFaKorygowanej")
+            ksef_number: reference_from(node)
           )
+        end
+
+        # The schema's choice is mandatory: either `NrKSeF` + the number, or `NrKSeFN`. Reading
+        # only the number treated "the document said neither" as "the document said NrKSeFN" —
+        # and re-serialising then **asserted the corrected invoice was issued outside KSeF**,
+        # a declaration nobody made, on output the XSD accepts. A document with neither is
+        # schema-invalid, so it is refused here the way a missing `NrFaKorygowanej` already is.
+        def reference_from(node)
+          number = text(node, "NrKSeFFaKorygowanej")
+          return number if number
+          return nil if element(node, "NrKSeFN")
+
+          raise ValidationError,
+                "DaneFaKorygowanej for #{text(node, "NrFaKorygowanej").inspect} states neither " \
+                "NrKSeFFaKorygowanej nor NrKSeFN. The schema requires one of the two, and " \
+                "assuming NrKSeFN would assert the corrected invoice was issued outside KSeF."
         end
 
         def previous_seller_from(fa_node)
