@@ -180,6 +180,14 @@ Ministry's downloads page.
 All twenty-six validate against the pinned FA(3) XSD with **zero errors** (measured 2026-08-24),
 which is a second independent confirmation that §8.3's in-memory import rewriting is sound.
 
+**They earned their keep the same day.** `KOR` was built against the five corrections here and
+nothing else — no upstream code models an FA(3) correction — and four of the five parse,
+re-serialise and validate. Every structural decision in §8.4 was taken by reading them, and two
+were taken *against* what the schema documentation alone would have suggested: Przykład 2 gives
+a before/after pair the same `NrWierszaFa` where the annotation says *"z odrębną numeracją"*,
+and three of the five make it plain that a correction's summary cannot be derived from its rows.
+§8.4a is a third finding they produced: their KSeF numbers do not satisfy §13's checksum.
+
 #### The licence position, and the decision taken
 
 **This is the first artifact pinned from outside the CIRFMF GitHub organisation, and §1.2's MIT
@@ -1333,6 +1341,99 @@ The validator must rewrite that one `schemaLocation` to the local `bazowe/` copy
 memory**, parsing the XSD into a document, editing the attribute, and compiling with a
 base URI pointing at the schema directory. The pinned file on disk must stay byte-for-byte
 identical so the §1 digests keep verifying.
+
+### 8.4 The correction, `KOR` — read from the XSD and measured against the Ministry's five
+
+Source: the pinned FA(3) XSD for the structure, and the five `KOR` samples of §1.5 for what
+a real one looks like. Recorded 2026-08-24, when `KOR` was built.
+
+The correction elements are an **anonymous `<xsd:sequence minOccurs="0">`** sitting between
+`RodzajFaktury` and `ZaliczkaCzesciowa` in `Fa`:
+
+| Element | Occurs | Carried as |
+|---|---|---|
+| `PrzyczynaKorekty` | 0–1, `TZnakowy` | `Correction#reason` |
+| `TypKorekty` | 0–1, `TTypKorekty` (1/2/3) | `Correction#effect` |
+| `DaneFaKorygowanej` | **1–50 000** | `Correction#corrected` |
+| `OkresFaKorygowanej` | 0–1, `TZnakowy` | `Correction#period` |
+| `NrFaKorygowany` | 0–1, `TZnakowy` | `Correction#corrected_number` |
+| `Podmiot1K` | 0–1 | `Correction#previous_seller` |
+| `Podmiot2K` | 0–101 | `Correction#previous_buyers` |
+| `P_15ZK`, `KursWalutyZK` | 0–1 | **not modelled** — scoped by their own documentation to `KOR_ZAL`/`KOR_ROZ` |
+
+Four consequences that are easy to get wrong:
+
+**The group is optional; `DaneFaKorygowanej` is not optional within it.** So a `KOR` with no
+correction elements at all is schema-valid, while one carrying `PrzyczynaKorekty` and nothing
+else is not. `Correction` refuses the latter at construction and the parser reads the former
+as simply having no correction — inventing one would change the document.
+
+**`DaneFaKorygowanej` ends in a choice**, not two optional fields: either `NrKSeF` +
+`NrKSeFFaKorygowanej`, or `NrKSeFN` alone — *"znacznik faktury korygowanej wystawionej poza
+KSeF"*. Both branches are `etd:TWybor1`, which has exactly one member, `"1"`: these are
+markers, present or absent, with no "no" to write. Modelled as one nil-able `ksef_number`, so
+emitting both branches or neither is unrepresentable.
+
+**`IDNabywcy` is the link between `Podmiot2K` and the `Podmiot2` it corrects** — *"unikalny
+klucz powiązania danych nabywcy na fakturach korygujących"*. Both sides carry it, a correction
+may name up to 101 previous buyers, and nothing else pairs them. It is therefore a field of
+`Subject`, not an element to lose. `Podmiot2K` has **no `JST`/`GV`**; `Podmiot1K` makes `Adres`
+mandatory as `Podmiot1` does.
+
+**`StanPrzed` marks a row as the state before correction** — *"w przypadku gdy korekta …
+jest dokonywana w sposób polegający na wykazaniu danych przed korektą i po korekcie jako
+osobnych wierszy"*. Przykład 2 gives such a pair **the same `NrWierszaFa`** despite the same
+sentence saying *"z odrębną numeracją"*, and pairs them by `UU_ID` too. Since `UU_ID` is not
+modelled, the shared row number is the only link left, so `Line#row_number` carries it — but
+only when it differs from the row's position, or a parsed ordinary invoice would stop equalling
+the built invoice it came from (DESIGN.md §7.6).
+
+#### A correction's summaries are read, never computed
+
+This is the substantive modelling decision. An ordinary `VAT` invoice's `P_13_*`/`P_14_*` are a
+function of its rows. A `KOR`'s are **deltas**, and FA(3) does not require its rows to determine
+them. Measured over the five samples:
+
+| Sample | Rows | How the summary relates to them |
+|---|---|---|
+| Przykład 2 | before/after pair | after − before = the stated delta |
+| Przykład 3 | one row, already a delta | equals the stated delta |
+| Przykład 5 | **none** | `P_15` = 0, no buckets; a pure `Podmiot2K` data correction |
+| Przykład 6 | **none** | six corrected invoices, a period, buckets stated outright |
+| Przykład 7 | one row with **no amounts at all** | `P_7`, `CN`, unit and quantity only |
+
+So three of the five cannot derive a summary from their rows at any price. `Invoice#totals`
+holds what the document states, and the parser fills it for every `KOR`. `Ksef::FA3::Totals`
+is keyed by **element name**, not rate code, because that mapping is not invertible — `"23"`
+and `"22"` share `P_13_1` (§8.1a) — and because it is the document's own representation
+(§8.2b). `Invoice#lines` may then be empty, which the constructor permits **only** when totals
+are stated.
+
+The after − before rule that Przykład 2 satisfies is **deliberately not implemented**. One
+witness is not a rule, no first-tier source states it, and deriving a correction's tax base
+from an inference is the kind of thing §15.6 warns against. Callers state the delta.
+
+#### The one cross-field rule tier 1 carries
+
+`PrzyczynaKorekty` is documented as the reason *"dla faktur korygujących"*, so the group
+belongs to a correcting `RodzajFaktury` — `KOR`, `KOR_ZAL`, `KOR_ROZ`. The XSD cannot say so:
+the group sits in the same sequence whatever the type, and a `VAT` invoice carrying
+`DaneFaKorygowanej` validates clean. `ModelValidator` reports it. **The converse is not
+checked** — a `KOR` without the group is schema-valid, and complaining would be inventing a
+rule.
+
+#### 8.4a The Ministry's KSeF numbers do not satisfy §13's checksum
+
+Measured 2026-08-24: **all six distinct `NrKSeFFaKorygowanej` values in the worked corrections
+fail the CRC-8 of §13**, including `9999999999-20230908-8BEF280C8D35-4D`, which appears in
+three samples. They match `TNumerKSeF`'s pattern — every sample is XSD-valid — so they are
+well-formed placeholders rather than numbers KSeF ever issued.
+
+Our CRC-8 is not the thing that is wrong: it reproduces the documented example (§13) and
+agreed with a real number assigned on live TEST (§12). So **tier 1 checks the shape of a
+referenced KSeF number and not its checksum.** Nothing upstream says KSeF verifies the
+checksum of a *referenced* number, and rejecting on it would make tier 1 refuse the Ministry's
+own documents — the same failure as the whitespace-collapse bug of §15.1. Do not add it.
 
 ---
 

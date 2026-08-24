@@ -110,6 +110,18 @@ module Ksef
           end
         end
 
+        # For the handful of elements restricting `xsd:integer` — `TypKorekty`, `NrWierszaFa`.
+        #
+        # `Integer()` rather than `#to_i`, which answers 0 for "abc" and would turn a
+        # malformed document into a plausible one. The failure arrives as a ValidationError
+        # for the same reason {.to_date} and {.decimal} do: a caller rescuing this gem's own
+        # hierarchy has to catch it.
+        def integer(value)
+          Integer(value)
+        rescue ArgumentError, TypeError
+          raise ValidationError, "Cannot read #{value.inspect} as a whole number"
+        end
+
         # @raise [Ksef::ValidationError] Float is forbidden in any monetary path
         #   (DESIGN.md §4.4) — binary floating point cannot represent 0.01 exactly, and
         #   a rounding error in a tax document is a real problem.

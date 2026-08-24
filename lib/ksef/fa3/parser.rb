@@ -10,8 +10,9 @@ module Ksef
     #
     # {Serializer} is total: every model it is given becomes a document. The parser cannot
     # be, because FA(3) is far larger than this model. A real invoice carries `Podmiot3`,
-    # `PodmiotUpowazniony`, `DaneKontaktowe`, `OkresFa`, `Zalacznik`, correction references,
-    # currency-conversion twins of every tax bucket — and 0.1 models a plain `VAT` invoice.
+    # `PodmiotUpowazniony`, `DaneKontaktowe`, `OkresFa`, `Zalacznik`, `Platnosc`,
+    # currency-conversion twins of every tax bucket — and this models the plain `VAT` invoice
+    # and the correction, `KOR`.
     #
     # So parsing takes what it understands and **keeps the whole document** on
     # {Invoice#raw_document}. Nothing is lost, but nothing is silently invented either:
@@ -37,10 +38,16 @@ module Ksef
     # whatever its NIP, and PROD is the only environment that checks the digits anyway
     # (docs/REFERENCE.md §15.3).
     module Parser
-      # The invoice kinds {Invoice} can represent faithfully. The other six of
+      # The invoice kinds {Invoice} can represent faithfully. The other five of
       # `TRodzajFaktury` are DESIGN.md §7.4's remaining work; see {#supported_type!} for why
       # accepting one would be worse than refusing it.
-      SUPPORTED_TYPES = %w[VAT].freeze
+      SUPPORTED_TYPES = %w[VAT KOR].freeze
+
+      # Types whose summaries are **read** rather than recomputed from the rows. A `KOR`
+      # states deltas its rows need not determine — three of the Ministry's five worked
+      # corrections have no usable rows at all — so recomputing would replace the document's
+      # own figures with an invented total (docs/REFERENCE.md §8.4).
+      STATED_TOTALS_TYPES = %w[KOR].freeze
 
       class << self
         # Namespace-aware element reading; see {NodeReader}.
@@ -54,16 +61,21 @@ module Ksef
           document = xml.is_a?(Nokogiri::XML::Document) ? xml : Nokogiri::XML(xml)
           root = verified_root(document)
           fa_node = require_element(root, "Fa", context: Serializer::ROOT)
-          # **Before anything else is read.** Keyword arguments evaluate in source order, so
-          # doing this inside {#build} let the row reader run first — and the Ministry's own
+          # **Both before anything else is read**, because `Invoice.new`'s keyword arguments
+          # evaluate in source order: anything a later argument depends on has to exist before
+          # the call rather than be computed inside it.
+          #
+          # Reading the type inside {#build} let the row reader run first — and the Ministry's
           # collective corrections carry no `FaWiersz` at all, so a `KOR` was refused with
           # "Invoice has no FaWiersz rows". True, and the wrong diagnosis: it blamed a
           # perfectly good document for lacking something its type does not need. A ZAL is the
           # same case, its rows being `minOccurs="0"` and explicitly "opcjonalny dla faktury
-          # zaliczkowej".
+          # zaliczkowej". `totals` is now the field that decides whether rows are required at
+          # all, so it has to be read here too.
           type = supported_type!(text(fa_node, "RodzajFaktury") || "VAT")
+          totals = STATED_TOTALS_TYPES.include?(type) ? CorrectionReader.totals_from(fa_node) : nil
 
-          resolve_rounding(build(document, root, fa_node, type), fa_node)
+          resolve_rounding(build(document, root, fa_node, type, totals), fa_node, totals)
         end
 
         private
@@ -91,15 +103,18 @@ module Ksef
         # Built with `:per_line`, which {#resolve_rounding} then confirms or replaces. The
         # strategy is not a field in the document, so it cannot be read — only inferred from
         # the summaries, and that needs the lines parsed first.
-        def build(document, root, fa_node, type)
+        def build(document, root, fa_node, type, totals)
           Invoice.new(
-            seller: subject_from(require_element(root, "Podmiot1", context: Serializer::ROOT), role: :seller),
-            buyer: subject_from(require_element(root, "Podmiot2", context: Serializer::ROOT), role: :buyer),
+            seller: party(root, "Podmiot1", role: :seller),
+            buyer: party(root, "Podmiot2", role: :buyer),
             number: text!(fa_node, "P_2"),
             # Passed as text; {Invoice} converts it, so a malformed date surfaces as a
             # ValidationError rather than as a bare `Date::Error` from outside this gem.
             issue_date: text!(fa_node, "P_1"),
-            lines: RowReader.lines_from(fa_node),
+            # An invoice that states its own totals may legitimately have no rows.
+            lines: RowReader.lines_from(fa_node, required: totals.nil?),
+            correction: CorrectionReader.correction_from(fa_node),
+            totals: totals,
             currency: text(fa_node, "KodWaluty") || "PLN",
             # Read, not defaulted. These are declarations with tax consequences — cash
             # accounting, reverse charge, split payment, an actual VAT exemption — and
@@ -116,64 +131,22 @@ module Ksef
           )
         end
 
-        # `role` decides which of `Nazwa` and `Adres` are required: `TPodmiot1` makes both
-        # mandatory, `TPodmiot2` makes both optional — the address explicitly *"opcjonalne dla
-        # przypadków określonych w art. 106e ust. 5 pkt 3"*, the simplified invoice
-        # (docs/REFERENCE.md §8.2a). Requiring them of a buyer rejected valid FA(3).
-        def subject_from(node, role:)
-          identity = require_element(node, "DaneIdentyfikacyjne", context: node.name)
-
-          Subject.new(
-            nip: identity_nip(identity),
-            name: role == :seller ? text!(identity, "Nazwa") : text(identity, "Nazwa"),
-            address: address_from(node, role: role),
-            # Absent means "no" — which is both the schema's meaning for the seller, where
-            # neither element exists, and the right default for a buyer that omits them.
-            local_government_unit: Formatting.unflag(text(node, "JST")),
-            vat_group_member: Formatting.unflag(text(node, "GV"))
-          )
+        def party(root, name, role:)
+          SubjectReader.subject_from(require_element(root, name, context: Serializer::ROOT), role: role)
         end
 
-        def address_from(node, role:)
-          address = element(node, "Adres")
-          if address.nil?
-            raise ValidationError, "Podmiot1 is missing the mandatory <Adres> element" if role == :seller
-
-            return nil
-          end
-
-          Address.new(
-            country: text(address, "KodKraju") || "PL",
-            line1: text!(address, "AdresL1"),
-            line2: text(address, "AdresL2")
-          )
-        end
-
-        # FA(3) identifies a party by `NIP`, or by `NrVatUE`, or by `NrID`, or by nothing at
-        # all for an unidentified buyer. {Subject} holds only a NIP, so the others are a
-        # limitation of the model and are reported as one — not as a malformed document,
-        # which is what a bare "missing NIP" would imply about a perfectly valid invoice.
-        def identity_nip(identity)
-          nip = text(identity, "NIP")
-          return nip if nip
-
-          alternatives = identity.element_children.map(&:name).reject { |n| n == "Nazwa" }
-          raise ValidationError,
-                "#{identity.parent.name} is identified by #{alternatives.join(", ")} rather than NIP. " \
-                "This model carries a NIP only (DESIGN.md §7.4); the document itself is fine."
-        end
-
-        # {Invoice} models the plain `VAT` invoice only (DESIGN.md §7.4). Accepting another
-        # type produced something far worse than a refusal: a `KOR` parsed and re-serialised
-        # kept its `RodzajFaktury` and `P_2` — and therefore KSeF's whole duplicate key
-        # (docs/REFERENCE.md §15.2) — while dropping `DaneFaKorygowanej` and recomputing the
-        # summaries from rows whose `StanPrzed` marker was ignored. A -9.84 correction came
-        # back as a +34.44 invoice, XSD-valid and plausible. Refuse instead.
+        # {Invoice} models `VAT` and `KOR` (DESIGN.md §7.4). Accepting an unmodelled type
+        # produces something far worse than a refusal, and `KOR` is the case that showed it:
+        # before 2026-08-24 one parsed and re-serialised kept its `RodzajFaktury` and `P_2` —
+        # and therefore KSeF's whole duplicate key (docs/REFERENCE.md §15.2) — while dropping
+        # `DaneFaKorygowanej` and recomputing the summaries from rows whose `StanPrzed` marker
+        # was ignored. A -9.84 correction came back as a +34.44 invoice, XSD-valid and
+        # plausible. The same is true of every type still on the list.
         def supported_type!(type)
           return type if SUPPORTED_TYPES.include?(type)
 
           raise ValidationError,
-                "This is a #{type} invoice, and only #{SUPPORTED_TYPES.join(", ")} is modelled " \
+                "This is a #{type} invoice, and only #{SUPPORTED_TYPES.join(", ")} are modelled " \
                 "so far (DESIGN.md §7.4). The document itself is fine — but parsing it would " \
                 "drop the fields that make it a #{type}, and re-serialising the result would " \
                 "produce a different invoice under the same number."
@@ -182,7 +155,13 @@ module Ksef
         # Delegated to {RoundingInference}: the strategy is not in the document, so it has
         # to be inferred from the summaries — which is reasoning about arithmetic rather
         # than reading elements, and belongs somewhere else.
-        def resolve_rounding(invoice, fa_node)
+        #
+        # Skipped entirely when the invoice states its own totals. There is then nothing to
+        # infer: the summaries were read, not computed, so no strategy produced them and
+        # comparing the lines against them would answer a question nobody asked.
+        def resolve_rounding(invoice, fa_node, totals)
+          return invoice if totals
+
           RoundingInference.apply(
             invoice, RoundingInference.stated_from(fa_node) { |node, name| text(node, name) }
           )

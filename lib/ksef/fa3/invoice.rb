@@ -4,11 +4,17 @@ module Ksef
   module FA3
     # A complete FA(3) invoice.
     #
-    # Phase 1 covers the plain `VAT` type. The remaining six types (DESIGN.md §7.4) reuse
-    # this core and add their own required and forbidden fields.
+    # Covers the plain `VAT` type and the correction, `KOR`. The remaining five types
+    # (DESIGN.md §7.4) reuse this core and add their own required and forbidden fields.
+    #
+    # A correction differs in three ways, all of them optional fields here: it carries a
+    # {Correction} saying what it corrects, it may state its {Totals} rather than have them
+    # derived, and — because it may state them — it may have no lines at all
+    # (docs/REFERENCE.md §8.4).
     Invoice = Data.define(
       :seller, :buyer, :number, :issue_date, :lines,
-      :currency, :issued_at, :rounding, :invoice_type, :annotations, :raw_document
+      :currency, :issued_at, :rounding, :invoice_type, :annotations,
+      :correction, :totals, :raw_document
     )
 
     # Computation, defaults and serialisation for {Ksef::FA3::Invoice}.
@@ -41,6 +47,10 @@ module Ksef
         "PMarzy" => { "P_PMarzyN" => "1" }
       }.freeze
 
+      NEEDS_LINES = "An invoice needs at least one line, unless it states its own totals. " \
+                    "A collective correction may have no FaWiersz at all — see " \
+                    "Ksef::FA3::Totals and docs/REFERENCE.md §8.4."
+
       # Everything except {#raw_document}: the fields that make this invoice *this* invoice.
       # {Provenance} reads this to decide what equality, hashing and `#inspect` cover.
       IDENTITY = (members - [:raw_document]).freeze
@@ -63,19 +73,26 @@ module Ksef
       # `nil` is left alone, and means something different: not "no timestamp" but "stamp it
       # when you serialise". Such an invoice is not fully determined and cannot round-trip
       # to an equal object, which is a property of that choice rather than a defect.
-      def initialize(seller:, buyer:, number:, issue_date:, lines:,
+      #
+      # `lines` may be empty **only** when the invoice states its own `totals`. `FaWiersz` is
+      # `minOccurs="0"`, and a collective correction legitimately has no rows — but without
+      # rows *and* without stated totals there is nothing to compute a summary from, and the
+      # result would be a document declaring zero tax on an invoice that means to declare
+      # some.
+      def initialize(seller:, buyer:, number:, issue_date:, lines: [],
                      currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT",
-                     annotations: nil, raw_document: nil)
+                     annotations: nil, correction: nil, totals: nil, raw_document: nil)
         unless ROUNDING_STRATEGIES.include?(rounding)
           raise ValidationError,
                 "Unknown rounding strategy #{rounding.inspect}; expected one of #{ROUNDING_STRATEGIES.inspect}"
         end
-        raise ValidationError, "An invoice needs at least one line" if lines.nil? || lines.empty?
+        rows = lines.nil? ? [] : lines
+        raise ValidationError, NEEDS_LINES if rows.empty? && totals.nil?
 
         super(
-          seller: seller, buyer: buyer, number: number, lines: lines,
+          seller: seller, buyer: buyer, number: number, lines: rows,
           currency: currency, rounding: rounding, invoice_type: invoice_type,
-          raw_document: raw_document,
+          correction: correction, totals: totals, raw_document: raw_document,
           # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
           # Date it denotes must not produce two unequal invoices (§8.2b).
           issue_date: Formatting.to_date(issue_date),
@@ -88,6 +105,12 @@ module Ksef
 
       # Net totals per rate code, in the order the lines first mention each rate, so the
       # output is stable for a given invoice.
+      #
+      # **This is what the *lines* say**, always — {#totals} does not enter into it, because
+      # a stated summary is keyed by bucket and cannot be resolved back to rate codes
+      # (§8.1a). For a correction that states its own summary the two are different
+      # questions, and an invoice with no lines answers `{}` here while {#net_total} answers
+      # what the document declares.
       # @return [Hash{String => BigDecimal}]
       def net_by_rate
         lines.each_with_object({}) do |line, acc|
@@ -101,9 +124,11 @@ module Ksef
         rounding == :per_line ? vat_rounded_per_line : vat_rounded_per_summary
       end
 
-      def net_total = net_by_rate.values.sum(BigDecimal(0))
-      def vat_total = vat_by_rate.values.sum(BigDecimal(0))
-      def gross_total = net_total + vat_total
+      # The three figures the document actually carries: read from {#totals} when the invoice
+      # states them, computed from the lines otherwise.
+      def net_total = totals ? totals.net : net_by_rate.values.sum(BigDecimal(0))
+      def vat_total = totals ? totals.vat : vat_by_rate.values.sum(BigDecimal(0))
+      def gross_total = totals ? totals.gross : net_total + vat_total
 
       def to_xml = Serializer.new(to_fa3).to_xml
 

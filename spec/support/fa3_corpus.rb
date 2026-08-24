@@ -32,34 +32,50 @@ module FA3Corpus
   # would mean a missing pin rather than a deliberate omission.
   MINISTRY_COUNT = 26
 
-  # The eight this model can represent today. Twelve of the twenty-six are `RodzajFaktury=VAT`,
-  # and four of *those* still exceed the model — a useful map of what 0.1 cannot do, measured
-  # against real Ministry documents rather than guessed:
+  # The twelve this model can represent today: eight of the twelve `VAT` samples and four of
+  # the five `KOR` ones. What is left out is a useful map of what the model cannot do,
+  # measured against real Ministry documents rather than guessed:
   #
   # - `08`, `19` — **gross-priced rows** (`P_9B`/`P_11A` under art. 106e ust. 7-8) where this
   #   model carries net pricing only.
   # - `22`, `23` — a buyer identified by `NrVatUE` and by `NrID`, where {Subject} holds a NIP
   #   only (§8.2a).
+  # - `07` — a collective correction whose single row states **no price at all**, naming what
+  #   the discount relates to while the amounts sit in the summary buckets (§8.4).
   #
-  # The other fourteen samples are non-`VAT` types, which {Parser} refuses outright rather than
-  # emitting a plausible impostor. All six exceptions are the corpus for DESIGN.md §7.4's
-  # remaining work.
-  MINISTRY_MODELLED = %w[01 04 09 20 21 24 25 26].map { |n| "mf-samples/przyklad-#{n}.xml" }.freeze
+  # The remaining nine samples are the five types {Parser} still refuses outright rather than
+  # emitting a plausible impostor. They are the corpus for DESIGN.md §7.4's remaining work.
+  MINISTRY_MODELLED = %w[01 02 03 04 05 06 09 20 21 24 25 26]
+                      .map { |n| "mf-samples/przyklad-#{n}.xml" }.freeze
+
+  # Samples with no `FaWiersz` at all, which is legal — `minOccurs="0"` — and is how the
+  # Ministry writes a correction of buyer data or a collective discount. Listed so the
+  # "modelled samples have lines" assertion can exempt exactly these rather than being
+  # weakened for all twelve (§8.4).
+  MINISTRY_WITHOUT_LINES = %w[
+    mf-samples/przyklad-05.xml
+    mf-samples/przyklad-06.xml
+  ].freeze
 
   # Valid FA(3), beyond this model, and refused with a message that says so.
   MINISTRY_BEYOND_MODEL = {
+    "mf-samples/przyklad-07.xml" => /states no price at all/,
     "mf-samples/przyklad-08.xml" => /priced gross/,
     "mf-samples/przyklad-19.xml" => /priced gross/,
     "mf-samples/przyklad-22.xml" => /identified by KodUE, NrVatUE/,
     "mf-samples/przyklad-23.xml" => /identified by KodKraju, NrID/
   }.freeze
 
+  # The types {Parser} refuses by `RodzajFaktury` alone. Named rather than derived, so
+  # supporting one is a deliberate edit here as well as in {Ksef::FA3::Parser::SUPPORTED_TYPES}.
+  MINISTRY_UNSUPPORTED_TYPES = %w[ZAL ROZ UPR KOR_ZAL KOR_ROZ].freeze
+
   # This gem's own *serializer output*, which is fully within the model and so round-trips byte
   # for byte. `minimal_vat_invoice.xml` is deliberately absent: it is hand-written for
   # `validator_spec`, and writes `<P_8B>10.00</P_8B>` where {Ksef::FA3::Formatting.quantity}
   # emits `10` — both legal `TIlosci`, numerically identical, so it belongs to the
   # XSD-validity set and not to the byte-exact one.
-  OURS = %w[golden/vat_single_line.xml].freeze
+  OURS = %w[golden/vat_single_line.xml golden/kor_before_after.xml].freeze
 
   # The C# samples are *templates*, not documents: they carry placeholders, and `#nip#` is not
   # a legal `TNrNIP`, so they are not even XSD-valid as they stand. The pinned bytes stay
@@ -99,6 +115,10 @@ module FA3Corpus
     def invoice_type(relative)
       Nokogiri::XML(read(relative)).remove_namespaces!.at_xpath("//Fa/RodzajFaktury")&.text
     end
+
+    # @return [String] the absolute path of a sample, for the few cases wanting the bytes
+    #   exactly as they are on disk rather than {read}'s substituted form
+    def path(relative) = File.join(DIR, relative)
 
     # @return [String] the sample's XML, with placeholders substituted
     def read(relative)

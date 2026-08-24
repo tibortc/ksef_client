@@ -8,20 +8,28 @@ module Ksef
     # aggressive: every child of `TFaWiersz` except `NrWierszaFa` is `minOccurs="0"`, so most
     # of what this does is decide which absences the model can absorb and which it cannot.
     module RowReader
+      # The elements a row can state a price or a value in. A row with none of them is not a
+      # priced row at all; see {#missing_net}.
+      PRICE_ELEMENTS = %w[P_11 P_11A P_9A P_9B].freeze
+
       class << self
         # Namespace-aware element reading; see {NodeReader}.
         include NodeReader
 
-        def lines_from(fa_node)
+        # @param fa_node [Nokogiri::XML::Node] the `Fa` element
+        # @param required [Boolean] whether an invoice with no rows is an error. False for a
+        #   correction that states its own totals: `FaWiersz` is `minOccurs="0"` and the
+        #   Ministry's own collective corrections carry none (docs/REFERENCE.md §8.4).
+        def lines_from(fa_node, required: true)
           rows = elements(fa_node, "FaWiersz")
-          raise ValidationError, "Invoice has no FaWiersz rows" if rows.empty?
+          raise ValidationError, "Invoice has no FaWiersz rows" if rows.empty? && required
 
-          rows.map { |row| line_from(row) }
+          rows.each_with_index.map { |row, index| line_from(row, index) }
         end
 
         private
 
-        def line_from(row)
+        def line_from(row, index)
           net_amount = text(row, "P_11")
           quantity = text(row, "P_8B")
           unit_price = text(row, "P_9A")
@@ -39,15 +47,29 @@ module Ksef
           Line.new(
             name: text(row, "P_7"), unit: text(row, "P_8A"),
             quantity: quantity, net_unit_price: unit_price,
-            vat_rate: rate_for(row), net_amount: net_amount
+            vat_rate: rate_for(row), net_amount: net_amount,
+            row_number: row_number_for(row, index), state_before: text(row, "StanPrzed")
           )
+        end
+
+        # Stored only when the row's own number is **not** its position, which is where the
+        # number carries information rather than repeating the index: a correction showing a
+        # position before and after gives both rows the same `NrWierszaFa`, and that is what
+        # pairs them. See {Line#initialize} for why storing it unconditionally would break
+        # DESIGN.md §7.6's round-trip law.
+        def row_number_for(row, index)
+          stated = text(row, "NrWierszaFa")
+          return nil if stated.nil? || Formatting.integer(stated) == index + 1
+
+          stated
         end
 
         # A row with no net value is usually a **gross-priced** row: under art. 106e ust. 7-8 an
         # invoice may state `P_9B` (unit gross price) and `P_11A` (gross sales value) instead of
         # `P_9A`/`P_11`, and two of the Ministry's own worked examples do exactly that. Saying
         # "has neither P_11 nor both of P_8B and P_9A" blames the document for lacking a field
-        # its pricing convention does not use, so the gross case is named for what it is.
+        # its pricing convention does not use, so the gross case is named for what it is — as is
+        # the row that states no price at all.
         def missing_net(row)
           where = "FaWiersz #{text(row, "NrWierszaFa") || "(unnumbered)"}"
           if text(row, "P_11A") || text(row, "P_9B")
@@ -55,8 +77,21 @@ module Ksef
                    "valid under art. 106e ust. 7-8, and this model carries net pricing only " \
                    "(DESIGN.md §7.4) — the document itself is fine."
           end
+          return descriptive(where) if PRICE_ELEMENTS.none? { |name| text(row, name) }
 
           "#{where} has neither P_11 nor both of P_8B and P_9A, so its net value cannot be established"
+        end
+
+        # The Ministry's Przykład 7: a collective correction whose single row names the goods
+        # the discount relates to — `P_7`, `CN`, a unit and a quantity — and states no amount
+        # anywhere, the whole effect being in the summary buckets. {Line} is built round a net
+        # value, so such a row cannot be represented; saying it "cannot establish its net
+        # value" would imply the document forgot something it deliberately omitted.
+        def descriptive(where)
+          "#{where} states no price at all — no P_11, P_11A, P_9A or P_9B. A row like this " \
+            "belongs to a collective correction, where it names what the correction relates to " \
+            "while the amounts sit in the summary buckets (docs/REFERENCE.md §8.4). This model's " \
+            "Line is built round a net value (DESIGN.md §7.4) — the document itself is fine."
         end
 
         def rate_for(row)

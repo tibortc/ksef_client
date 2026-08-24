@@ -156,13 +156,32 @@ RSpec.describe "the FA(3) round-trip law" do
       end
     end
 
-    describe "the eight this model represents" do
+    describe "the twelve this model represents" do
       FA3Corpus::MINISTRY_MODELLED.each do |relative|
         it "#{relative} parses and re-serialises to a schema-valid document" do
           parsed = Ksef::FA3.parse(FA3Corpus.read(relative))
 
-          expect(parsed.lines).not_to be_empty
+          # `FaWiersz` is `minOccurs="0"`, and a correction of buyer data or a collective
+          # discount legitimately has none — but only those, so the exemption is a list.
+          if FA3Corpus::MINISTRY_WITHOUT_LINES.include?(relative)
+            expect(parsed.lines).to be_empty
+          else
+            expect(parsed.lines).not_to be_empty
+          end
           expect(Ksef::FA3::Validator.errors_for(parsed.to_xml)).to be_empty
+        end
+      end
+
+      # The strong form of the law for the samples that are wholly within the model: parse,
+      # serialise, parse again, and get the same object. Weaker than byte-equality — the
+      # Ministry writes `-200` where {Ksef::FA3::Formatting.amount} writes `-200.00`, both
+      # legal `TKwotowy` — but it is the property DESIGN.md §7.6 actually states, and it is
+      # what would have caught a correction losing its `DaneFaKorygowanej` on the way out.
+      it "re-parses to an equal invoice, so nothing modelled is lost in a round trip" do
+        FA3Corpus::MINISTRY_MODELLED.each do |relative|
+          parsed = Ksef::FA3.parse(FA3Corpus.read(relative))
+
+          expect(Ksef::FA3.parse(parsed.to_xml)).to eq(parsed), relative
         end
       end
 
@@ -175,10 +194,10 @@ RSpec.describe "the FA(3) round-trip law" do
       end
     end
 
-    # Four VAT invoices that are perfectly valid and beyond this model. Each refusal names the
-    # construct and says the document is fine — which is the whole point of refusing rather than
-    # parsing them into something lossy.
-    describe "the four VAT examples beyond the model" do
+    # Five invoices of a modelled *type* that are still beyond the model — a construct at a
+    # time, not a type. Each refusal names the construct and says the document is fine, which
+    # is the whole point of refusing rather than parsing them into something lossy.
+    describe "the five examples of a supported type that are beyond the model" do
       FA3Corpus::MINISTRY_BEYOND_MODEL.each do |relative, reason|
         it "#{relative} is refused, naming the construct" do
           expect { Ksef::FA3.parse(FA3Corpus.read(relative)) }
@@ -188,17 +207,21 @@ RSpec.describe "the FA(3) round-trip law" do
         end
       end
 
-      it "accounts for every VAT sample, so none is quietly unclassified" do
-        vat = FA3Corpus.ministry.select { |r| FA3Corpus.invoice_type(r) == "VAT" }
+      it "accounts for every sample of a supported type, so none is quietly unclassified" do
+        supported = FA3Corpus.ministry.select do |relative|
+          Ksef::FA3::Parser::SUPPORTED_TYPES.include?(FA3Corpus.invoice_type(relative))
+        end
 
-        expect(vat).to match_array(FA3Corpus::MINISTRY_MODELLED + FA3Corpus::MINISTRY_BEYOND_MODEL.keys)
+        expect(supported)
+          .to match_array(FA3Corpus::MINISTRY_MODELLED + FA3Corpus::MINISTRY_BEYOND_MODEL.keys)
       end
     end
 
-    # The refusal path, against the documents that motivate it. A KOR carries its corrections in
-    # `DaneFaKorygowanej` and its amounts as deltas; parsing one into this model would drop the
-    # first and recompute the second, producing a different invoice under the same number.
-    describe "the fourteen the model cannot represent" do
+    # The refusal path, against the documents that motivate it. A `KOR_ZAL` carries the amount
+    # paid before correction in `P_15ZK`, a `ZAL` its instalments in `ZaliczkaCzesciowa`;
+    # parsing one into this model would drop them and re-serialise a different invoice under
+    # the original's number.
+    describe "the nine whose type the model cannot represent" do
       (FA3Corpus.ministry - FA3Corpus::MINISTRY_MODELLED - FA3Corpus::MINISTRY_BEYOND_MODEL.keys)
         .each do |relative|
         it "#{relative} is refused, naming the type and blaming the model" do
@@ -207,6 +230,16 @@ RSpec.describe "the FA(3) round-trip law" do
           expect { Ksef::FA3.parse(FA3Corpus.read(relative)) }
             .to raise_error(Ksef::ValidationError, /This is a #{type} invoice.*document itself is fine/m)
         end
+      end
+
+      # The list above is a set difference, so a sample slipping out of MINISTRY_MODELLED
+      # would silently join it and still pass. This pins what is actually left.
+      it "is exactly the five unsupported types" do
+        refused = FA3Corpus.ministry - FA3Corpus::MINISTRY_MODELLED - FA3Corpus::MINISTRY_BEYOND_MODEL.keys
+
+        expect(refused.size).to eq(9)
+        expect(refused.map { |relative| FA3Corpus.invoice_type(relative) }.uniq)
+          .to match_array(FA3Corpus::MINISTRY_UNSUPPORTED_TYPES)
       end
     end
   end

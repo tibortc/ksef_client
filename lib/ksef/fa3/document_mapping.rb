@@ -39,14 +39,24 @@ module Ksef
           "KodWaluty" => currency,
           "P_1" => Formatting.date(issue_date),
           "P_2" => number,
-          **rate_summaries,
-          "P_15" => Formatting.amount(gross_total),
+          **summary,
           "Adnotacje" => annotations,
           "RodzajFaktury" => invoice_type,
+          **(correction ? correction.to_fa3 : {}),
           "FaWiersz" => rows
         }
       end
 
+      # A stated summary wins over a computed one, and for a correction it is the only one
+      # there is: its buckets are deltas that its rows need not determine (§8.4).
+      def summary
+        return totals.to_fa3 if totals
+
+        { **rate_summaries, "P_15" => Formatting.amount(gross_total) }
+      end
+
+      # `index + 1` is the *default* number, used unless the line states one of its own —
+      # which only a correction's paired before/after rows do (see {Line#initialize}).
       def rows
         lines.each_with_index.map { |line, index| line.to_fa3(row_number: index + 1) }
       end

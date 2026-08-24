@@ -79,6 +79,13 @@ SimpleCov.start do
   # close fails the build on one new uncovered branch anywhere, which is the opposite of what
   # the paragraph above argues for. The eleven uncovered branches are all pre-existing `&.`
   # guards outside the FA(3) model.
+  #
+  # Re-measured 2026-08-24 after `KOR`: line 100%, branch 98.31% (585/595), method 100%. **Still
+  # 97, and the same reasoning:** 98 would permit eleven uncovered branches against the ten that
+  # exist, so any new `&.` guard anywhere fails the build. But the caveat above is now visible in
+  # the numbers — the denominator went 530 -> 595, so an unchanged floor of 97 permits seventeen
+  # uncovered branches where it permitted fifteen. The slack a percentage grants really does
+  # drift upward, and the same ten pre-existing `&.` guards account for all of it.
   minimum_coverage line: 99, branch: 97, method: 100
 end
 

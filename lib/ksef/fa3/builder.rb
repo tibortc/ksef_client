@@ -12,9 +12,11 @@ module Ksef
     # single-value field set twice simply takes the later value, which is what anyone
     # writing a builder expects, and what `f.number` called twice obviously ought to do.
     class Builder
-      SUBJECT_KEYS = %i[nip name address local_government_unit vat_group_member].freeze
+      SUBJECT_KEYS = %i[nip name address local_government_unit vat_group_member buyer_id].freeze
       ADDRESS_KEYS = %i[line1 line2 country street city postal_code].freeze
-      LINE_KEYS = %i[name quantity unit net_unit_price vat_rate net_amount].freeze
+      LINE_KEYS = %i[name quantity unit net_unit_price vat_rate net_amount row_number state_before].freeze
+      CORRECTION_KEYS = %i[reason effect period corrected_number previous_seller previous_buyers].freeze
+      CORRECTED_KEYS = %i[number issue_date ksef_number].freeze
 
       # English shorthand from DESIGN.md §8's example. The canonical names work too, so
       # `qty:` and `quantity:` are interchangeable — but passing both is an error rather
@@ -27,6 +29,8 @@ module Ksef
       def initialize
         @fields = {}
         @lines = []
+        @corrected = []
+        @correction = nil
       end
 
       # @param attributes [Hash] `:nip`, `:name`, `:address`, and optionally
@@ -57,12 +61,50 @@ module Ksef
       # @param value [String] a `TRodzajFaktury` code; defaults to `"VAT"`
       def invoice_type(value) = @fields[:invoice_type] = value
 
-      # Appends a line. Call once per line; row numbers are assigned on serialisation.
+      # Appends a line. Call once per line; row numbers are assigned on serialisation unless
+      # a line states its own.
       #
       # @param attributes [Hash] `:name`, `:quantity` (or `:qty`), `:unit`,
-      #   `:net_unit_price`, `:vat_rate` (or `:vat`), and optionally `:net_amount`
+      #   `:net_unit_price`, `:vat_rate` (or `:vat`), and optionally `:net_amount`,
+      #   `:row_number`, `:state_before`
       def line(**attributes)
         @lines << Line.new(**normalise(attributes, LINE_KEYS, LINE_ALIASES, "line"))
+      end
+
+      # Makes this a correction. Optional next to {#corrects}, which is what a correction
+      # actually needs; call this for the reason, the effect date and the rest.
+      #
+      # @param attributes [Hash] `:reason`, `:effect`, `:period`, `:corrected_number`,
+      #   `:previous_seller`, `:previous_buyers` — see {Correction}
+      def correction(**attributes)
+        @correction = normalise(attributes, CORRECTION_KEYS, {}, "correction")
+      end
+
+      # Names one invoice this correction corrects. Call once per corrected invoice; a
+      # collective correction under art. 106j ust. 3 names many.
+      #
+      # @param attributes [Hash] `:number`, `:issue_date`, and `:ksef_number` unless the
+      #   corrected invoice was issued outside KSeF
+      def corrects(**attributes)
+        @corrected << CorrectedInvoice.new(**normalise(attributes, CORRECTED_KEYS, {}, "corrects"))
+      end
+
+      # States the tax summary instead of having it computed from the lines — which a
+      # correction must do, its buckets being deltas its rows need not determine
+      # (docs/REFERENCE.md §8.4).
+      #
+      # Keyed by **rate code**, as {#line} is, and mapped to summary buckets here. The model
+      # stores the buckets, because that mapping is not invertible: `"23"` and `"22"` share
+      # one (§8.1a).
+      #
+      # @param gross [BigDecimal, Integer, String] `P_15`
+      # @param net [Hash{String => Object}] rate code => net amount
+      # @param vat [Hash{String => Object}] rate code => tax amount
+      def totals(gross:, net: {}, vat: {})
+        buckets = {}
+        net.each { |code, amount| accumulate(buckets, VatRate.bucket(code).first, amount) }
+        vat.each { |code, amount| accumulate(buckets, tax_element(code), amount) }
+        @fields[:totals] = Totals.new(buckets: buckets, gross: gross)
       end
 
       # @return [Invoice]
@@ -75,10 +117,36 @@ module Ksef
                 "Every invoice needs a seller, a buyer, a number and an issue date."
         end
 
-        Invoice.new(**@fields, lines: @lines)
+        Invoice.new(**@fields, lines: @lines, correction: assembled_correction)
       end
 
       private
+
+      # Assembled at the end rather than as {#correction} is called, because a correction is
+      # only well-formed once it names a corrected invoice — and the DSL takes those one at a
+      # time. Present whenever either half was used, so `corrects` alone is enough and
+      # `correction` alone fails with {Correction::NAMES_NOTHING} rather than silently
+      # producing an invoice that is not a correction.
+      def assembled_correction
+        return nil if @correction.nil? && @corrected.empty?
+
+        Correction.new(**(@correction || {}), corrected: @corrected)
+      end
+
+      # Several rate codes share a bucket (§8.1a), so a summary accumulates rather than
+      # assigning — the shape of a bug an audit found in {DocumentMapping} on 2026-08-24.
+      def accumulate(buckets, element, amount)
+        buckets[element] = Formatting.decimal(buckets.fetch(element, 0)) + Formatting.decimal(amount)
+      end
+
+      # The zero-rated and exempt buckets have no tax element at all: there is no amount to
+      # report and nowhere in the schema to put one (§8.1a).
+      def tax_element(code)
+        VatRate.bucket(code).last ||
+          raise(ValidationError,
+                "Rate code #{code.inspect} has no tax bucket — it is zero-rated, exempt or " \
+                "reverse-charged, so there is no VAT amount to state. Pass it under net: only.")
+      end
 
       def subject(attributes, role:)
         normalised = normalise(attributes, SUBJECT_KEYS, {}, "#{role} subject")
