@@ -1284,15 +1284,17 @@ Carried forward; must be resolved before the code that depends on them is writte
   `InvoiceInSessionStatusCodeResponse`, `OperationStatusCodeResponse`,
   `InvoiceExportStatusCodeResponse`) that will likely close the corresponding areas the
   same way when those subsystems are built.
-- **Whether the KSeF-token timestamp is really enforced as a replay nonce.** §4.5 records
-  the claim from first-tier documentation, and nothing offline can test it.
-  `spec/integration/crypto_spec.rb` now asserts it against live TEST by authenticating
-  with a deliberately stale `timestampMs`; **a failure there is a finding for this ledger,
-  not a regression in the gem.**
-- **Whether `certificateId` and `publicKeyId` are derived as §10.2 states.** The library
-  never computes either — it echoes the server's `publicKeyId` back — so a unit test could
-  only check the claim against a fixture built from it. `spec/integration/crypto_spec.rb`
-  recomputes both from the real certificates.
+- ~~**Whether the KSeF-token timestamp is really enforced as a replay nonce.**~~ **Resolved
+  2026-08-24: it is.** §4.5 recorded the claim from first-tier documentation and nothing
+  offline could test it. `spec/integration/crypto_spec.rb` authenticates with a deliberately
+  stale `timestampMs`, and live TEST refused it (run `32704511675`). The claim is now
+  observed, not believed.
+- ~~**Whether `certificateId` and `publicKeyId` are derived as §10.2 states.**~~ **Resolved
+  2026-08-24: both are.** The library never computes either — it echoes the server's
+  `publicKeyId` back — so no offline test could check the derivation.
+  `spec/integration/crypto_spec.rb` recomputes both from the real certificates and they
+  match: `publicKeyId` is the Base64 SHA-256 of the DER `SubjectPublicKeyInfo`,
+  `certificateId` the Base64 SHA-256 of the DER certificate (same run).
 - **Nightly higher rate limits** (§6.1) — the 20:00–06:00 values are explicitly
   unpublished pending production tuning. Do not hard-code a nightly multiplier.
 - ~~**Whether `upo.pages[].downloadUrl` arrives absolute or host-relative**~~ — **resolved
