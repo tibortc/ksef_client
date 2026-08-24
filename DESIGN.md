@@ -397,6 +397,19 @@ Both belong under `validate!`, and (2) has to run last. Note tier 2 now also cov
 well-formedness, which the XSD does not: libxml2 recovers from broken XML by default, and
 `Validator` had to be taught to consult `document.errors` (§15.1).
 
+**Built 2026-08-24.** `Ksef::FA3::ModelValidator` is (1) and `Ksef::FA3::DocumentValidator` is
+(2); `Invoice#errors` runs model → document → schema and returns `Issue` values carrying a
+field path, so a caller learns *which* value to fix. Two properties worth keeping:
+
+- **The model tier short-circuits.** Serialisation raises on a bad NIP, a nameless seller or a
+  line with no derivable net, so attempting it after a model failure would replace a list of
+  addressed errors with one exception about whichever came first. Its contract is therefore
+  the stronger statement: *what the model tier passes, `#to_xml` can serialise.*
+- **`#errors` never raises.** A serialisation refusal the model tier did not anticipate is
+  reported as an issue, because a method asked "what is wrong with this?" should answer.
+
+Tier 3 remains unbuilt and unblocked-but-ungrounded; `Invoice#errors` is where it attaches.
+
 ---
 
 ## 8. Public API contract (must run verbatim by 0.1.0)
@@ -489,9 +502,9 @@ Gate status, precisely:
 |---|---|
 | §8 contract runs against TEST | **met**, verified live 2026-08-24 (nightly run `32692339217`) |
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
-| All seven types build, validate, round-trip | **not met** — only `VAT`; validator tiers 1 and 3 outstanding. **Round-trip is now met for `VAT`**: the parser landed 2026-08-24 and the law runs green over the pinned corpus |
+| All seven types build, validate, round-trip | **not met** — only `VAT`. Round-trip and **validator tier 1** are both met for `VAT` as of 2026-08-24; tier 3 and the six other types remain |
 
-Remaining for Phase 2: validator tiers 1 and 3, then the six other invoice types starting with KOR (§7.4).
+Remaining for Phase 2: validator tier 3, then the six other invoice types starting with KOR (§7.4). **Tier 1 landed 2026-08-24**, split into the model and document halves §7.7 now describes.
 
 **The parser landed 2026-08-24**, with the sample corpus §7.6 assumed and did not have
 (`docs/REFERENCE.md` §1.4). Two findings changed the plan around it, both ledgered:

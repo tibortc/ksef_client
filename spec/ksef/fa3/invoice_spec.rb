@@ -157,6 +157,73 @@ RSpec.describe Ksef::FA3::Invoice do
     end
   end
 
+  # DESIGN.md §7.7's three tiers, as amended 2026-08-24: model checks, then document checks on
+  # the serialized bytes, then the schema. Tier 3 does not exist — its catalogue is absent
+  # upstream (docs/REFERENCE.md §15.6).
+  describe "#errors across the tiers" do
+    it "is empty for a sound invoice" do
+      expect(invoice.errors).to be_empty
+    end
+
+    it "reports a model problem addressed to its field" do
+      broken = invoice(number: "")
+
+      expect(broken.errors.map(&:field)).to eq(["number"])
+    end
+
+    # The ordering is load-bearing, not cosmetic. Serialisation *raises* on a bad NIP, so
+    # attempting it would replace a list of addressed errors with one exception about
+    # whichever came first — and would hide the second problem entirely.
+    it "stops at the model tier rather than trying to serialise an unserialisable invoice" do
+      doomed = invoice(seller: Ksef::FA3::Subject.new(nip: "9999999998", name: "ACME",
+                                                      address: Ksef::FA3::Address.new(line1: "P")),
+                       number: "")
+
+      expect { doomed.to_xml }.to raise_error(Ksef::ValidationError)
+      expect(doomed.errors.map(&:field)).to contain_exactly("seller.nip", "number")
+    end
+
+    it "reports a document-tier problem the schema cannot see" do
+      # U+0087, built by codepoint so it stays visible in a diff.
+      offending = invoice(lines: [line.with(name: "Consulting#{0x87.chr(Encoding::UTF_8)}")])
+
+      expect(Ksef::FA3::Validator.errors_for(offending.to_xml)).to be_empty
+      expect(offending.errors.map(&:message)).to include(a_string_matching(/U\+0087/))
+    end
+
+    it "attributes a schema violation to the schema tier" do
+      # Annotations the model will carry but the schema will not accept there.
+      wrong = invoice(annotations: { "P_16" => "3" })
+
+      expect(wrong.errors.map(&:field).uniq).to eq(["schema"])
+    end
+
+    # #errors answers the question it was asked, even when serialisation refuses for a reason
+    # the model tier did not anticipate.
+    it "reports a serialisation refusal rather than raising it" do
+      unknown = invoice(annotations: { "Nieoczekiwany" => "1" })
+
+      expect { unknown.to_xml }.to raise_error(Ksef::ValidationError)
+      expect(unknown.errors.map(&:field)).to eq(["document"])
+    end
+  end
+
+  describe "#validate!" do
+    it "lists every problem, sorted, rather than only the first" do
+      broken = invoice(number: "", currency: "XYZ")
+
+      expect { broken.validate! }.to raise_error(Ksef::ValidationError) { |error|
+        expect(error.message).to include("currency:", "number:")
+        expect(error.message.index("currency:")).to be < error.message.index("number:")
+      }
+    end
+
+    it "names the invoice, since a caller may be validating many" do
+      expect { invoice(number: "").validate! }
+        .to raise_error(Ksef::ValidationError, /Invoice "" is not valid/)
+    end
+  end
+
   # Several rate codes report into one bucket (§8.1a). Assigning per code instead of
   # accumulating let the last one win, understating the tax base while P_15 stayed correct —
   # an internally inconsistent invoice that the XSD accepts.

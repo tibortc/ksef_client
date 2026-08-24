@@ -57,9 +57,14 @@ submitted.
 > builder produces, tested against the Ministry's own published sample invoices. It refuses
 > what it cannot represent faithfully rather than guessing.
 >
-> **Not yet:** validator tiers 1 and 3 (only the XSD tier exists), and six of the seven
-> invoice types — `VAT` builds and parses, `KOR`/`ZAL`/`ROZ`/`UPR` and the two `KOR_`
-> combinations do not. See [Roadmap](#roadmap).
+> **Validation runs in three tiers now**, not one: the model (required fields, enum
+> membership, NIP checksums, string lengths, date sanity), the serialized bytes (no BOM, no
+> processing instructions, UTF-8 prolog, no characters KSeF refuses, size), then the XSD.
+> `invoice.errors` returns them all at once, each addressed to the field that caused it.
+>
+> **Not yet:** validator tier 3 — the reconciliation rules — and six of the seven invoice
+> types: `VAT` builds and parses, `KOR`/`ZAL`/`ROZ`/`UPR` and the two `KOR_` combinations do
+> not. See [Roadmap](#roadmap).
 
 ## Installation
 

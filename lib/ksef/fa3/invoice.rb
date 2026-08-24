@@ -107,9 +107,42 @@ module Ksef
 
       def to_xml = Serializer.new(to_fa3).to_xml
 
-      # @raise [Ksef::ValidationError] if the document does not conform to the XSD
-      def validate! = Validator.validate!(to_xml)
-      def valid? = Validator.valid?(to_xml)
+      # Every validation tier that exists, in the order DESIGN.md §7.7 requires.
+      #
+      # **Tier 1a first, and nothing else runs if it fails.** {ModelValidator}'s contract is
+      # that a model it passes can be serialized; a model it rejects generally cannot, because
+      # serialisation *raises* on a bad NIP, a nameless seller or a line with no derivable net.
+      # Attempting `#to_xml` anyway would replace a list of addressed errors with a single
+      # exception about whichever one came first.
+      #
+      # Then {DocumentValidator} (tier 1b) and {Validator} (tier 2) on the same bytes. Tier 3 —
+      # the reconciliation rules — does not exist: its catalogue is absent upstream
+      # (docs/REFERENCE.md §15.6), and this is where it will attach when it does.
+      #
+      # @return [Array<Issue>] empty when the invoice is sound
+      def errors
+        model = ModelValidator.errors_for(self)
+        return model unless model.empty?
+
+        document = to_xml
+        DocumentValidator.errors_for(document) +
+          Validator.errors_for(document).map { |message| Issue.new(field: "schema", message: message) }
+      rescue Ksef::Error => e
+        # A serialisation refusal the model tier did not anticipate. Reported rather than
+        # raised, so `#errors` always answers the question it was asked.
+        [Issue.new(field: "document", message: e.message)]
+      end
+
+      def valid? = errors.empty?
+
+      # @raise [Ksef::ValidationError] listing every problem found, not merely the first
+      def validate!
+        found = errors
+        return true if found.empty?
+
+        raise ValidationError,
+              "Invoice #{number.inspect} is not valid:\n#{found.sort.map { |issue| "  - #{issue}" }.join("\n")}"
+      end
 
       private
 

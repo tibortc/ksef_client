@@ -2098,6 +2098,11 @@ existing at all — and it is not hypothetical. The C# client's own test corpus 
   substituted (§1.4) — `Ksef::FA3::Validator` returns zero errors, so tier 2 passes it;
 - it carries **U+0087** and **U+009B**, both inside the forbidden `[#x86-#x9F]` range.
 
+**Implemented 2026-08-24** as `Ksef::FA3::DocumentValidator` (validator tier 1b, DESIGN.md
+§7.7). It runs on `#to_xml`'s output, before those bytes are hashed and encrypted — after that
+point a rejection costs a round trip and a session. All four otherwise-invisible rules are
+covered, plus the 1 000 000-byte ceiling of §15.5.
+
 A schema-only validator ships that invoice, and the pinned rule above says KSeF rejects it.
 **That rejection is derived, not observed** — it follows from *"Niespełnienie któregokolwiek z
 powyższych wymagań spowoduje odrzucenie faktury"*, and no session has ever reached live KSeF
