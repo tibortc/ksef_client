@@ -40,9 +40,11 @@ gem version for which API state".
   checks the invoice object — required fields, enum membership read from the generated schema
   metadata, NIP checksums, string lengths against the schema's own facets, and an issue date
   that is not in the future. `Ksef::FA3::DocumentValidator` checks the serialized bytes for the
-  four admission rules of `docs/REFERENCE.md` §15.1 that **neither a model tier nor the XSD can
+  four admission rules of `docs/REFERENCE.md` §15.1 that **neither a model tier nor tier 2 can
   see** — a byte-order mark, a prolog declaring anything but UTF-8, processing instructions, and
-  the Unicode characters KSeF refuses — plus the million-byte ceiling.
+  the Unicode characters KSeF refuses — plus that the bytes are UTF-8 at all, and the
+  million-byte ceiling, which `max_bytes:` overrides because upstream marks it a negotiable
+  default rather than a limit of the format.
 
   `Invoice#errors` runs model → document → schema and returns `Issue` values carrying a field
   path (`lines[2].vat_rate`), so a caller learns which value to fix rather than reading a
@@ -50,10 +52,10 @@ gem version for which API state".
 
   The model tier short-circuits deliberately: serialisation *raises* on a bad NIP, a nameless
   seller or a line with no derivable net, so running it after a model failure would collapse a
-  list of addressed errors into a single exception. Its contract is the stronger statement —
-  **what the model tier passes, `#to_xml` can serialise.** And `#errors` never raises: an
-  unanticipated serialisation refusal is reported as an issue, because a method asked what is
-  wrong should answer.
+  list of addressed errors into a single exception. Its aim is the stronger statement — *what
+  the model tier passes, `#to_xml` can serialise* — held as an aim rather than a proof, since a
+  review falsified it twice before release. And `#errors` reports rather than raises, including
+  for text tagged UTF-8 that is not: a method asked what is wrong should answer.
 
 - **`Ksef::FA3::Invoice#annotations`** — the `Adnotacje` block is carried, not defaulted, so
   re-serialising cannot deny a declaration the document made (cash accounting, reverse charge,

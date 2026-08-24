@@ -30,7 +30,18 @@ module Ksef
 
       # A processing instruction, excluding the XML declaration — which is not a PI, though it
       # looks like one. Anchoring on a name that is not `xml` is what separates them.
-      PROCESSING_INSTRUCTION = /<\?(?!xml[\s?])([\w:.-]+)/
+      #
+      # The target is an XML `Name`, which may contain non-ASCII letters, so it cannot be
+      # matched with `\w`: `<?źdźbło x?>` is a real processing instruction that an ASCII-only
+      # class waved through — the one input a review on 2026-08-24 found that every tier passed
+      # while §15.1 says KSeF rejects it.
+      PROCESSING_INSTRUCTION = /<\?(?!xml[\s?])([^\s?>]+)/
+
+      # Stripped before the search above, because `<?php ... ?>` written inside a comment or a
+      # CDATA section is text, not a processing instruction, and rejecting it would refuse an
+      # admissible document. Characters are *not* scanned this way: a discouraged character is
+      # forbidden wherever it appears, comments included.
+      NON_MARKUP = /<!--.*?-->|<!\[CDATA\[.*?\]\]>/m
 
       # §15.1's discouraged characters, exactly as the pinned document lists them. Note U+0085
       # sits between the first two ranges and is *not* forbidden, and that the plane
@@ -46,19 +57,42 @@ module Ksef
       # 1 000 000 bytes, and upstream means the decimal million rather than 2^20 — it writes
       # "1 MB * (1 000 000 bajtów)" (§15.5). Attachments raise it to 3 MB and are batch-only,
       # so 0.1 has no reason to carry the larger figure.
+      # It is a **default, not a ceiling of the format.** Upstream marks the figure with an
+      # asterisk — *"Jeżeli w scenariuszach biznesowych organizacji dostępne limity są
+      # niewystarczające, prosimy o kontakt z działem wsparcia KSeF"* — and `limity.md` heads the
+      # same numbers *"Wartość domyślna"*, with `GET /limits/context` returning the live values
+      # for a context. So an organisation that has negotiated a higher limit passes its own via
+      # `max_bytes:`; hard-coding this as absolute rejected invoices KSeF would have accepted.
       MAX_BYTES = 1_000_000
+
+      # {DISCOURAGED} compiled into one character class.
+      DISCOURAGED_PATTERN = Regexp.new(
+        "[#{DISCOURAGED.map { |range| "\\u{#{range.first.to_s(16)}}-\\u{#{range.last.to_s(16)}}" }.join}]"
+      ).freeze
 
       class << self
         # @param xml [String] a serialized FA(3) document
+        # @param max_bytes [Integer] the size ceiling for this context; see {MAX_BYTES}
         # @return [Array<Issue>] empty when KSeF would admit these bytes
-        def errors_for(xml)
+        def errors_for(xml, max_bytes: MAX_BYTES)
+          # Everything below reads the string as text, and every one of those reads raises on
+          # invalid bytes rather than reporting them. It is also a rule in its own right: §15.1
+          # requires the document to *be* UTF-8, not merely to lack a byte-order mark.
+          return [encoding_issue] unless xml.valid_encoding?
+
           [bom_issue(xml), prolog_issue(xml), *instruction_issues(xml),
-           *character_issues(xml), size_issue(xml)].compact
+           *character_issues(xml), size_issue(xml, max_bytes)].compact
         end
 
-        def valid?(xml) = errors_for(xml).empty?
+        def valid?(xml, max_bytes: MAX_BYTES) = errors_for(xml, max_bytes: max_bytes).empty?
 
         private
+
+        def encoding_issue
+          Issue.new(field: "document",
+                    message: "is not valid UTF-8; KSeF requires UTF-8 encoding without a " \
+                             "byte-order mark (docs/REFERENCE.md §15.1)")
+        end
 
         def bom_issue(xml)
           return nil unless xml.b.start_with?(BOM.b)
@@ -79,7 +113,7 @@ module Ksef
         end
 
         def instruction_issues(xml)
-          xml.scan(PROCESSING_INSTRUCTION).flatten.uniq.map do |target|
+          xml.gsub(NON_MARKUP, "").scan(PROCESSING_INSTRUCTION).flatten.uniq.map do |target|
             Issue.new(field: "document",
                       message: "contains the processing instruction <?#{target}…?>; KSeF accepts none")
           end
@@ -90,7 +124,10 @@ module Ksef
         # sought, because {Serializer} escapes every `&` it writes, so a reference cannot
         # survive into output this method is given.
         def character_issues(xml)
-          found = xml.each_char.select { |char| discouraged?(char.ord) }.uniq
+          # One regexp pass rather than a per-character range walk. The walk cost about 1.2s on
+          # a legal 500 KB invoice — some eighty times the whole XSD validation — and this runs
+          # on every default `send_invoice`.
+          found = xml.scan(DISCOURAGED_PATTERN).uniq
           return [] if found.empty?
 
           found.map do |char|
@@ -100,14 +137,15 @@ module Ksef
           end
         end
 
-        def discouraged?(codepoint) = DISCOURAGED.any? { |range| range.cover?(codepoint) }
-
-        def size_issue(xml)
+        # Measured in **bytes**: upstream writes "1 MB * (1 000 000 bajtów)", and a document of
+        # Polish text is far longer in bytes than in characters. The boundary is inclusive —
+        # "maksymalny rozmiar" — so exactly the limit is accepted.
+        def size_issue(xml, max_bytes)
           size = xml.bytesize
-          return nil if size <= MAX_BYTES
+          return nil if size <= max_bytes
 
           Issue.new(field: "document",
-                    message: "is #{size} bytes; KSeF accepts #{MAX_BYTES} without an attachment")
+                    message: "is #{size} bytes; KSeF accepts #{max_bytes} without an attachment")
         end
       end
     end

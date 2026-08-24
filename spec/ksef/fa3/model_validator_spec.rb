@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../../support/fa3_corpus"
+
 RSpec.describe Ksef::FA3::ModelValidator do
   def address(**overrides) = Ksef::FA3::Address.new(line1: "Prosta 1", **overrides)
 
@@ -125,6 +127,125 @@ RSpec.describe Ksef::FA3::ModelValidator do
     end
   end
 
+  # Both text types derive from xsd:token, whose whiteSpace facet is collapse, and XSD applies
+  # that *before* maxLength. Measuring the raw string made tier 1 stricter than the schema —
+  # and strictness on the send path means refusing documents KSeF admits.
+  describe "whitespace, which the schema collapses before measuring" do
+    it "agrees with the schema about a long name full of whitespace" do
+      padded = "A#{" " * 300}B"
+
+      expect(described_class.errors_for(invoice(number: padded))).to be_empty
+      expect(Ksef::FA3::Validator.errors_for(invoice(number: padded).to_xml)).to be_empty
+    end
+
+    it "still rejects a name that is too long once collapsed" do
+      expect(fields_for(seller: subject_for(name: (["ab"] * 300).join("  ")))).to include("seller.name")
+    end
+
+    it "accepts an enum value with stray whitespace, as the schema does" do
+      expect(described_class.errors_for(invoice(currency: " PLN "))).to be_empty
+    end
+
+    # The real document that exposed this: thirteen line names of 577 raw characters collapsing
+    # to 500, XSD-clean and rejected by tier 1 until 2026-08-24.
+    it "passes the pinned upstream sample that used to be falsely rejected" do
+      xml = FA3Corpus.read("ksef-pdf-generator/invoice.xml")
+
+      expect(Ksef::FA3.parse(xml).errors).to be_empty
+    end
+  end
+
+  # Text tagged UTF-8 but holding invalid bytes used to raise Encoding::CompatibilityError out
+  # of `String#strip` — from a method whose entire purpose is answering "what is wrong here?",
+  # on the input class §15.1 calls the likeliest real-world rejection.
+  describe "text that is not valid UTF-8" do
+    let(:mojibake) { "Kowalsk\xFF".dup.force_encoding("UTF-8") }
+
+    it "is reported rather than raised" do
+      issue = described_class.errors_for(invoice(seller: subject_for(name: mojibake))).first
+
+      expect(issue.field).to eq("seller.name")
+      expect(issue.message).to include("not valid UTF-8")
+    end
+
+    it "does not raise from #errors either" do
+      expect { invoice(number: mojibake).errors }.not_to raise_error
+    end
+
+    it "does not let an invalid-encoding value slip past the enum check" do
+      expect(fields_for(currency: mojibake)).to include("currency")
+    end
+  end
+
+  # Characters outside XML's Char production are not the *discouraged* set of §15.1 — they
+  # cannot appear in any XML document, and libxml2 answers with a bare ArgumentError.
+  describe "characters XML does not permit at all" do
+    it "reports a NUL byte against its field" do
+      issue = described_class.errors_for(invoice(number: "FV/\u0000/1")).first
+
+      expect(issue.field).to eq("number")
+      expect(issue.message).to include("U+0000")
+    end
+  end
+
+  # The contract's known holes, closed 2026-08-24: both were fields the model tier never
+  # inspected, so they passed here and made the serializer raise.
+  describe "fields that used to slip past into a serialisation failure" do
+    it "checks the shape of the annotations block" do
+      issues = described_class.errors_for(invoice(annotations: { "Nieoczekiwany" => "1" }))
+
+      expect(issues.map(&:field)).to eq(["annotations"])
+      expect(issues.first.message).to include("not an element of Adnotacje")
+    end
+
+    it "accepts the defaults and a legitimate override" do
+      declared = Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS.merge("P_16" => "1")
+
+      expect(described_class.errors_for(invoice(annotations: declared))).to be_empty
+    end
+
+    # Defence against a codegen change that re-keys the anonymous Adnotacje type: that is a
+    # generator problem, not a caller's, and no reason to reject their annotations.
+    it "checks nothing when the generated metadata no longer knows the type" do
+      allow(Ksef::FA3::Generated::Types)
+        .to receive(:ordered_elements).with(described_class::ANNOTATIONS_TYPE).and_return([])
+
+      expect(described_class.errors_for(invoice(annotations: { "Nieoczekiwany" => "1" }))).to be_empty
+    end
+
+    it "rejects annotations that are not a Hash" do
+      expect(fields_for(annotations: "none")).to include("annotations")
+    end
+
+    # JST and GV go through Formatting.flag, which raises on anything not boolean-ish.
+    it "checks the buyer's two yes/no flags" do
+      odd = subject_for(nip: "1111111111", name: "K", vat_group_member: "yes")
+
+      expect(fields_for(buyer: odd)).to include("buyer.vat_group_member")
+    end
+
+    it "does not look for those flags on a seller, which has no such elements" do
+      odd = subject_for(vat_group_member: "yes")
+
+      expect(described_class.errors_for(invoice(seller: odd))).to be_empty
+    end
+  end
+
+  # A mistyped member used to surface as NoMethodError from inside the validator.
+  describe "members of the wrong type" do
+    it "reports a subject that is not a Subject" do
+      expect(fields_for(buyer: "Klient S.A.")).to include("buyer")
+    end
+
+    it "reports an address that is not an Address" do
+      expect(fields_for(seller: subject_for(address: "Prosta 1"))).to include("seller.address")
+    end
+
+    it "reports a line that is not a Line" do
+      expect(fields_for(lines: [line, "second"])).to include("lines[1]")
+    end
+  end
+
   describe "the issue date (§15.4)" do
     it "accepts today and the recent past" do
       expect(described_class.errors_for(invoice(issue_date: Date.today))).to be_empty
@@ -136,6 +257,13 @@ RSpec.describe Ksef::FA3::ModelValidator do
     # so one day of slack is deliberate and the same-day boundary is left to the service.
     it "tolerates tomorrow, because the timezone is not ours to assume" do
       expect(described_class.errors_for(invoice(issue_date: Date.today + 1))).to be_empty
+    end
+
+    # A DateTime is a Date, and comparing one against `Date.today + 1` made the tolerance
+    # depend on the clock. Invoice now converts it, so both give the same verdict.
+    it "treats a DateTime the same as the Date it falls on" do
+      expect(described_class.errors_for(invoice(issue_date: DateTime.now + 1))).to be_empty
+      expect(invoice(issue_date: DateTime.now).issue_date).to be_an_instance_of(Date)
     end
 
     it "rejects a date that is unambiguously in the future" do

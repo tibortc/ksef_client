@@ -5,7 +5,7 @@ require_relative "../../support/fa3_corpus"
 RSpec.describe Ksef::FA3::DocumentValidator do
   let(:golden) { FA3Corpus.read("golden/vat_single_line.xml") }
 
-  def messages(xml) = described_class.errors_for(xml).map(&:message)
+  def messages(xml, **) = described_class.errors_for(xml, **).map(&:message)
 
   # Built by codepoint rather than written literally: a control character pasted into a source
   # file is invisible in every diff and review tool that would otherwise catch a typo here.
@@ -112,9 +112,73 @@ RSpec.describe Ksef::FA3::DocumentValidator do
     end
 
     # Upstream writes "1 MB * (1 000 000 bajtów)" — the decimal million, not 2^20.
+    #
+    # This example previously used `"ż" * 400_000` — 400k characters, 800k bytes, under the
+    # limit on *either* reading, so it distinguished nothing and a `bytesize` → `length`
+    # mutation survived the whole suite. 600k two-byte characters is 1.2 MB of bytes and 600k
+    # characters, which only a byte measurement rejects.
     it "measures bytes rather than characters" do
       expect(described_class::MAX_BYTES).to eq(1_000_000)
+      expect(messages("ż" * 600_000)).to include(a_string_matching(/is 1200000 bytes/))
       expect(described_class.errors_for("ż" * 400_000)).to be_empty
+    end
+
+    # "Maksymalny rozmiar" is inclusive, and the analogous boundary is pinned for text lengths.
+    it "accepts a document of exactly the ceiling and rejects one byte more" do
+      expect(described_class.errors_for("a" * 1_000_000)).to be_empty
+      expect(messages("a" * 1_000_001)).to include(a_string_matching(/is 1000001 bytes/))
+    end
+
+    # The figure is a *default*: upstream's asterisk says an organisation can have it raised,
+    # and `limity.md` heads the same numbers "Wartość domyślna" (docs/REFERENCE.md §15.5).
+    it "honours a negotiated ceiling" do
+      expect(described_class.errors_for("a" * 2_000_000, max_bytes: 3_000_000)).to be_empty
+      expect(messages("a" * 100, max_bytes: 50)).to include(a_string_matching(/accepts 50/))
+    end
+  end
+
+  describe "the second half of the encoding rule" do
+    # Upstream says "musi być kodowana w UTF-8 bez znaku BOM" — encoded in UTF-8 *and* without a
+    # BOM. Only the BOM was checked, and invalid bytes crashed the scan instead of reporting.
+    it "rejects bytes that are not valid UTF-8, rather than raising" do
+      expect(messages("<Faktura>\xFF</Faktura>".dup.force_encoding("UTF-8")))
+        .to contain_exactly(a_string_matching(/not valid UTF-8/))
+    end
+
+    it "reports it as the only issue, since nothing else can be read from the bytes" do
+      expect(described_class.errors_for("\xFF\xFE".dup.force_encoding("UTF-8")).size).to eq(1)
+    end
+  end
+
+  describe "#valid?" do
+    it "is false for a document KSeF would refuse" do
+      expect(described_class.valid?("\xEF\xBB\xBF#{golden}")).to be(false)
+    end
+
+    it "forwards a negotiated ceiling" do
+      expect(described_class.valid?(golden, max_bytes: 10)).to be(false)
+    end
+  end
+
+  describe "processing instructions that are only text" do
+    # `<?php ... ?>` inside a comment or CDATA is text, not an instruction; rejecting it would
+    # refuse an admissible document.
+    it "ignores one inside a comment" do
+      expect(described_class.errors_for(golden.sub("<Faktura", "<!-- <?php gen ?> -->\n<Faktura")))
+        .to be_empty
+    end
+
+    it "ignores one inside CDATA" do
+      cdata = golden.sub("Consulting", "<![CDATA[<?php gen ?>]]>")
+
+      expect(described_class.errors_for(cdata)).to be_empty
+    end
+
+    # A PI target is an XML Name and may hold non-ASCII letters; an ASCII-only class waved this
+    # through, and it was the one input every tier passed while §15.1 says KSeF rejects it.
+    it "catches a target that is not ASCII" do
+      expect(messages(golden.sub("<Faktura", "<?źdźbło x?>\n<Faktura")))
+        .to contain_exactly(a_string_matching(/źdźbło/))
     end
   end
 end

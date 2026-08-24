@@ -78,7 +78,7 @@ module Ksef
           raw_document: raw_document,
           # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
           # Date it denotes must not produce two unequal invoices (§8.2b).
-          issue_date: issue_date.is_a?(Date) ? issue_date : Formatting.to_date(issue_date),
+          issue_date: Formatting.to_date(issue_date),
           issued_at: issued_at.nil? ? nil : Formatting.date_time(issued_at),
           # Defaulted here rather than at serialisation, so a built invoice and the same
           # invoice parsed back hold the same value and compare equal.
@@ -107,7 +107,9 @@ module Ksef
 
       def to_xml = Serializer.new(to_fa3).to_xml
 
-      # Every validation tier that exists, in the order DESIGN.md §7.7 requires.
+      # Every validation tier that exists, model first (DESIGN.md §7.7). Document and schema
+      # checks then run on the same bytes; their relative order is not fixed by §7.7 and does
+      # not matter, since neither can affect the other's input.
       #
       # **Tier 1a first, and nothing else runs if it fails.** {ModelValidator}'s contract is
       # that a model it passes can be serialized; a model it rejects generally cannot, because
@@ -119,13 +121,16 @@ module Ksef
       # the reconciliation rules — does not exist: its catalogue is absent upstream
       # (docs/REFERENCE.md §15.6), and this is where it will attach when it does.
       #
+      # @param max_bytes [Integer] the document-size ceiling for this context. KSeF's 1 MB is a
+      #   *default* that an organisation can have raised on application (docs/REFERENCE.md
+      #   §15.5); pass the value `GET /limits/context` reports if yours differs.
       # @return [Array<Issue>] empty when the invoice is sound
-      def errors
+      def errors(max_bytes: DocumentValidator::MAX_BYTES)
         model = ModelValidator.errors_for(self)
         return model unless model.empty?
 
         document = to_xml
-        DocumentValidator.errors_for(document) +
+        DocumentValidator.errors_for(document, max_bytes: max_bytes) +
           Validator.errors_for(document).map { |message| Issue.new(field: "schema", message: message) }
       rescue Ksef::Error => e
         # A serialisation refusal the model tier did not anticipate. Reported rather than
@@ -133,11 +138,11 @@ module Ksef
         [Issue.new(field: "document", message: e.message)]
       end
 
-      def valid? = errors.empty?
+      def valid?(**) = errors(**).empty?
 
       # @raise [Ksef::ValidationError] listing every problem found, not merely the first
-      def validate!
-        found = errors
+      def validate!(**)
+        found = errors(**)
         return true if found.empty?
 
         raise ValidationError,

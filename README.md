@@ -57,10 +57,13 @@ submitted.
 > builder produces, tested against the Ministry's own published sample invoices. It refuses
 > what it cannot represent faithfully rather than guessing.
 >
-> **Validation runs in three tiers now**, not one: the model (required fields, enum
-> membership, NIP checksums, string lengths, date sanity), the serialized bytes (no BOM, no
-> processing instructions, UTF-8 prolog, no characters KSeF refuses, size), then the XSD.
-> `invoice.errors` returns them all at once, each addressed to the field that caused it.
+> **Validation runs in three stages now**, not one: the model (required fields, enum
+> membership, NIP checksums, string lengths, date sanity), the serialized bytes (valid UTF-8,
+> no BOM, no processing instructions, UTF-8 prolog, no characters KSeF refuses, size), then the
+> XSD. Those are validator tiers 1a, 1b and 2 — tier 3, the business rules, is still absent.
+> `invoice.errors` reports the model problems together, each addressed to the field that
+> caused it (`lines[2].vat_rate`); the byte and schema checks run once the model is sound, and
+> report against `document` and `schema`.
 >
 > **Not yet:** validator tier 3 — the reconciliation rules — and six of the seven invoice
 > types: `VAT` builds and parses, `KOR`/`ZAL`/`ROZ`/`UPR` and the two `KOR_` combinations do
@@ -112,7 +115,7 @@ invoice = Ksef::FA3.build do |f|
   f.line name: "Consulting", qty: 10, unit: "godz.", net_unit_price: 150, vat: "23"
 end
 
-invoice.validate!                              # offline, against the bundled XSD
+invoice.validate!                              # offline: model, bytes, then the XSD
 invoice.to_xml
 
 result = client.send_invoice(invoice)          # validate! → encrypt → session → submit
@@ -212,7 +215,7 @@ invoice.net_total    # => 1500  (a BigDecimal; #inspect shows 0.15e4)
 invoice.vat_total    # => 345
 invoice.gross_total  # => 1845   — use .to_s("F") for a plain decimal string
 
-invoice.validate!    # against the bundled XSD, no network
+invoice.validate!    # model, bytes, then the bundled XSD — no network
 invoice.to_xml       # => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>..."
 ```
 
@@ -336,7 +339,7 @@ integrators.
 
 | Version | Scope |
 |---|---|
-| 0.1.0 | **Both auth methods** — certificate/XAdES *and* KSeF token — crypto, online sessions, send/status/UPO/download, **three-tier validation** (model, XSD, business), full FA(3) builder for all seven invoice types |
+| 0.1.0 | **Both auth methods** — certificate/XAdES *and* KSeF token — crypto, online sessions, send/status/UPO/download, **three-tier validation** (model *and its byte-level half*, XSD, business), full FA(3) builder for all seven invoice types |
 | 0.2 | Batch sessions, invoice query/search, package export, hardened error catalogue |
 | 0.3 | KSeF certificate lifecycle endpoints, permissions API, offline QR codes |
 | 1.0 | After sustained production use; API stability promise begins |

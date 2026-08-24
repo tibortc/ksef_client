@@ -73,11 +73,13 @@ SimpleCov.start do
   # point branch 95 quietly allows twice today's slack. Re-ratchet at each phase boundary,
   # not once (CLAUDE.md records this in the Phase 2 definition of done).
   #
-  # Ratcheted 2026-08-24 (branch 95 -> 96) after the parser landed and its audit closed the
-  # gaps it opened. Actual at that point: line 100%, branch 97.84% (453/463), method 100% —
-  # so 96 leaves about eight branches of slack, roughly what 95 left when it was set. The ten
-  # uncovered branches are all pre-existing `&.` guards outside the FA(3) model.
-  minimum_coverage line: 99, branch: 96, method: 100
+  # Ratcheted 2026-08-24 twice: 95 -> 96 after the parser landed, then 96 -> 97 after validator
+  # tier 1. Actual at the second: line 100%, branch 97.92% (519/530), method 100% — so 97 leaves
+  # about five branches of slack. 98 was rejected deliberately: actual is 97.92, and a floor that
+  # close fails the build on one new uncovered branch anywhere, which is the opposite of what
+  # the paragraph above argues for. The eleven uncovered branches are all pre-existing `&.`
+  # guards outside the FA(3) model.
+  minimum_coverage line: 99, branch: 97, method: 100
 end
 
 require "ksef_client"

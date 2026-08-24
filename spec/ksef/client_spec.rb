@@ -172,6 +172,32 @@ RSpec.describe Ksef::Client do
         expect { client.send_invoice(invoice_xml) }.not_to raise_error
       end
 
+      # It is still bytes, and the admission rules of docs/REFERENCE.md §15.1 are about bytes.
+      # Without this, the gem would ship the very document tier 1 exists to stop, as long as the
+      # caller handed it over as a String — mis-encoded ERP text being precisely §15.1's case.
+      it "still applies the byte-level rules to a raw String" do
+        poisoned = invoice_xml.sub("</Faktura>", "#{0x87.chr(Encoding::UTF_8)}</Faktura>")
+
+        expect { client.send_invoice(poisoned) }
+          .to raise_error(Ksef::ValidationError, /U\+0087/)
+        expect(a_request(:post, "#{base}/sessions/online/#{session_ref}/invoices")).not_to have_been_made
+      end
+
+      # Not the schema tier, though: the transport layer is meant to carry documents this gem
+      # does not model, and validating a caller's own XML against FA(3) would refuse them.
+      it "does not hold a raw String to the FA(3) schema" do
+        expect { client.send_invoice("<Cokolwiek>nie faktura</Cokolwiek>") }.not_to raise_error
+      end
+
+      # §5's contract is "anything with #to_xml, or a String". Something that is neither
+      # validatable nor a String has no bytes to check until the session layer asks for them.
+      it "leaves a document that is neither validatable nor a String alone" do
+        document = Object.new
+        def document.to_xml = "<Faktura/>"
+
+        expect { client.send_invoice(document) }.not_to raise_error
+      end
+
       it "surfaces a validation failure before opening a session" do
         invoice = instance_double(Ksef::FA3::Invoice)
         allow(invoice).to receive(:validate!).and_raise(Ksef::ValidationError, "bad")

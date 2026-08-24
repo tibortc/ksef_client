@@ -198,13 +198,43 @@ RSpec.describe Ksef::FA3::Invoice do
       expect(wrong.errors.map(&:field).uniq).to eq(["schema"])
     end
 
-    # #errors answers the question it was asked, even when serialisation refuses for a reason
-    # the model tier did not anticipate.
-    it "reports a serialisation refusal rather than raising it" do
+    # This used to be the counterexample to the model tier's contract: an unknown annotation
+    # key passed the model and then made the serializer raise. The model tier now checks the
+    # shape, so the issue is addressed to the field rather than landing as an unaddressed
+    # `document:` complaint.
+    it "addresses an unknown annotation to its field instead of letting serialisation refuse it" do
       unknown = invoice(annotations: { "Nieoczekiwany" => "1" })
 
       expect { unknown.to_xml }.to raise_error(Ksef::ValidationError)
-      expect(unknown.errors.map(&:field)).to eq(["document"])
+      expect(unknown.errors.map(&:field)).to eq(["annotations"])
+    end
+
+    # The rescue behind that: whatever else serialisation might one day refuse, #errors answers
+    # the question it was asked. Driven by stubbing, because the known holes are now closed and
+    # a real counterexample is exactly what this guard exists to survive not having.
+    it "reports an unanticipated serialisation refusal rather than raising it" do
+      # A subclass rather than a stub: Invoice instances are frozen Data values.
+      refusing = Class.new(described_class) do
+        def to_xml = raise(Ksef::ValidationError, "something new")
+      end
+
+      expect(refusing.new(**invoice.to_h).errors.map(&:to_s)).to eq(["document: something new"])
+    end
+
+    it "does not swallow an error the model tier can describe properly" do
+      expect(invoice(number: "").errors.map(&:field)).to eq(["number"])
+    end
+
+    it "is false from #valid? when something is wrong" do
+      expect(invoice(number: "").valid?).to be(false)
+      expect(invoice.valid?).to be(true)
+    end
+
+    # The ceiling is a per-context default an organisation can have raised (§15.5).
+    it "forwards a negotiated size ceiling" do
+      expect(invoice.errors(max_bytes: 10).map(&:message)).to include(a_string_matching(/accepts 10/))
+      expect(invoice.valid?(max_bytes: 10)).to be(false)
+      expect { invoice.validate!(max_bytes: 10) }.to raise_error(Ksef::ValidationError, /accepts 10/)
     end
   end
 

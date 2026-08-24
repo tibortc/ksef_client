@@ -61,11 +61,14 @@ module Ksef
         #   gem's own hierarchy — which is what the docs tell them to do — actually catches a
         #   malformed date read out of a document
         def to_date(value)
-          case value
-          when Date then value
-          when String then Date.parse(value)
-          else value.to_date
-          end
+          return Date.parse(value) if value.is_a?(String)
+          # `instance_of?`, not `is_a?`: a DateTime *is* a Date, but it carries a time of day, and
+          # leaving one in place makes every date comparison depend on the clock — `DateTime.now
+          # + 1` sorts after `Date.today + 1`, so a one-day tolerance quietly shrinks by however
+          # late in the day it is.
+          return value if value.instance_of?(Date)
+
+          value.to_date
         # `Date::Error` is itself an `ArgumentError`, so listing both would shadow it.
         # `NoMethodError` covers an object with no `#to_date`.
         rescue ArgumentError, TypeError, NoMethodError => e

@@ -403,10 +403,17 @@ field path, so a caller learns *which* value to fix. Two properties worth keepin
 
 - **The model tier short-circuits.** Serialisation raises on a bad NIP, a nameless seller or a
   line with no derivable net, so attempting it after a model failure would replace a list of
-  addressed errors with one exception about whichever came first. Its contract is therefore
-  the stronger statement: *what the model tier passes, `#to_xml` can serialise.*
-- **`#errors` never raises.** A serialisation refusal the model tier did not anticipate is
-  reported as an issue, because a method asked "what is wrong with this?" should answer.
+  addressed errors with one exception about whichever came first. Its aim is therefore the
+  stronger statement — *what the model tier passes, `#to_xml` can serialise* — and it is an
+  **aim, not a proof**. A review on 2026-08-24 falsified the absolute twice, through
+  `annotations` and the buyer's yes/no flags, both public constructor fields the tier did not
+  inspect; both are now checked. Treat a new counterexample as a gap to close here, not as a
+  surprise.
+- **`#errors` reports rather than raises**, including for a serialisation refusal the model
+  tier did not anticipate, and for text that is tagged UTF-8 but is not — the case §15.1 calls
+  the likeliest real-world rejection, and the one that used to make it throw
+  `Encoding::CompatibilityError` from `String#strip`. Stated as behaviour rather than as a
+  guarantee: it is bounded by the input classes that have been tried.
 
 Tier 3 remains unbuilt and unblocked-but-ungrounded; `Invoice#errors` is where it attaches.
 

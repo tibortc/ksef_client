@@ -14,8 +14,19 @@ module Ksef
       def to_s = "#{field}: #{message}"
 
       # Sorted output is stable output, which keeps error lists diffable in tests and logs.
+      #
+      # **`Comparable` is deliberately not included**, though `<=>` alone is all sorting needs.
+      # Including it puts `Comparable#==` ahead of `Data#==` in the ancestry, and that `==`
+      # delegates to this `<=>` — so two issues whose *renderings* coincide compare equal even
+      # with different fields, and an `Issue` compares equal to a bare `String`:
+      #
+      #     Issue[field: "a", message: "b: c"] == Issue[field: "a: b", message: "c"]  # => true
+      #     Issue[field: "a", message: "b"]    == "a: b"                              # => true
+      #
+      # while `eql?` and `hash` kept `Data`'s field-wise semantics, breaking the `==`/`hash`
+      # contract and making `Array#include?` disagree with `Hash` membership. Found by a review
+      # on 2026-08-24.
       def <=>(other) = to_s <=> other.to_s
-      include Comparable
     end
   end
 end

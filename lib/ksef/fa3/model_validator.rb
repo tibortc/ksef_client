@@ -35,6 +35,11 @@ module Ksef
       SHORT_TEXT = 256
       LONG_TEXT = 512
 
+      # `Adnotacje` is an anonymous complex type, so the generated metadata keys it by path
+      # rather than by name — the same key {Serializer} resolves when it rejects an unknown
+      # element there.
+      ANNOTATIONS_TYPE = "Faktura/Fa/Adnotacje"
+
       # §15.4: `P_1` must not be later than the date KSeF accepts the document — a date in
       # *KSeF's* timezone, which is unknowable here. Comparing against a local `Date.today`
       # would reject perfectly good invoices around midnight for any caller west of Warsaw, so
@@ -44,6 +49,9 @@ module Ksef
       FUTURE_TOLERANCE_DAYS = 1
 
       class << self
+        # Value-level checks: encoding, xsd:token collapse, lengths, enum membership.
+        include FieldChecks
+
         # @param invoice [Invoice]
         # @return [Array<Issue>] empty when the model is sound
         def errors_for(invoice)
@@ -51,6 +59,7 @@ module Ksef
             *subject_errors(invoice.seller, "seller", role: :seller),
             *subject_errors(invoice.buyer, "buyer", role: :buyer),
             *header_errors(invoice),
+            *annotation_errors(invoice.annotations),
             *invoice.lines.each_with_index.flat_map { |line, index| line_errors(line, index) }
           ]
         end
@@ -68,12 +77,48 @@ module Ksef
 
         def subject_errors(subject, field, role:)
           return [Issue.new(field: field, message: "is required")] if subject.nil?
+          unless subject.respond_to?(:nip) && subject.respond_to?(:address)
+            return [Issue.new(field: field, message: "is not a Ksef::FA3::Subject")]
+          end
 
           [
             *nip_errors(subject.nip, "#{field}.nip"),
             *name_errors(subject.name, "#{field}.name", role: role),
-            *address_errors(subject.address, "#{field}.address", role: role)
+            *address_errors(subject.address, "#{field}.address", role: role),
+            *flag_errors(subject, field, role: role)
           ]
+        end
+
+        # `JST` and `GV` are written through {Formatting.flag}, which raises on anything that is
+        # not boolean-ish. Only a buyer carries them, so only a buyer is checked.
+        def flag_errors(subject, field, role:)
+          return [] unless role == :buyer
+
+          { "local_government_unit" => subject.local_government_unit,
+            "vat_group_member" => subject.vat_group_member }.filter_map do |name, value|
+            next if [true, false, nil, "1", "2", 1, 2].include?(value)
+
+            Issue.new(field: "#{field}.#{name}", message: "#{value.inspect} is not a yes/no value")
+          end
+        end
+
+        # `annotations` is a public constructor field the model tier used to ignore entirely, so
+        # an unknown key passed the model and then made the serializer raise — the one hole in
+        # this module's contract that a 2026-08-24 review could still find. Names are checked
+        # against the generated schema metadata, one level deep, which is as far as the
+        # serializer's own key check reaches per element.
+        def annotation_errors(annotations)
+          return [Issue.new(field: "annotations", message: "must be a Hash")] unless annotations.is_a?(Hash)
+
+          permitted = Generated::Types.ordered_elements(ANNOTATIONS_TYPE).map { |particle| particle[:name] }
+          # An empty list means the generated metadata no longer keys this type by the path
+          # above — a codegen change, not a caller's mistake, and no reason to reject their
+          # annotations.
+          return [] if permitted.empty?
+
+          (annotations.keys.map(&:to_s) - permitted).map do |unknown|
+            Issue.new(field: "annotations", message: "#{unknown.inspect} is not an element of Adnotacje")
+          end
         end
 
         # Checked here as well as in {Subject#to_fa3} on purpose. Serialisation raises, which
@@ -102,6 +147,7 @@ module Ksef
           if address.nil?
             return role == :seller ? [Issue.new(field: field, message: "is required for a seller")] : []
           end
+          return [Issue.new(field: field, message: "is not a Ksef::FA3::Address")] unless address.respond_to?(:line1)
 
           [
             *text_errors(address.line1, "#{field}.line1", LONG_TEXT, required: true),
@@ -112,6 +158,7 @@ module Ksef
 
         def line_errors(line, index)
           field = "lines[#{index}]"
+          return [Issue.new(field: field, message: "is not a Ksef::FA3::Line")] unless line.respond_to?(:vat_rate)
 
           [
             *text_errors(line.name, "#{field}.name", LONG_TEXT),
@@ -128,25 +175,6 @@ module Ksef
 
           Issue.new(field: field,
                     message: "needs either net_amount, or both quantity and net_unit_price")
-        end
-
-        def text_errors(value, field, limit, required: false)
-          return required ? [Issue.new(field: field, message: "is required")] : [] if value.nil?
-
-          text = value.to_s
-          return [Issue.new(field: field, message: "must not be empty")] if text.strip.empty?
-          return [] if text.length <= limit
-
-          [Issue.new(field: field, message: "is #{text.length} characters; the schema allows #{limit}")]
-        end
-
-        # Membership is read from the generated metadata, so a schema revision that adds or
-        # renames a code is picked up by regenerating rather than by editing a list here.
-        def enum_issue(field, type, value)
-          return Issue.new(field: field, message: "is required") if value.nil?
-          return nil if Generated::Enums.valid?(type, value.to_s)
-
-          Issue.new(field: field, message: "#{value.inspect} is not one of #{type}'s permitted values")
         end
 
         def future_date_issue(issue_date)

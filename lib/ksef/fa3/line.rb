@@ -70,7 +70,7 @@ module Ksef
 
       # Every child of `TFaWiersz` except `NrWierszaFa` is `minOccurs="0"`, and the parser
       # accepts a row that states only its net. Absent fields are therefore **omitted**, not
-      # written empty: `<P_8A/>` fails `TZnakowy512`'s minimum length, so emitting one turned a
+      # written empty: `<P_8A/>` fails `TZnakowy`'s minimum length, so emitting one turned a
       # schema-valid lump-sum row into an invalid document — and formatting a nil quantity
       # raised, which took {Provenance#unmapped_elements} down with it, since that serialises
       # to work out what it would lose. Same rule {Subject} follows for an absent `Nazwa`.
