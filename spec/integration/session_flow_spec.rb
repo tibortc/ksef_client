@@ -141,6 +141,14 @@ RSpec.describe "an online session against TEST", :integration do
       expect(result.receiving_party).to include("Ministerstwo Finans")
     end
 
+    # A UPO fetched from KSeF is XAdES-signed by the Ministry — that is what makes it proof of
+    # receipt — and **not one of upstream's six published examples is signed**, so this is the
+    # only place the difference can be observed (§14.7). It is why `UPO::Validator` sets the
+    # signature aside before running the schema, which declares no `ds:Signature` at all.
+    it "carries the Ministry's signature, unlike every offline fixture" do
+      expect(Ksef::UPO::Validator.signed?(client.upo(receipt).xml)).to be(true)
+    end
+
     # §14.6, the contract-silent header. If the UPO comes back as 4.3, the header both
     # official clients send does what they assume — and it is why we send it.
     it "conforms to the upo-v4-3 schema we asked for with X-KSeF-Feature" do
@@ -212,14 +220,6 @@ RSpec.describe "an online session against TEST", :integration do
     it "names the original's session" do
       expect(duplicated[:second].original_session_reference)
         .to eq(duplicated[:receipt].session_reference)
-    end
-  end
-
-  # A UPO fetched from KSeF is XAdES-signed by the Ministry; none of upstream's published
-  # examples is, so this is the only place the difference shows up (§14.7).
-  describe "the signature on a real UPO" do
-    it "is present, unlike every offline fixture" do
-      expect(Ksef::UPO::Validator.signed?(client.upo(receipt).xml)).to be(true)
     end
   end
 end
