@@ -88,6 +88,53 @@ gem version for which API state".
 
 ### Added
 
+- **`ZAL` and `ROZ` — the advance invoice and the settlement invoice that closes it out**
+  (DESIGN.md §7.4, `docs/REFERENCE.md` §8.5). Four of the seven types now build, parse,
+  round-trip and validate, and fifteen of the Ministry's twenty-six worked examples go through
+  end to end.
+
+  A `ZAL` documents money received before delivery, and carries **no invoice rows at all** —
+  the order or contract of art. 106f ust. 1 pkt 4 takes their place:
+
+  ```ruby
+  f.invoice_type "ZAL"
+  f.order total: "375150"                    # the whole order, including tax
+  f.order_line name: "mieszkanie 50m^2", qty: 1, unit: "szt.",
+               net_unit_price: "300000", net_amount: "300000",
+               vat_amount: "69000", vat: "23"
+  f.totals gross: "20000", net: { "23" => "16260.16" }, vat: { "23" => "3739.84" }
+  ```
+
+  `f.order`'s `total:` is `WartoscZamowienia`, the whole order **including tax** — 375 150
+  against 20 000 actually received. They are different numbers, and conflating them would be a
+  large error. An order position states its own tax through `vat_amount:`, because FA(3) gives
+  it a field (`P_11VatZ`) that an invoice row does not have; nothing about an order is derived.
+
+  The `ROZ` issued once the goods are delivered names each advance invoice it settles, in
+  either of the two forms the schema allows:
+
+  ```ruby
+  f.settles ksef_number: "5265877635-20250826-0100001AF629-AF"   # issued through KSeF
+  f.settles number: "FZ/2026/02/150"                             # issued outside it
+  ```
+
+  **The choice here is inverted from a correction's**: `NrKSeFZN` marks an advance invoice
+  issued *outside* KSeF and pairs with the plain number, while the KSeF branch is the number
+  alone. The two branches name different fields, so `Ksef::FA3::AdvanceInvoice` carries both
+  and requires exactly one — a single nil-able field, which was enough for `CorrectedInvoice`,
+  would assert the wrong provenance here.
+
+  **Both types state their tax summary rather than deriving it**, and that is measured rather
+  than assumed: across every sample of the family the stated buckets never equal the row
+  totals. A `ZAL` has no rows to derive from; a `ROZ` describes the goods in its rows and
+  states what is left to pay **after** the advance — an amount this document does not contain
+  enough to compute. Tier 1 now requires a stated summary on three structural triggers: a
+  `state_before` row, an order, or a settled advance invoice.
+
+  Not modelled, and visible through `#unmapped_elements` if a parsed document carries them:
+  `ZaliczkaCzesciowa` (in none of the twenty-six samples), `P_15ZK` (scoped to the `KOR_`
+  combinations, which are the remaining work), `Platnosc` and `DodatkowyOpis`.
+
 - **`KOR`, the correction — building, parsing and validating** (DESIGN.md §7.4,
   `docs/REFERENCE.md` §8.4). A correction says what it corrects, why, and when it takes effect:
 

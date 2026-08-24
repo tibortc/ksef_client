@@ -71,8 +71,12 @@ submitted.
 > buckets are deltas its rows need not determine: three of the Ministry's five worked
 > corrections have no usable rows at all.
 >
-> **Not yet:** validator tier 3 — the reconciliation rules — and five of the seven invoice
-> types: `VAT` and `KOR` build and parse, `ZAL`/`ROZ`/`UPR` and the two remaining `KOR_`
+> **Advance invoices work too.** A `ZAL` carries the order or contract it collects against
+> (`Zamowienie`) and has no invoice rows at all; a `ROZ` names every advance invoice it settles
+> and states what is left to pay.
+>
+> **Not yet:** validator tier 3 — the reconciliation rules — and three of the seven invoice
+> types: `VAT`, `KOR`, `ZAL` and `ROZ` build and parse; `UPR` and the two remaining `KOR_`
 > combinations do not. See [Roadmap](#roadmap).
 
 ## Installation
@@ -277,6 +281,41 @@ Omit `ksef_number` when the invoice being corrected was issued outside KSeF; the
 carries the `NrKSeFN` marker instead. If the buyer's details are what changed, pass the old
 ones as `previous_buyers:` on `f.correction` and give both the old and new record the same
 `buyer_id`, which is what links them.
+
+### Collecting an advance, then settling it
+
+A `ZAL` documents money received before the goods are delivered. It has **no invoice rows** —
+the order or contract takes their place, per art. 106f ust. 1 pkt 4:
+
+```ruby
+Ksef::FA3.build do |f|
+  # …seller, buyer, number, issue_date…
+  f.invoice_type "ZAL"
+
+  f.order total: "375150"                    # the whole order, including tax
+  f.order_line name: "mieszkanie 50m^2", qty: 1, unit: "szt.",
+               net_unit_price: "300000", net_amount: "300000",
+               vat_amount: "69000", vat: "23"
+
+  f.totals gross: "20000", net: { "23" => "16260.16" }, vat: { "23" => "3739.84" }
+end
+```
+
+`f.order`'s `total:` is the **whole order including tax** — 375 150 here — while `f.totals`
+states the 20 000 actually received. They are different numbers on purpose, and an order
+position states its own tax (`vat_amount`) rather than having it computed, because FA(3)
+gives it a field of its own.
+
+The `ROZ` issued once the goods are delivered names the advance invoices it settles:
+
+```ruby
+f.invoice_type "ROZ"
+f.settles ksef_number: "5265877635-20250826-0100001AF629-AF"   # issued through KSeF
+f.settles number: "FZ/2026/02/150"                             # issued outside it
+```
+
+Its rows describe the goods while `f.totals` states what is **left** to pay, so those two do
+not add up to each other — which is why the summary is stated here as well.
 
 ### Reading an invoice back
 

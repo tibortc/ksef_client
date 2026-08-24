@@ -14,7 +14,7 @@ module Ksef
     Invoice = Data.define(
       :seller, :buyer, :number, :issue_date, :lines,
       :currency, :issued_at, :rounding, :invoice_type, :annotations,
-      :correction, :totals, :raw_document
+      :correction, :totals, :order, :advances, :raw_document
     )
 
     # Computation, defaults and serialisation for {Ksef::FA3::Invoice}.
@@ -52,7 +52,11 @@ module Ksef
       # stated summary for these types, and {ModelValidator} reports one set on any other —
       # where it would be emitted verbatim, never read back, and disagree with the lines with
       # nothing to notice (docs/REFERENCE.md §8.4).
-      STATED_TOTALS_TYPES = %w[KOR].freeze
+      # Measured over every sample of each, 2026-08-24/25: in none of them do the stated
+      # buckets equal the row totals. A `ZAL` has no rows at all; a `ROZ` describes the goods
+      # in its rows and states the amount *remaining after the advance* in its buckets, which
+      # this document does not contain the advance to compute from (§8.5).
+      STATED_TOTALS_TYPES = %w[KOR ZAL ROZ].freeze
 
       NEEDS_LINES = "An invoice needs at least one line, unless it states its own totals. " \
                     "A collective correction may have no FaWiersz at all — see " \
@@ -88,7 +92,8 @@ module Ksef
       # some.
       def initialize(seller:, buyer:, number:, issue_date:, lines: [],
                      currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT",
-                     annotations: nil, correction: nil, totals: nil, raw_document: nil)
+                     annotations: nil, correction: nil, totals: nil, order: nil, advances: [],
+                     raw_document: nil)
         rows = self.class.rows_for(lines, rounding: rounding, totals: totals)
 
         super(
@@ -96,7 +101,8 @@ module Ksef
           number: Formatting.text(number),
           currency: Formatting.text(currency),
           invoice_type: Formatting.text(invoice_type),
-          correction: correction, totals: totals, raw_document: raw_document,
+          correction: correction, totals: totals, order: order,
+          advances: Correction.wrap(advances).dup.freeze, raw_document: raw_document,
           # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
           # Date it denotes must not produce two unequal invoices (§8.2b).
           issue_date: Formatting.to_date(issue_date),

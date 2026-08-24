@@ -156,7 +156,7 @@ RSpec.describe "the FA(3) round-trip law" do
       end
     end
 
-    describe "the twelve this model represents" do
+    describe "the fifteen this model represents" do
       FA3Corpus::MINISTRY_MODELLED.each do |relative|
         it "#{relative} parses and re-serialises to a schema-valid document" do
           parsed = Ksef::FA3.parse(FA3Corpus.read(relative))
@@ -221,7 +221,7 @@ RSpec.describe "the FA(3) round-trip law" do
     # paid before correction in `P_15ZK`, a `ZAL` its instalments in `ZaliczkaCzesciowa`;
     # parsing one into this model would drop them and re-serialise a different invoice under
     # the original's number.
-    describe "the nine whose type the model cannot represent" do
+    describe "the six whose type the model cannot represent" do
       (FA3Corpus.ministry - FA3Corpus::MINISTRY_MODELLED - FA3Corpus::MINISTRY_BEYOND_MODEL.keys)
         .each do |relative|
         it "#{relative} is refused, naming the type and blaming the model" do
@@ -234,10 +234,10 @@ RSpec.describe "the FA(3) round-trip law" do
 
       # The list above is a set difference, so a sample slipping out of MINISTRY_MODELLED
       # would silently join it and still pass. This pins what is actually left.
-      it "is exactly the five unsupported types" do
+      it "is exactly the three unsupported types" do
         refused = FA3Corpus.ministry - FA3Corpus::MINISTRY_MODELLED - FA3Corpus::MINISTRY_BEYOND_MODEL.keys
 
-        expect(refused.size).to eq(9)
+        expect(refused.size).to eq(6)
         expect(refused.map { |relative| FA3Corpus.invoice_type(relative) }.uniq)
           .to match_array(FA3Corpus::MINISTRY_UNSUPPORTED_TYPES)
       end

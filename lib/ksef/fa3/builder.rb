@@ -12,11 +12,19 @@ module Ksef
     # single-value field set twice simply takes the later value, which is what anyone
     # writing a builder expects, and what `f.number` called twice obviously ought to do.
     class Builder
+      # The type-specific halves of the DSL, each with its own assembly (§8.4, §8.5).
+      include Corrections
+      include Advances
+
       SUBJECT_KEYS = %i[nip name address local_government_unit vat_group_member buyer_id].freeze
       ADDRESS_KEYS = %i[line1 line2 country street city postal_code].freeze
       LINE_KEYS = %i[name quantity unit net_unit_price vat_rate net_amount row_number state_before].freeze
       CORRECTION_KEYS = %i[reason effect period corrected_number previous_seller previous_buyers].freeze
       CORRECTED_KEYS = %i[number issue_date ksef_number].freeze
+      ORDER_KEYS = %i[total].freeze
+      ORDER_LINE_KEYS = %i[name quantity unit net_unit_price net_amount vat_amount vat_rate
+                           row_number state_before].freeze
+      ADVANCE_KEYS = %i[ksef_number number].freeze
 
       # English shorthand from DESIGN.md §8's example. The canonical names work too, so
       # `qty:` and `quantity:` are interchangeable — but passing both is an error rather
@@ -31,6 +39,9 @@ module Ksef
         @lines = []
         @corrected = []
         @correction = nil
+        @order = nil
+        @order_lines = []
+        @advances = []
       end
 
       # @param attributes [Hash] `:nip`, `:name`, `:address`, and optionally
@@ -71,24 +82,6 @@ module Ksef
         @lines << Line.new(**normalise(attributes, LINE_KEYS, LINE_ALIASES, "line"))
       end
 
-      # Makes this a correction. Optional next to {#corrects}, which is what a correction
-      # actually needs; call this for the reason, the effect date and the rest.
-      #
-      # @param attributes [Hash] `:reason`, `:effect`, `:period`, `:corrected_number`,
-      #   `:previous_seller`, `:previous_buyers` — see {Correction}
-      def correction(**attributes)
-        @correction = normalise(attributes, CORRECTION_KEYS, {}, "correction")
-      end
-
-      # Names one invoice this correction corrects. Call once per corrected invoice; a
-      # collective correction under art. 106j ust. 3 names many.
-      #
-      # @param attributes [Hash] `:number`, `:issue_date`, and `:ksef_number` unless the
-      #   corrected invoice was issued outside KSeF
-      def corrects(**attributes)
-        @corrected << CorrectedInvoice.new(**normalise(attributes, CORRECTED_KEYS, {}, "corrects"))
-      end
-
       # States the tax summary instead of having it computed from the lines — which a
       # correction must do, its buckets being deltas its rows need not determine
       # (docs/REFERENCE.md §8.4).
@@ -119,21 +112,11 @@ module Ksef
                 "Every invoice needs a seller, a buyer, a number and an issue date."
         end
 
-        Invoice.new(**@fields, lines: @lines, correction: assembled_correction)
+        Invoice.new(**@fields, lines: @lines, correction: assembled_correction,
+                               order: assembled_order, advances: @advances)
       end
 
       private
-
-      # Assembled at the end rather than as {#correction} is called, because a correction is
-      # only well-formed once it names a corrected invoice — and the DSL takes those one at a
-      # time. Present whenever either half was used, so `corrects` alone is enough and
-      # `correction` alone fails with {Correction::NAMES_NOTHING} rather than silently
-      # producing an invoice that is not a correction.
-      def assembled_correction
-        return nil if @correction.nil? && @corrected.empty?
-
-        Correction.new(**(@correction || {}), corrected: @corrected)
-      end
 
       # Several rate codes share a bucket (§8.1a), so a summary accumulates rather than
       # assigning — the shape of a bug an audit found in {DocumentMapping} on 2026-08-24.

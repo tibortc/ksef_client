@@ -384,6 +384,25 @@ RSpec.describe Ksef::FA3::Invoice do
     # document — a real difference, pinned by its own example in the parser spec.
     def determined = invoice(lines: [line(net_amount: BigDecimal("1500"))])
 
+    # Every member of IDENTITY, one at a time. Pinning inequality on `number` alone let a
+    # mutation that dropped `issued_at` from IDENTITY survive the whole suite — equality was
+    # thoroughly tested, inequality barely at all.
+    let(:differences) do
+      {
+        number: "FV/OTHER", issue_date: Date.new(2026, 1, 1), currency: "EUR",
+        issued_at: "2020-01-01T00:00:00Z", rounding: :per_summary, invoice_type: "KOR",
+        annotations: Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS.merge("P_16" => "1"),
+        lines: [line(price: "999")], seller: buyer, buyer: seller,
+        correction: Ksef::FA3::Correction.new(
+          corrected: Ksef::FA3::CorrectedInvoice.new(number: "FV/2026/01", issue_date: "2026-01-15")
+        ),
+        totals: Ksef::FA3::Totals.new(gross: "1500.00", buckets: { "P_13_1" => "1500.00" }),
+        order: Ksef::FA3::Order.new(total: "1845.00",
+                                    lines: Ksef::FA3::OrderLine.new(name: "Consulting")),
+        advances: [Ksef::FA3::AdvanceInvoice.new(number: "FZ/2026/01/001")]
+      }
+    end
+
     it "ignores the retained document when comparing" do
       built = determined
       parsed = Ksef::FA3.parse(built.to_xml)
@@ -394,21 +413,7 @@ RSpec.describe Ksef::FA3::Invoice do
       expect(parsed.hash).to eq(built.hash)
     end
 
-    # Every member of IDENTITY, one at a time. Pinning inequality on `number` alone let a
-    # mutation that dropped `issued_at` from IDENTITY survive the whole suite — equality was
-    # thoroughly tested, inequality barely at all.
     it "distinguishes invoices differing in any single identity field" do
-      differences = {
-        number: "FV/OTHER", issue_date: Date.new(2026, 1, 1), currency: "EUR",
-        issued_at: "2020-01-01T00:00:00Z", rounding: :per_summary, invoice_type: "KOR",
-        annotations: Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS.merge("P_16" => "1"),
-        lines: [line(price: "999")], seller: buyer, buyer: seller,
-        correction: Ksef::FA3::Correction.new(
-          corrected: Ksef::FA3::CorrectedInvoice.new(number: "FV/2026/01", issue_date: "2026-01-15")
-        ),
-        totals: Ksef::FA3::Totals.new(gross: "1500.00", buckets: { "P_13_1" => "1500.00" })
-      }
-
       expect(Ksef::FA3::Invoice::IDENTITY).to match_array(differences.keys)
       differences.each do |field, value|
         expect(invoice).not_to eq(invoice(**{ field => value })), "#{field} is not part of identity"

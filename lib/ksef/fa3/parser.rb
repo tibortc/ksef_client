@@ -41,7 +41,7 @@ module Ksef
       # The invoice kinds {Invoice} can represent faithfully. The other five of
       # `TRodzajFaktury` are DESIGN.md §7.4's remaining work; see {#supported_type!} for why
       # accepting one would be worse than refusing it.
-      SUPPORTED_TYPES = %w[VAT KOR].freeze
+      SUPPORTED_TYPES = %w[VAT KOR ZAL ROZ].freeze
 
       class << self
         # Namespace-aware element reading; see {NodeReader}.
@@ -111,6 +111,8 @@ module Ksef
             # An invoice that states its own totals may legitimately have no rows.
             lines: RowReader.lines_from(fa_node, required: totals.nil?),
             correction: CorrectionReader.correction_from(fa_node),
+            order: AdvanceReader.order_from(fa_node),
+            advances: AdvanceReader.advances_from(fa_node),
             totals: totals,
             currency: text(fa_node, "KodWaluty") || "PLN",
             # Read, not defaulted. These are declarations with tax consequences — cash

@@ -1502,6 +1502,87 @@ against the schema when rejecting unknown element names, but wrote with `values.
 against a String. A symbol key therefore passed the check and was then **silently dropped**.
 Keys are normalised once, at the top of `write_children`.
 
+### 8.5 The advance-payment pair, `ZAL` and `ROZ`
+
+Source: the pinned FA(3) XSD for the structure, and the Ministry's `ZAL`, `ROZ`, `KOR_ZAL` and
+`KOR_ROZ` samples of §1.5 for what they contain. Recorded 2026-08-25.
+
+A `ZAL` documents money received **before** the goods are delivered; a `ROZ` — art. 106f ust. 3
+— is the invoice issued once they are, settling what the advance invoices already covered. Two
+elements carry that, and both sit in `Fa` outside the correction group:
+
+| Element | Occurs | Carried as |
+|---|---|---|
+| `Zamowienie` | 0–1 | `Invoice#order` |
+| `Zamowienie/WartoscZamowienia` | 1, `TKwotowy` | `Order#total` |
+| `Zamowienie/ZamowienieWiersz` | **1–10 000** | `Order#lines` |
+| `FakturaZaliczkowa` | 0–**100** | `Invoice#advances` |
+| `ZaliczkaCzesciowa` | 0–31 | **not modelled** — see below |
+
+**A `ZAL` has no `FaWiersz` at all.** `Zamowienie` is *"zamówienie lub umowa, o których mowa w
+art. 106f ust. 1 pkt 4"* — the order or contract — and its positions take the place of invoice
+rows, in the currency the advance invoice was issued in. The Ministry's Przykład 10 is exactly
+that: two `ZamowienieWiersz`, no rows.
+
+**`WartoscZamowienia` is not `P_15`, and confusing them would be a large error.** It is
+*"wartość zamówienia lub umowy z uwzględnieniem kwoty podatku"* — the whole order **including
+tax**. In Przykład 10 it is `375 150` against a `P_15` of `20 000`: the order is the contract,
+`P_15` is the money received so far.
+
+**An order position states its own tax.** `ZamowienieWiersz` carries both `P_11NettoZ`
+(*"wartość zamówionego towaru lub usługi bez kwoty podatku"*) and `P_11VatZ` (*"kwota podatku
+od zamówionego towaru lub usługi"*). `FaWiersz` has no per-row tax element and the tax is
+computed from `P_12`; here the document carries both, so `OrderLine` reads both and derives
+nothing. `StanPrzedZ` is `StanPrzed`'s twin, for a `KOR_ZAL` correcting an order position.
+
+**`FakturaZaliczkowa`'s choice is inverted from `DaneFaKorygowanej`'s.** There, the marker
+pairs with the KSeF number. Here it pairs with the plain one:
+
+- in KSeF → `NrKSeFFaZaliczkowej` **alone**;
+- outside KSeF → `NrKSeFZN` (*"znacznik faktury zaliczkowej wystawionej poza KSeF"*) followed
+  by `NrFaZaliczkowej`.
+
+So the two branches name *different fields*, and {AdvanceInvoice} carries both with exactly one
+required — unlike {CorrectedInvoice}, where one nil-able field was enough. Getting this
+backwards is easy and produces a schema-valid document asserting the wrong provenance.
+
+#### Both types state their summary, measured rather than assumed
+
+`Invoice::STATED_TOTALS_TYPES` gains `ZAL` and `ROZ`. Over every sample of each, the stated
+buckets **never** equal the row totals:
+
+| Sample | Type | Σ row `P_11` | Σ stated `P_13_*` | `P_15` |
+|---|---|---|---|---|
+| Przykład 10 | `ZAL` | — (no rows) | 16 260.16 | 20 000 |
+| Przykład 14 | `ROZ` | 312 000.00 | 284 277.75 | 307 635 |
+| Przykład 17 | `ROZ` | 312 000.00 | 277 222.45 | 300 000 |
+| Przykład 11 | `KOR_ZAL` | — (no rows) | 2 221.34 | 0 |
+| Przykład 18 | `KOR_ROZ` | 624 000.00 | 7 055.30 | 7 635 |
+
+A `ZAL` has nothing to derive from. A `ROZ` describes the goods in its rows and states the
+amount **remaining after the advance** in its buckets — and the advance is not in this
+document, so the model could not compute it even in principle. `ZaliczkaCzesciowa`'s own
+documentation confirms the shape: *"różnica kwoty w polu P_15 i sumy poszczególnych pól P_15Z
+stanowi kwotę pozostałą ponad płatności otrzymane przed wykonaniem"*.
+
+Tier 1 therefore requires a stated summary whenever an order is present or an advance invoice
+is settled — the same rule, and the same module, as the `state_before` case of §8.4b. All three
+triggers are **structural**: an element the document either carries or does not. Whether the
+figures then reconcile is tier 3's, and tier 3 is not built.
+
+#### What is deliberately not modelled
+
+- **`ZaliczkaCzesciowa`** — instalments of a partial advance. It appears in **none of the
+  twenty-six samples**, so there is nothing to build against; it is a whole element and is
+  therefore visible through `#unmapped_elements`.
+- **`P_15ZK` / `KursWalutyZK`** — the amount paid before correction. Still scoped to `KOR_ZAL`
+  and `KOR_ROZ`, which are the remaining work; three `KOR_ZAL` samples and the `KOR_ROZ` one
+  carry it, so it lands with them rather than here.
+- **`Platnosc`** and **`DodatkowyOpis`** — payment details and free-form key/value notes. Both
+  appear across `VAT`, `ZAL` and `ROZ` alike and have never been modelled; both are
+  path-visible. `Platnosc` on a `ZAL` carries *when* the advance was paid, which is worth
+  having eventually, but it is not what makes a `ZAL` a `ZAL`.
+
 ---
 
 ## 9. Still unverified

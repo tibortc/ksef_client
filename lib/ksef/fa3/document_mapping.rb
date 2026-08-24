@@ -43,8 +43,12 @@ module Ksef
           "Adnotacje" => annotations,
           "RodzajFaktury" => invoice_type,
           **(correction ? correction.to_fa3 : {}),
-          "FaWiersz" => rows
-        }
+          "FakturaZaliczkowa" => advances.map(&:to_fa3),
+          "FaWiersz" => rows,
+          "Zamowienie" => order&.to_fa3
+          # `compact`, because a nil value is not "absent" to {Serializer}: it writes an empty
+          # element for one. An empty Array *is* absent — it repeats zero times.
+        }.compact
       end
 
       # A stated summary wins over a computed one, and for a correction it is the only one

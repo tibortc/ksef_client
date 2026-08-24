@@ -59,6 +59,10 @@ module Ksef
         # The correction group and its value objects. It includes {SubjectChecks} itself,
         # `Podmiot1K` and `Podmiot2K` being parties like any other.
         include CorrectionChecks
+        # The stated tax summary, which spans corrections and the advance-payment types alike.
+        include SummaryChecks
+        # `Zamowienie` and `FakturaZaliczkowa`, for `ZAL` and `ROZ`.
+        include AdvanceChecks
 
         # @param invoice [Invoice]
         # @return [Array<Issue>] empty when the model is sound
@@ -68,15 +72,26 @@ module Ksef
             *subject_errors(invoice.buyer, "buyer", role: :buyer),
             *header_errors(invoice),
             *annotation_errors(invoice.annotations),
-            *totals_errors(invoice),
-            *before_state_errors(invoice),
-            *correction_errors(invoice.correction),
-            *correcting_type_errors(invoice),
+            *summary_errors(invoice),
+            *type_specific_errors(invoice),
             *invoice.lines.each_with_index.flat_map { |line, index| line_errors(line, index) }
           ]
         end
 
         private
+
+        # The stated tax summary, from both directions: set where it does not belong, and
+        # absent where the rows cannot stand in for it ({SummaryChecks}).
+        def summary_errors(invoice)
+          [*totals_errors(invoice), *derived_summary_errors(invoice)]
+        end
+
+        # What each family of invoice types adds to the common core: the correction group
+        # ({CorrectionChecks}) and the advance-payment structures ({AdvanceChecks}).
+        def type_specific_errors(invoice)
+          [*advance_errors(invoice), *correction_errors(invoice.correction),
+           *correcting_type_errors(invoice)]
+        end
 
         def header_errors(invoice)
           issues = []
