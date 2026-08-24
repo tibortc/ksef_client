@@ -37,12 +37,15 @@ module Ksef
     # whatever its NIP, and PROD is the only environment that checks the digits anyway
     # (docs/REFERENCE.md §15.3).
     module Parser
-      # FA(3) sets `elementFormDefault="qualified"`, so every element is in the target
-      # namespace and unprefixed XPath would match nothing. One prefix, bound once.
-      PREFIX = "fa"
-      NAMESPACES = { PREFIX => Serializer::NAMESPACE }.freeze
+      # The invoice kinds {Invoice} can represent faithfully. The other six of
+      # `TRodzajFaktury` are DESIGN.md §7.4's remaining work; see {#supported_type!} for why
+      # accepting one would be worse than refusing it.
+      SUPPORTED_TYPES = %w[VAT].freeze
 
       class << self
+        # Namespace-aware element reading; see {NodeReader}.
+        include NodeReader
+
         # @param xml [String, Nokogiri::XML::Document]
         # @return [Invoice] with {Invoice#raw_document} set
         # @raise [Ksef::ValidationError] if the input is not a parseable FA(3) invoice, or
@@ -85,38 +88,56 @@ module Ksef
             seller: subject_from(require_element(root, "Podmiot1", context: Serializer::ROOT), role: :seller),
             buyer: subject_from(require_element(root, "Podmiot2", context: Serializer::ROOT), role: :buyer),
             number: text!(fa_node, "P_2"),
-            issue_date: Date.parse(text!(fa_node, "P_1")),
-            lines: lines_from(fa_node),
+            # Passed as text; {Invoice} converts it, so a malformed date surfaces as a
+            # ValidationError rather than as a bare `Date::Error` from outside this gem.
+            issue_date: text!(fa_node, "P_1"),
+            lines: RowReader.lines_from(fa_node),
             currency: text(fa_node, "KodWaluty") || "PLN",
+            # Read, not defaulted. These are declarations with tax consequences — cash
+            # accounting, reverse charge, split payment, an actual VAT exemption — and
+            # re-emitting the defaults would silently deny every one of them
+            # ({Invoice::DEFAULT_ANNOTATIONS}).
+            annotations: ElementTree.to_hash(element(fa_node, "Adnotacje")),
+            invoice_type: supported_type!(text(fa_node, "RodzajFaktury") || "VAT"),
             # Kept as the string it was written as, so a round trip reproduces it byte for
             # byte — {Formatting.date_time} passes a String through untouched. Parsing it
             # into a Time would re-render it, and `+02:00` would come back as `Z`.
-            issued_at: text(root, "Naglowek/#{PREFIX}:DataWytworzeniaFa"),
-            invoice_type: text(fa_node, "RodzajFaktury") || "VAT",
+            issued_at: text(root, "Naglowek/DataWytworzeniaFa"),
             rounding: :per_line,
             raw_document: document
           )
         end
 
-        # `role` decides one thing only: whether `Nazwa` is required. `TPodmiot1` makes it
-        # mandatory and `TPodmiot2` does not, and upstream's own corpus contains a buyer
-        # identified by NIP with no name at all.
+        # `role` decides which of `Nazwa` and `Adres` are required: `TPodmiot1` makes both
+        # mandatory, `TPodmiot2` makes both optional — the address explicitly *"opcjonalne dla
+        # przypadków określonych w art. 106e ust. 5 pkt 3"*, the simplified invoice
+        # (docs/REFERENCE.md §8.2a). Requiring them of a buyer rejected valid FA(3).
         def subject_from(node, role:)
           identity = require_element(node, "DaneIdentyfikacyjne", context: node.name)
-          address = require_element(node, "Adres", context: node.name)
 
           Subject.new(
             nip: identity_nip(identity),
             name: role == :seller ? text!(identity, "Nazwa") : text(identity, "Nazwa"),
-            address: Address.new(
-              country: text(address, "KodKraju") || "PL",
-              line1: text!(address, "AdresL1"),
-              line2: text(address, "AdresL2")
-            ),
+            address: address_from(node, role: role),
             # Absent means "no" — which is both the schema's meaning for the seller, where
             # neither element exists, and the right default for a buyer that omits them.
             local_government_unit: Formatting.unflag(text(node, "JST")),
             vat_group_member: Formatting.unflag(text(node, "GV"))
+          )
+        end
+
+        def address_from(node, role:)
+          address = element(node, "Adres")
+          if address.nil?
+            raise ValidationError, "Podmiot1 is missing the mandatory <Adres> element" if role == :seller
+
+            return nil
+          end
+
+          Address.new(
+            country: text(address, "KodKraju") || "PL",
+            line1: text!(address, "AdresL1"),
+            line2: text(address, "AdresL2")
           )
         end
 
@@ -134,31 +155,20 @@ module Ksef
                 "This model carries a NIP only (DESIGN.md §7.4); the document itself is fine."
         end
 
-        def lines_from(fa_node)
-          rows = fa_node.xpath("#{PREFIX}:FaWiersz", NAMESPACES)
-          raise ValidationError, "Invoice has no FaWiersz rows" if rows.empty?
+        # {Invoice} models the plain `VAT` invoice only (DESIGN.md §7.4). Accepting another
+        # type produced something far worse than a refusal: a `KOR` parsed and re-serialised
+        # kept its `RodzajFaktury` and `P_2` — and therefore KSeF's whole duplicate key
+        # (docs/REFERENCE.md §15.2) — while dropping `DaneFaKorygowanej` and recomputing the
+        # summaries from rows whose `StanPrzed` marker was ignored. A -9.84 correction came
+        # back as a +34.44 invoice, XSD-valid and plausible. Refuse instead.
+        def supported_type!(type)
+          return type if SUPPORTED_TYPES.include?(type)
 
-          rows.map { |row| line_from(row) }
-        end
-
-        def line_from(row)
-          net_amount = text(row, "P_11")
-          quantity = text(row, "P_8B")
-          unit_price = text(row, "P_9A")
-
-          if net_amount.nil? && (quantity.nil? || unit_price.nil?)
-            raise ValidationError,
-                  "FaWiersz #{text(row, "NrWierszaFa") || "(unnumbered)"} has neither P_11 " \
-                  "nor both of P_8B and P_9A, so its net value cannot be established"
-          end
-
-          # Passed as the strings they were written as; {Line} converts them, so decimal
-          # coercion lives in one place rather than being repeated per caller.
-          Line.new(
-            name: text!(row, "P_7"), unit: text(row, "P_8A"),
-            quantity: quantity, net_unit_price: unit_price,
-            vat_rate: text!(row, "P_12"), net_amount: net_amount
-          )
+          raise ValidationError,
+                "This is a #{type} invoice, and only #{SUPPORTED_TYPES.join(", ")} is modelled " \
+                "so far (DESIGN.md §7.4). The document itself is fine — but parsing it would " \
+                "drop the fields that make it a #{type}, and re-serialising the result would " \
+                "produce a different invoice under the same number."
         end
 
         # Delegated to {RoundingInference}: the strategy is not in the document, so it has
@@ -169,30 +179,6 @@ module Ksef
             invoice, RoundingInference.stated_from(fa_node) { |node, name| text(node, name) }
           )
         end
-
-        def require_element(node, name, context:)
-          found = node.at_xpath("#{PREFIX}:#{name}", NAMESPACES)
-          return found if found
-
-          raise ValidationError, "#{context} is missing the mandatory <#{name}> element"
-        end
-
-        def text(node, path)
-          found = node.at_xpath("#{PREFIX}:#{path}", NAMESPACES)
-          found&.text
-        end
-
-        def text!(node, path)
-          text(node, path) || raise(ValidationError, "#{label(node)} is missing the mandatory <#{path}> element")
-        end
-
-        # `DaneIdentyfikacyjne` appears under both subjects, so the bare element name would
-        # not tell a caller which one is wrong. One level of parent is enough to disambiguate
-        # every element this parser reads.
-        #
-        # Every `text!` call site passes a nested element, so there is always a parent — no
-        # guard here, because an unreachable branch is worse than a direct expression.
-        def label(node) = "#{node.parent.name}/#{node.name}"
       end
     end
   end

@@ -13,7 +13,7 @@ RSpec.describe "the FA(3) round-trip law" do
   def sample(relative) = FA3Corpus.read(relative)
 
   describe "upstream's own samples" do
-    FA3Corpus.samples.each do |relative|
+    FA3Corpus.upstream.each do |relative|
       context relative do
         let(:xml) { sample(relative) }
         let(:parsed) { Ksef::FA3.parse(xml) }
@@ -39,13 +39,35 @@ RSpec.describe "the FA(3) round-trip law" do
           expect(Ksef::FA3.parse(once).to_xml).to eq(once)
         end
 
+        # P_15 is recomputed from the lines on the way out, so this asserts that our
+        # arithmetic agrees with the document's own stated total — read independently, out of
+        # the raw upstream bytes. Asserted unconditionally: a trailing `if stated` would turn
+        # a sample without a P_15 into an example with no expectations at all, which RSpec
+        # reports as a pass.
         it "preserves the totals it read" do
-          # P_15 is recomputed from the lines on the way out, so this asserts that our
-          # arithmetic agrees with the document's own stated total.
           stated = Nokogiri::XML(xml).at_xpath("//*[local-name()='P_15']")&.text
 
-          expect(Ksef::FA3::Formatting.amount(parsed.gross_total)).to eq(stated) if stated
+          expect(stated).not_to be_nil
+          expect(Ksef::FA3::Formatting.amount(parsed.gross_total)).to eq(stated)
         end
+      end
+    end
+  end
+
+  # The loop above generates its examples from a list. If that list came back empty the suite
+  # would still pass, 24 examples lighter, with coverage unchanged — so the list itself needs
+  # an assertion (see FA3Corpus::UPSTREAM).
+  describe "the corpus wiring" do
+    it "finds every pinned upstream sample" do
+      expect(FA3Corpus.upstream).to match_array(FA3Corpus::UPSTREAM)
+      expect(FA3Corpus::UPSTREAM.size).to eq(4)
+    end
+
+    it "reads them as non-empty FA(3) documents with the placeholders substituted" do
+      FA3Corpus.upstream.each do |relative|
+        xml = FA3Corpus.read(relative)
+        expect(xml).to include("<Faktura"), relative
+        expect(xml).not_to include("#nip#"), relative
       end
     end
   end
@@ -53,7 +75,7 @@ RSpec.describe "the FA(3) round-trip law" do
   describe "documents this gem wrote" do
     # Our own goldens are fully within the model, so for these the law is the strong one:
     # byte-for-byte, and nothing reported as lost.
-    %w[golden/vat_single_line.xml].each do |relative|
+    FA3Corpus.ours.each do |relative|
       it "#{relative} round-trips byte for byte, losing nothing" do
         xml = sample(relative)
         parsed = Ksef::FA3.parse(xml)

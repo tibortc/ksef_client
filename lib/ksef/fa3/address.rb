@@ -24,6 +24,8 @@ module Ksef
     # document that has one reports it through {Invoice#unmapped_elements} rather than
     # losing it quietly.
     Address = Data.define(:line1, :line2, :country) do
+      include Canonical
+
       # @param line1 [String, nil] a formatted address line, for callers who have one
       # @param line2 [String, nil] `AdresL2`, omitted from the document when nil
       # @param country [String] `KodKraju`, ISO 3166-1 alpha-2

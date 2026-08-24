@@ -10,7 +10,9 @@ gem version for which API state".
 
 ## [Unreleased]
 
-**Targets:** KSeF API 2.0 · FA(3) `1-0E` · upstream `CIRFMF/ksef-api@1c34fe27`
+**Targets:** KSeF API 2.0 · FA(3) `1-0E` · upstream `CIRFMF/ksef-api@1c34fe27`,
+`CIRFMF/ksef-client-csharp@406904d6`, `CIRFMF/ksef-pdf-generator@2b7c1dae` (sample corpus,
+`docs/REFERENCE.md` §1.4)
 
 > **What "works" means in this section.** Only the certificate/XAdES authentication flow has
 > ever run against the live KSeF TEST service, and only four of its endpoints. Everything
@@ -19,6 +21,30 @@ gem version for which API state".
 > `spec/integration/session_flow_spec.rb` is what will settle that, and it has not run yet.
 
 ### Added
+
+- **`Ksef::FA3.parse` — reading an FA(3) document back into the model** (DESIGN.md §7.6).
+  The round-trip law runs green over a pinned corpus of the Ministry's own sample invoices,
+  which turned out not to live in `ksef-api` at all: they come from `CIRFMF/ksef-pdf-generator`
+  and `CIRFMF/ksef-client-csharp`, each pinned at its own commit (`docs/REFERENCE.md` §1.4).
+
+  Three things are worth knowing before using it. **Parsing is not validating** — a document
+  KSeF rejected still parses, because inspecting one is usually *why* you are parsing.
+  **`#raw_document` is always retained**, and `#unmapped_elements` names what re-serialising
+  would drop, computed by difference against the serializer so it cannot drift from what is
+  actually written; FA(3) is much larger than this model, so re-serialising a document you did
+  not write is lossy. And it **refuses what it cannot represent faithfully** rather than
+  guessing: a `KOR` or any other non-`VAT` type, and a row with no `P_12` rate code. Those
+  messages say the document is fine and the model is the limit.
+
+- **`Ksef::FA3::Invoice#annotations`** — the `Adnotacje` block is carried, not defaulted, so
+  re-serialising cannot deny a declaration the document made (cash accounting, reverse charge,
+  split payment, a real VAT exemption).
+
+- **Pinned `faktury/weryfikacja-faktury.md`** (`docs/REFERENCE.md` §15), the invoice-admission
+  rules KSeF applies on submission. It settles two open questions: validator tier 3's
+  business-rule catalogue is **absent from upstream**, not merely unpinned (§15.6), while
+  tier 1 — which had no first-tier source at all — is now specified exactly. NIP checksums are
+  validated **in production only** (§15.3), so no TEST run can ever exercise that rule.
 
 - **`Ksef::Client` — the facade, and DESIGN.md §8's snippet now runs.** A spec drives that
   snippet as written, from `Ksef::FA3.build` through `send_invoice`, `wait_until_accepted`
@@ -379,6 +405,49 @@ gem version for which API state".
   validation rather than transport alone.
 
 ### Fixed
+
+- **Summary buckets are accumulated, not overwritten.** Several VAT rate codes report into one
+  bucket — `"23"` and `"22"` both into `P_13_1`/`P_14_1`, `"np I"` and `"np II"` into `P_13_8`
+  (`docs/REFERENCE.md` §8.1a) — and assigning per rate code let the last one win. An invoice
+  with a 23% line of 100 and a 22% line of 200 emitted `P_13_1=200.00` and `P_14_1=44.00`
+  while `P_15` carried the correct `367.00`: the tax base understated by a third,
+  `P_13_1 + P_14_1 ≠ P_15`, and **XSD-valid**, because a schema cannot see an arithmetic
+  inconsistency. This affected documents the builder produced, not only parsed ones.
+
+- **`Ksef::FA3::Validator` no longer passes XML that is not well-formed.** libxml2 parses in
+  recovery mode, so an unclosed root or trailing text after it yielded a usable tree that
+  validated clean; `document.errors` was never consulted. Well-formedness is KSeF's first
+  admission rule (§15.1).
+
+- **`Data#with` now re-runs the constructor** (`Ksef::FA3::Canonical`). On Ruby 3.2 — this
+  gem's declared floor — `Data#with` does *not* call a custom `initialize`, though it does on
+  4.0, so every "canonicalise on the way in" invariant was bypassable through a public method
+  there: `line.with(quantity: 0.1)` stored a `Float` in a monetary field, straight through the
+  no-`Float` rule. RuboCop cannot see this; only running on 3.2 finds it.
+
+- **Amounts and quantities are rounded to the scale their element permits**, at construction.
+  `TKwotowy` is `fractionDigits="2"` and `TIlosci` is `"6"`, so a unit price of `150.125` is
+  not a value FA(3) can express — and a quantity finer than six places made the document
+  schema-invalid outright. Rounding on the way in means the model reports the figure the
+  document will carry, and a line's net agrees with the price shown on the invoice.
+
+- **`Formatting.decimal` no longer truncates a large `Rational`.** `BigDecimal`'s second
+  argument is *significant digits*, not decimal places; the old `AMOUNT_SCALE + 10` turned
+  `12345678901234.56` into `12345678901200.0` — the silent-rounding failure the `Float` ban
+  exists to prevent, in the one type admitted as safe.
+
+- **Malformed dates and numbers raise `Ksef::ValidationError`** instead of `Date::Error` and
+  `ArgumentError`, so rescuing this gem's own hierarchy — which its docs tell you to do —
+  actually catches the empty and malformed field text a rejected document contains.
+
+- **`P_7` and `Podmiot2/Adres` are optional**, as the XSD says (`minOccurs="0"`; the address is
+  *"opcjonalne dla przypadków określonych w art. 106e ust. 5 pkt 3"*, the simplified invoice).
+  Requiring them refused valid FA(3) while reporting it as malformed. Absent optional row
+  fields are now omitted rather than written as empty elements, which failed `TZnakowy512`.
+
+- **`nokogiri` is required centrally.** Every file that uses it required it, but Zeitwerk defers
+  loading those files, so the constant did not exist after `require "ksef_client"` until
+  something touched the serializer — making one spec pass or fail on the RSpec seed.
 
 - **`bundle exec rake` was never enforcing the coverage floors.** `rake spec` invokes
   `rspec --pattern spec/**{,/*/**}/*_spec.rb`, and that pattern *value* starts with `spec/` —

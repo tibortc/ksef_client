@@ -382,6 +382,21 @@ Nokogiri-based; consumes generated ordering; formatting rules centralized: BigDe
 
 Transport's `send_invoice` runs `validate!` by default (`validate: false` opt-out).
 
+**Amended 2026-08-24 — tier 1 is two things, not one.** `docs/REFERENCE.md` §15.1 pins the
+admission rules KSeF actually applies, and four of the six are **byte-level properties of the
+serialized document**: no BOM, no processing instructions, a prolog that does not contradict
+UTF-8, and no discouraged Unicode characters. A model tier as described above — "required
+fields per invoice type, enum membership, NIP checksums, date sanity" — structurally cannot
+see any of them, because at that point there is no document yet. So tier 1 splits:
+
+1. **Model checks**, as originally described, on the object graph.
+2. **Document checks**, on the bytes `#to_xml` produces, run before they are hashed and
+   encrypted.
+
+Both belong under `validate!`, and (2) has to run last. Note tier 2 now also covers
+well-formedness, which the XSD does not: libxml2 recovers from broken XML by default, and
+`Validator` had to be taught to consult `document.errors` (§15.1).
+
 ---
 
 ## 8. Public API contract (must run verbatim by 0.1.0)
@@ -481,10 +496,14 @@ Remaining for Phase 2: validator tiers 1 and 3, then the six other invoice types
   document §9 named as the place to look — is a list of *technical admission* checks, and
   turned out to be the missing first-tier source for tier **1** instead. No file in
   `ksef-api` states a reconciliation rule (`docs/REFERENCE.md` §15.6). So tier 1 is now the
-  better-specified of the two, and should be built first, reversing §7.7's implied order.
+  better-specified of the two and should be built first — which reverses **§9's** framing of
+  tier 3 as "the only genuinely open blocker", i.e. the thing to resolve first. (An earlier
+  version of this note said it reversed §7.7's order; §7.7 states the order the tiers *run*
+  in, which is unchanged. See §7.7's amendment for what did change there.)
 - **Tier 1 is provably not redundant with tier 2.** Upstream ships an invoice that is
-  XSD-valid *and* rejected by KSeF, on forbidden C1 characters that a schema cannot see
-  (§15.1). It is pinned, and `spec/ksef/fa3/round_trip_spec.rb` asserts both halves.
+  XSD-valid — once its `#nip#` placeholder is substituted (§1.4) — and that the pinned rules
+  say KSeF rejects, on forbidden C1 characters a schema cannot see (§15.1). It is pinned, and
+  `spec/ksef/fa3/round_trip_spec.rb` asserts both halves.
 
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.

@@ -72,7 +72,12 @@ SimpleCov.start do
   # branches they permit grows with the codebase. Phase 2 roughly doubles it, at which
   # point branch 95 quietly allows twice today's slack. Re-ratchet at each phase boundary,
   # not once (CLAUDE.md records this in the Phase 2 definition of done).
-  minimum_coverage line: 99, branch: 95, method: 100
+  #
+  # Ratcheted 2026-08-24 (branch 95 -> 96) after the parser landed and its audit closed the
+  # gaps it opened. Actual at that point: line 100%, branch 97.84% (453/463), method 100% —
+  # so 96 leaves about eight branches of slack, roughly what 95 left when it was set. The ten
+  # uncovered branches are all pre-existing `&.` guards outside the FA(3) model.
+  minimum_coverage line: 99, branch: 96, method: 100
 end
 
 require "ksef_client"

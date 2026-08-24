@@ -52,6 +52,22 @@ RSpec.describe Ksef::FA3::Formatting do
       expect { described_class.decimal(:nope) }
         .to raise_error(Ksef::ValidationError, /Cannot convert Symbol/)
     end
+
+    # BigDecimal's second argument is significant digits, not decimal places. AMOUNT_SCALE + 10
+    # read as "12 decimal places" and meant "12 significant digits", truncating large amounts.
+    it "keeps a large Rational exact" do
+      expect(described_class.decimal(Rational(1_234_567_890_123_456, 100)).to_s("F"))
+        .to eq("12345678901234.56")
+    end
+
+    # Empty and malformed numeric text is what a rejected document contains, so it must arrive
+    # as this gem's own error rather than a bare ArgumentError from BigDecimal.
+    it "wraps unreadable numeric text in a ValidationError" do
+      ["", "abc", "12,50"].each do |text|
+        expect { described_class.decimal(text) }
+          .to raise_error(Ksef::ValidationError, /Cannot read #{Regexp.escape(text.inspect)} as a decimal/)
+      end
+    end
   end
 
   describe ".quantity" do
@@ -119,6 +135,22 @@ RSpec.describe Ksef::FA3::Formatting do
 
     it "parses a string date" do
       expect(described_class.date("2026-08-22")).to eq("2026-08-22")
+    end
+
+    # Date::Error is not part of this gem's hierarchy, so a caller rescuing Ksef::Error — which
+    # is what the parser's docs tell them to do — would not catch a malformed P_1.
+    it "wraps an unreadable date in a ValidationError" do
+      ["not-a-date", "", "2026-13-45"].each do |text|
+        expect { described_class.to_date(text) }
+          .to raise_error(Ksef::ValidationError, /Cannot read .* as a date/)
+      end
+    end
+
+    it "returns a Date untouched and coerces a Time" do
+      date = Date.new(2026, 8, 22)
+
+      expect(described_class.to_date(date)).to be(date)
+      expect(described_class.to_date(Time.utc(2026, 8, 22, 5))).to eq(date)
     end
 
     it "formats a Time as UTC xsd:dateTime" do

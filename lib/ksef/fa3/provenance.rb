@@ -53,10 +53,24 @@ module Ksef
       #
       # @return [Array<String>] slash-separated local-name paths, sorted; empty when this
       #   invoice was built rather than parsed
+      # **It cannot see a changed value, only a missing element.** Two documents whose
+      # `Adnotacje/P_16` differ have identical path sets, so a diagnostic built on paths says
+      # nothing about them; the fix for that class of loss is for the model to carry the field
+      # (as {Invoice#annotations} now does), not for this method to grow. Equally invisible:
+      # attributes, occurrence counts, element order, and comments. What it does catch — a
+      # whole element or subtree the model has no field for — is the common case and the one a
+      # caller can act on.
       def unmapped_elements
         return [] if raw_document.nil?
 
         (element_paths(raw_document) - element_paths(Nokogiri::XML(to_xml))).sort
+      rescue Ksef::Error => e
+        # It has to serialise to find out what serialising would lose, so an invoice that
+        # cannot be written at all has no answer to give. Say that, rather than surfacing a
+        # bare "invalid check digit" from a method the README tells people to call for safety.
+        raise ValidationError,
+              "This invoice cannot be re-serialised, so there is nothing to say about what " \
+              "re-serialising it would drop: #{e.message}"
       end
 
       # @return [Boolean] whether `#to_xml` reproduces every element the source document had

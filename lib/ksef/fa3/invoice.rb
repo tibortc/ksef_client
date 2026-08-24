@@ -8,7 +8,7 @@ module Ksef
     # this core and add their own required and forbidden fields.
     Invoice = Data.define(
       :seller, :buyer, :number, :issue_date, :lines,
-      :currency, :issued_at, :rounding, :invoice_type, :raw_document
+      :currency, :issued_at, :rounding, :invoice_type, :annotations, :raw_document
     )
 
     # Computation, defaults and serialisation for {Ksef::FA3::Invoice}.
@@ -17,11 +17,20 @@ module Ksef
       # one-grosz mismatches against a user's ERP (DESIGN.md §7.3).
       ROUNDING_STRATEGIES = %i[per_line per_summary].freeze
 
-      # All five flags plus the three wrapper elements are mandatory (§8.2), and every one of
-      # them is the same on an ordinary domestic invoice. Defaulting them to "not applicable"
-      # is what makes such an invoice possible without the caller knowing any of this — and
-      # they are fixed, so this is a constant rather than a method that rebuilds it per call.
-      ANNOTATIONS = {
+      # The **default** annotations: all five flags plus the three wrapper elements are
+      # mandatory (§8.2), and every one of them is the same on an ordinary domestic invoice.
+      # Defaulting them to "not applicable" is what makes such an invoice possible without
+      # the caller knowing any of this.
+      #
+      # They are a *default*, not a constant of the format. Until 2026-08-24 they were emitted
+      # unconditionally, which meant parsing an invoice that declared cash accounting
+      # (`P_16`), reverse charge (`P_18`), split payment (`P_18A`) or an actual VAT exemption
+      # (`Zwolnienie/P_19`) and re-serialising it **silently reset every one of them to "does
+      # not apply"** — and, for the exemption, wrote a positive `P_19N` asserting that none
+      # applied. Because the element paths are identical either way,
+      # {Provenance#unmapped_elements} could not see it. These are declarations with tax
+      # consequences; {Parser} now reads them and {#annotations} carries them.
+      DEFAULT_ANNOTATIONS = {
         "P_16" => Formatting.flag(false),
         "P_17" => Formatting.flag(false),
         "P_18" => Formatting.flag(false),
@@ -39,6 +48,10 @@ module Ksef
       # Equality, `#inspect` and {Provenance#unmapped_elements} — everything to do with the
       # document this invoice may have been read from.
       include Provenance
+      # `#with` must re-run the constructor; on Ruby 3.2 it otherwise skips every invariant.
+      include Canonical
+      # `#to_fa3` and the element-name mapping behind it.
+      include DocumentMapping
 
       # `issued_at` is normalised to the string the document will carry, which is the same
       # rule {Address} and {Line} follow: **the model stores the document's representation,
@@ -52,7 +65,7 @@ module Ksef
       # to an equal object, which is a property of that choice rather than a defect.
       def initialize(seller:, buyer:, number:, issue_date:, lines:,
                      currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT",
-                     raw_document: nil)
+                     annotations: nil, raw_document: nil)
         unless ROUNDING_STRATEGIES.include?(rounding)
           raise ValidationError,
                 "Unknown rounding strategy #{rounding.inspect}; expected one of #{ROUNDING_STRATEGIES.inspect}"
@@ -60,10 +73,16 @@ module Ksef
         raise ValidationError, "An invoice needs at least one line" if lines.nil? || lines.empty?
 
         super(
-          seller: seller, buyer: buyer, number: number, issue_date: issue_date, lines: lines,
+          seller: seller, buyer: buyer, number: number, lines: lines,
           currency: currency, rounding: rounding, invoice_type: invoice_type,
           raw_document: raw_document,
-          issued_at: issued_at.nil? ? nil : Formatting.date_time(issued_at)
+          # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
+          # Date it denotes must not produce two unequal invoices (§8.2b).
+          issue_date: issue_date.is_a?(Date) ? issue_date : Formatting.to_date(issue_date),
+          issued_at: issued_at.nil? ? nil : Formatting.date_time(issued_at),
+          # Defaulted here rather than at serialisation, so a built invoice and the same
+          # invoice parsed back hold the same value and compare equal.
+          annotations: annotations || DEFAULT_ANNOTATIONS
         )
       end
 
@@ -92,15 +111,6 @@ module Ksef
       def validate! = Validator.validate!(to_xml)
       def valid? = Validator.valid?(to_xml)
 
-      def to_fa3
-        {
-          "Naglowek" => header,
-          "Podmiot1" => seller.to_fa3(role: :seller),
-          "Podmiot2" => buyer.to_fa3(role: :buyer),
-          "Fa" => invoice_body
-        }
-      end
-
       private
 
       # Round each line, then sum. Matches an ERP that prices line by line.
@@ -118,50 +128,6 @@ module Ksef
           percentage = VatRate.percentage(code)
           rounded = percentage ? (net * percentage / 100).round(Formatting::AMOUNT_SCALE) : BigDecimal(0)
           [code, rounded]
-        end
-      end
-
-      def header
-        # Every value here is fixed by the schema except the generation timestamp, and the
-        # fixed ones are read from the generated metadata rather than restated.
-        attributes = Generated::Types["TNaglowek"][:attributes]
-                     .select { |a| a[:fixed] }
-                     .to_h { |a| [a[:name], a[:fixed]] }
-
-        {
-          "KodFormularza" => Serializer::Element.new(text: "FA", attributes: attributes),
-          "WariantFormularza" => 3,
-          "DataWytworzeniaFa" => issued_at || Formatting.date_time(Time.now)
-        }
-      end
-
-      def invoice_body
-        {
-          "KodWaluty" => currency,
-          "P_1" => Formatting.date(issue_date),
-          "P_2" => number,
-          **rate_summaries,
-          "P_15" => Formatting.amount(gross_total),
-          "Adnotacje" => ANNOTATIONS,
-          "RodzajFaktury" => invoice_type,
-          "FaWiersz" => rows
-        }
-      end
-
-      def rows
-        lines.each_with_index.map { |line, index| line.to_fa3(row_number: index + 1) }
-      end
-
-      # Emitted in schema order by the serializer, so this only has to say which buckets
-      # carry a value.
-      def rate_summaries
-        vat = vat_by_rate
-
-        net_by_rate.each_with_object({}) do |(code, net), acc|
-          net_element, tax_element = VatRate.bucket(code)
-          acc[net_element] = Formatting.amount(net)
-          # Zero-rated and exempt buckets have no tax element at all (§8.1a).
-          acc[tax_element] = Formatting.amount(vat[code]) if tax_element
         end
       end
     end

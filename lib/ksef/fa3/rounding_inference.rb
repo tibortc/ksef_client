@@ -51,11 +51,18 @@ module Ksef
 
         # Several rate codes share one bucket — 23 and 22 both land in `P_14_1` — so the
         # comparison has to be made per bucket, not per rate.
+        #
+        # An unrecognised rate code is skipped rather than raised on. `VatRate.bucket` raises,
+        # which meant a document carrying a rate the schema does not define was refused by
+        # `parse` — but only when it also stated a `P_14_*`, since otherwise this method was
+        # never reached. Inferring a rounding strategy is not the place to validate rate codes:
+        # the inconsistency is worse than the leniency, and `#to_xml` still refuses the code
+        # honestly when asked to write a bucket for it.
         def computed(invoice)
           invoice.vat_by_rate.each_with_object({}) do |(code, amount), acc|
-            element = VatRate.bucket(code).last
             # Zero-rated and exempt buckets have no tax element at all (§8.1a); there is
             # nothing in the document to compare against.
+            element = VatRate::BUCKETS[code.to_s]&.last
             next if element.nil?
 
             acc[element] = (acc[element] || BigDecimal(0)) + amount

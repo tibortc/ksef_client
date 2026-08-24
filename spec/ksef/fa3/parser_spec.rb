@@ -396,4 +396,150 @@ RSpec.describe Ksef::FA3::Parser do
         .to raise_error(Ksef::ValidationError, /Not an FA\(3\) invoice.*got <Faktura> in nil/)
     end
   end
+
+  # Every one of these is XSD-optional, and requiring them refused documents that are valid
+  # FA(3) while calling them malformed (docs/REFERENCE.md §8.2a).
+  describe "elements the schema makes optional" do
+    it "accepts a row with no P_7 name and omits it again" do
+      xml = document(subjects, fa(one_row("P_7" => nil)))
+      parsed = described_class.parse(xml)
+
+      expect(parsed.lines.first.name).to be_nil
+      expect(parsed.to_xml).not_to include("<P_7")
+      expect(Ksef::FA3::Validator.errors_for(parsed.to_xml)).to be_empty
+    end
+
+    # `Podmiot2/Adres` is minOccurs="0" — "opcjonalne dla przypadków określonych w art. 106e
+    # ust. 5 pkt 3", the simplified invoice.
+    it "accepts a buyer with no address and omits it again" do
+      xml = document(<<~SUBJECTS, fa(one_row))
+        <Podmiot1>
+          <DaneIdentyfikacyjne><NIP>9999999999</NIP><Nazwa>ACME</Nazwa></DaneIdentyfikacyjne>
+          <Adres><KodKraju>PL</KodKraju><AdresL1>Prosta 1</AdresL1></Adres>
+        </Podmiot1>
+        <Podmiot2>
+          <DaneIdentyfikacyjne><NIP>1111111111</NIP><Nazwa>Klient</Nazwa></DaneIdentyfikacyjne>
+        </Podmiot2>
+      SUBJECTS
+      parsed = described_class.parse(xml)
+
+      expect(parsed.buyer.address).to be_nil
+      expect(Ksef::FA3::Validator.errors_for(parsed.to_xml)).to be_empty
+    end
+
+    it "still requires the seller's address, which its own type makes mandatory" do
+      xml = document(<<~SUBJECTS, fa(one_row))
+        <Podmiot1>
+          <DaneIdentyfikacyjne><NIP>9999999999</NIP><Nazwa>ACME</Nazwa></DaneIdentyfikacyjne>
+        </Podmiot1>
+        <Podmiot2>
+          <DaneIdentyfikacyjne><NIP>1111111111</NIP><Nazwa>Klient</Nazwa></DaneIdentyfikacyjne>
+          <Adres><KodKraju>PL</KodKraju><AdresL1>Długa 2</AdresL1></Adres>
+        </Podmiot2>
+      SUBJECTS
+
+      expect { described_class.parse(xml) }
+        .to raise_error(Ksef::ValidationError, /Podmiot1 is missing the mandatory <Adres>/)
+    end
+
+    # P_12 is optional too, but unlike a name the model cannot do without it: every summary
+    # bucket is chosen by rate code. So the refusal has to say that, not imply bad input.
+    it "refuses a row with no P_12, as a model limit rather than a malformed document" do
+      xml = document(subjects, fa(one_row("P_12" => nil)))
+
+      expect { described_class.parse(xml) }
+        .to raise_error(Ksef::ValidationError, /states no P_12 rate code.*document may be valid/m)
+    end
+  end
+
+  describe "the annotations" do
+    def with_annotations(body)
+      document(subjects, fa("#{one_row}<Adnotacje>#{body}</Adnotacje><RodzajFaktury>VAT</RodzajFaktury>"))
+    end
+
+    def default_annotations(**overrides)
+      { "P_16" => "2", "P_17" => "2", "P_18" => "2", "P_18A" => "2",
+        "Zwolnienie" => "<P_19N>1</P_19N>", "NoweSrodkiTransportu" => "<P_22N>1</P_22N>",
+        "P_23" => "2", "PMarzy" => "<P_PMarzyN>1</P_PMarzyN>" }.merge(overrides)
+    end
+
+    # Values are either a flag ("2") or a nested fragment ("<P_19N>1</P_19N>"); both wrap the
+    # same way, so there is nothing to branch on.
+    def annotations_xml(**overrides)
+      default_annotations(**overrides).map { |name, value| "<#{name}>#{value}</#{name}>" }.join
+    end
+
+    # These are declarations with tax consequences. Emitting the defaults regardless meant a
+    # parsed invoice claiming cash accounting came back denying it — invisibly, since the
+    # element paths are identical either way.
+    it "carries a declared flag through a round trip" do
+      parsed = described_class.parse(with_annotations(annotations_xml("P_16" => "1")))
+      out = Nokogiri::XML(parsed.to_xml).remove_namespaces!
+
+      expect(parsed.annotations["P_16"]).to eq("1")
+      expect(out.at_xpath("//Adnotacje/P_16").text).to eq("1")
+    end
+
+    it "carries a real VAT exemption instead of asserting there is none" do
+      exemption = "<P_19>1</P_19><P_19A>art. 43 ust. 1 pkt 26 ustawy</P_19A>"
+      parsed = described_class.parse(with_annotations(annotations_xml("Zwolnienie" => exemption)))
+      out = Nokogiri::XML(parsed.to_xml).remove_namespaces!
+
+      expect(out.at_xpath("//Zwolnienie/P_19").text).to eq("1")
+      expect(out.at_xpath("//Zwolnienie/P_19A").text).to eq("art. 43 ust. 1 pkt 26 ustawy")
+      expect(out.at_xpath("//Zwolnienie/P_19N")).to be_nil
+      expect(Ksef::FA3::Validator.errors_for(parsed.to_xml)).to be_empty
+    end
+
+    it "falls back to the defaults when the element is absent" do
+      parsed = described_class.parse(document(subjects, fa(one_row)))
+
+      expect(parsed.annotations).to eq(Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS)
+    end
+  end
+
+  # Accepting a non-VAT type produced something worse than a refusal: a valid-looking invoice
+  # under the original's number with recomputed, sign-flipped totals.
+  describe "invoice types this model does not carry" do
+    %w[KOR ZAL ROZ UPR KOR_ZAL KOR_ROZ].each do |type|
+      it "refuses a #{type} document, explaining that the document is fine" do
+        xml = document(subjects, fa("#{one_row}<RodzajFaktury>#{type}</RodzajFaktury>"))
+
+        expect { described_class.parse(xml) }
+          .to raise_error(Ksef::ValidationError, /This is a #{type} invoice.*document itself is fine/m)
+      end
+    end
+
+    it "still accepts an explicit VAT type" do
+      xml = document(subjects, fa("#{one_row}<RodzajFaktury>VAT</RodzajFaktury>"))
+
+      expect(described_class.parse(xml).invoice_type).to eq("VAT")
+    end
+  end
+
+  describe "malformed field text" do
+    it "reports an unreadable P_1 as a ValidationError, not a Date::Error" do
+      xml = document(subjects, "<Fa><P_1>not-a-date</P_1><P_2>FV/1</P_2>#{one_row}</Fa>")
+
+      expect { described_class.parse(xml) }
+        .to raise_error(Ksef::ValidationError, /Cannot read "not-a-date" as a date/)
+    end
+
+    it "reports unreadable numeric text as a ValidationError, not an ArgumentError" do
+      xml = document(subjects, fa(one_row("P_11" => "", "P_9A" => nil, "P_8B" => nil)))
+
+      expect { described_class.parse(xml) }
+        .to raise_error(Ksef::ValidationError, /Cannot read "" as a decimal/)
+    end
+
+    # Reached only through the rounding inference, which used to raise here — and so refused a
+    # document only when it also stated a P_14, which is an odd place to validate rate codes.
+    it "parses a row whose rate code the schema does not define" do
+      xml = document(subjects, fa(one_row("P_12" => "24"), "<P_13_1>100.00</P_13_1><P_14_1>23.00</P_14_1>"))
+      parsed = described_class.parse(xml)
+
+      expect(parsed.lines.first.vat_rate).to eq("24")
+      expect { parsed.to_xml }.to raise_error(Ksef::ValidationError, /Unknown VAT rate code "24"/)
+    end
+  end
 end

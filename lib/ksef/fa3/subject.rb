@@ -10,19 +10,33 @@ module Ksef
     # a VAT-group member. Both default to "no", because that is the answer for an ordinary
     # domestic sale and because omitting them makes the document schema-invalid — a caller
     # should not have to discover that from a rejection.
-    # `name` is optional, and only for a buyer. `TPodmiot1` is a plain sequence of `NIP` and
-    # `Nazwa`, both mandatory; `TPodmiot2` puts `Nazwa` inside an `<xsd:sequence
-    # minOccurs="0">` following a four-way identification choice (docs/REFERENCE.md §8.2a).
-    # Upstream's own test corpus has a buyer identified by NIP alone, so this is not a
-    # theoretical branch — it is a document that must parse.
+    # **Two fields are optional for a buyer and mandatory for a seller**, both read from the
+    # schema rather than assumed (docs/REFERENCE.md §8.2a):
+    #
+    # - `name` — `TPodmiot1` is a plain sequence of `NIP` and `Nazwa`; `TPodmiot2` puts `Nazwa`
+    #   inside an `<xsd:sequence minOccurs="0">` after a four-way identification choice.
+    # - `address` — `Podmiot1/Adres` is mandatory, while `Podmiot2/Adres` is `minOccurs="0"`,
+    #   *"opcjonalne dla przypadków określonych w art. 106e ust. 5 pkt 3"* — the simplified
+    #   invoice.
+    #
+    # Neither is theoretical: upstream's own corpus has a buyer identified by NIP alone, and
+    # refusing an address-less buyer would reject valid FA(3) as if it were malformed.
     Subject = Data.define(:nip, :name, :address, :local_government_unit, :vat_group_member) do
-      def initialize(nip:, address:, name: nil, local_government_unit: false, vat_group_member: false)
+      include Canonical
+
+      def initialize(nip:, address: nil, name: nil, local_government_unit: false, vat_group_member: false)
         super
       end
 
       # @param role [Symbol] :seller or :buyer
+      # @raise [Ksef::ValidationError] if a seller is missing a name or an address
       def to_fa3(role:)
-        content = { "DaneIdentyfikacyjne" => identity_for(role), "Adres" => address.to_fa3 }
+        content = { "DaneIdentyfikacyjne" => identity_for(role) }
+        if address.nil?
+          raise ValidationError, "A seller (Podmiot1) must have an address" if role == :seller
+        else
+          content["Adres"] = address.to_fa3
+        end
         return content unless role == :buyer
 
         content.merge(

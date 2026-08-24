@@ -63,4 +63,28 @@ RSpec.describe Ksef::FA3::Subject do
         .to eq("9999999999")
     end
   end
+
+  # `Podmiot1/Adres` is mandatory; `Podmiot2/Adres` is minOccurs="0" — "opcjonalne dla
+  # przypadków określonych w art. 106e ust. 5 pkt 3", the simplified invoice (§8.2a).
+  describe "the address, which only the buyer may omit" do
+    it "omits Adres entirely for an address-less buyer" do
+      content = described_class.new(nip: "1111111111", name: "Klient").to_fa3(role: :buyer)
+
+      expect(content).not_to have_key("Adres")
+      expect(content.keys).to eq(%w[DaneIdentyfikacyjne JST GV])
+    end
+
+    it "refuses an address-less seller" do
+      expect { described_class.new(nip: "9999999999", name: "ACME").to_fa3(role: :seller) }
+        .to raise_error(Ksef::ValidationError, /seller \(Podmiot1\) must have an address/)
+    end
+  end
+
+  describe "#with" do
+    it "re-runs the constructor, so the NIP is still normalised on serialisation" do
+      changed = subject_with.with(nip: "PL111-111-11-11")
+
+      expect(changed.to_fa3(role: :buyer)["DaneIdentyfikacyjne"]["NIP"]).to eq("1111111111")
+    end
+  end
 end

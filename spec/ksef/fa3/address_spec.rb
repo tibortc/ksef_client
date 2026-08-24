@@ -62,4 +62,13 @@ RSpec.describe Ksef::FA3::Address do
       expect(address.line1).to eq("Given")
     end
   end
+
+  describe "#with" do
+    # Data#with skips a custom initialize on Ruby 3.2 (see FA3::Canonical), which would have
+    # let a copy exist with no AdresL1 at all.
+    it "re-runs the constructor, so the mandatory line is still enforced" do
+      expect { described_class.new(line1: "Prosta 1").with(line1: nil) }
+        .to raise_error(Ksef::ValidationError, /needs either line1/)
+    end
+  end
 end
