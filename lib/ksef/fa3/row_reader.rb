@@ -20,16 +20,19 @@ module Ksef
         # @param required [Boolean] whether an invoice with no rows is an error. False for a
         #   correction that states its own totals: `FaWiersz` is `minOccurs="0"` and the
         #   Ministry's own collective corrections carry none (docs/REFERENCE.md §8.4).
+        # The row number is read as stated; {Invoice.positioned} is what reduces it to nil
+        # when it merely repeats the position. One place decides, and it is the one that knows
+        # what a line's position is.
         def lines_from(fa_node, required: true)
           rows = elements(fa_node, "FaWiersz")
           raise ValidationError, "Invoice has no FaWiersz rows" if rows.empty? && required
 
-          rows.each_with_index.map { |row, index| line_from(row, index) }
+          rows.map { |row| line_from(row) }
         end
 
         private
 
-        def line_from(row, index)
+        def line_from(row)
           net_amount = text(row, "P_11")
           quantity = text(row, "P_8B")
           unit_price = text(row, "P_9A")
@@ -48,20 +51,8 @@ module Ksef
             name: text(row, "P_7"), unit: text(row, "P_8A"),
             quantity: quantity, net_unit_price: unit_price,
             vat_rate: rate_for(row), net_amount: net_amount,
-            row_number: row_number_for(row, index), state_before: text(row, "StanPrzed")
+            row_number: text(row, "NrWierszaFa"), state_before: text(row, "StanPrzed")
           )
-        end
-
-        # Stored only when the row's own number is **not** its position, which is where the
-        # number carries information rather than repeating the index: a correction showing a
-        # position before and after gives both rows the same `NrWierszaFa`, and that is what
-        # pairs them. See {Line#initialize} for why storing it unconditionally would break
-        # DESIGN.md §7.6's round-trip law.
-        def row_number_for(row, index)
-          stated = text(row, "NrWierszaFa")
-          return nil if stated.nil? || Formatting.integer(stated) == index + 1
-
-          stated
         end
 
         # A row with no net value is usually a **gross-priced** row: under art. 106e ust. 7-8 an

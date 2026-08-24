@@ -74,8 +74,27 @@ RSpec.describe "FA(3) corrections" do
 
   describe Ksef::FA3::Correction do
     it "refuses a correction that names no corrected invoice" do
-      expect { described_class.new(corrected: []) }
-        .to raise_error(Ksef::ValidationError, /must name at least one corrected invoice/)
+      [[], nil].each do |nothing|
+        expect { described_class.new(corrected: nothing) }
+          .to raise_error(Ksef::ValidationError, /must name at least one corrected invoice/)
+      end
+    end
+
+    # `Array(hash)` splats a Hash into pairs, so this was accepted and then raised
+    # `NoMethodError` from inside `#to_xml`.
+    it "refuses a Hash rather than splatting it into pairs" do
+      built = described_class.new(corrected: { number: "FV/1", issue_date: "2026-01-01" })
+
+      expect(built.corrected).to eq([{ number: "FV/1", issue_date: "2026-01-01" }])
+      expect(invoice(correction: built).errors.map(&:to_s))
+        .to eq(["correction.corrected[0]: is not a Ksef::FA3::CorrectedInvoice"])
+    end
+
+    it "does not freeze the array it was given" do
+      entries = [corrected]
+      described_class.new(corrected: entries)
+
+      expect { entries << corrected }.not_to raise_error
     end
 
     it "accepts a single corrected invoice without wrapping it in an Array" do
@@ -131,6 +150,22 @@ RSpec.describe "FA(3) corrections" do
       totals = described_class.new(gross: 0)
 
       expect([totals.net, totals.vat]).to eq([BigDecimal(0), BigDecimal(0)])
+    end
+
+    # `Hash#to_h` would keep only the last of two spellings of one element name, dropping a
+    # tax base without a word.
+    it "refuses one bucket given under two spellings rather than letting one win" do
+      # Built through a variable rather than written as a symbol literal: a symbol key is the
+      # whole point of the example, and RuboCop's Naming/VariableNumber rejects `:P_13_1`.
+      bucket = "P_13_1"
+      spelled_twice = { bucket => "-23.00" }.merge(bucket.to_sym => "-100.00")
+
+      expect { described_class.new(gross: "-146.00", buckets: spelled_twice) }
+        .to raise_error(Ksef::ValidationError, /"P_13_1" given more than once/)
+    end
+
+    it "freezes its buckets, so an invariant cannot be edited around afterwards" do
+      expect(described_class.new(gross: 0, buckets: { "P_13_1" => 1 }).buckets).to be_frozen
     end
 
     it "refuses an element that is not a summary bucket" do
@@ -400,8 +435,43 @@ RSpec.describe "FA(3) corrections" do
   describe "reading one back" do
     let(:parsed) { Ksef::FA3.parse(invoice.to_xml) }
 
+    # **Every field of the correction, in one object.** An audit on 2026-08-24 nulled each
+    # reader in turn and found five that nothing noticed — `period`, `corrected_number`,
+    # `previous_seller`, `previous_buyers` and `buyer_id` were asserted on the *write* side
+    # only, and the parse-side examples used a correction that carried none of them. A
+    # self-round-trip is structurally blind to a reader that never reads a field, because the
+    # omission is symmetric; equality against the *built* invoice is not.
+    let(:full) do
+      invoice(
+        correction: correction(
+          period: "pierwsze półrocze 2026",
+          corrected_number: "FV/2026/07/011",
+          previous_seller: seller,
+          previous_buyers: [buyer(name: "CDE sp. j.", buyer_id: "0001")],
+          corrected: [corrected, corrected(number: "FV/2026/07/012", ksef_number: nil)]
+        )
+      )
+    end
+
     it "round-trips to an equal invoice" do
       expect(parsed).to eq(invoice)
+    end
+
+    it "reads every field of a fully populated correction back" do
+      expect(Ksef::FA3.parse(full.to_xml)).to eq(full)
+      expect(Ksef::FA3::Validator.errors_for(full.to_xml)).to be_empty
+    end
+
+    # Named individually as well, so a failure says which reader broke rather than
+    # "not equal" — the equality above is what makes the set exhaustive.
+    it "reads each of the five fields no self-round-trip could have caught" do
+      read = Ksef::FA3.parse(full.to_xml).correction
+
+      expect(read).to have_attributes(period: "pierwsze półrocze 2026",
+                                      corrected_number: "FV/2026/07/011")
+      expect(read.previous_seller.name).to eq("ACME sp. z o.o.")
+      expect(read.previous_buyers.map(&:buyer_id)).to eq(["0001"])
+      expect(read.corrected.map(&:ksef_number).last).to be_nil
     end
 
     it "reads the summary as stated rather than recomputing it from absent lines" do
@@ -421,6 +491,16 @@ RSpec.describe "FA(3) corrections" do
 
       expect(bare.correction).to be_nil
       expect(bare.invoice_type).to eq("KOR")
+    end
+
+    # The schema's choice is mandatory. Reading only the number treated "the document said
+    # neither" as "the document said NrKSeFN", and re-serialising then asserted the corrected
+    # invoice had been issued outside KSeF — a declaration nobody made, on valid output.
+    it "refuses a DaneFaKorygowanej that states neither branch of the choice" do
+      neither = invoice.to_xml.sub(%r{<NrKSeF>1</NrKSeF>\s*<NrKSeFFaKorygowanej>[^<]*</NrKSeFFaKorygowanej>}m, "")
+
+      expect { Ksef::FA3.parse(neither) }
+        .to raise_error(Ksef::ValidationError, /states neither NrKSeFFaKorygowanej nor NrKSeFN/)
     end
 
     it "reads NrKSeFN back as no KSeF number" do
@@ -450,11 +530,34 @@ RSpec.describe "FA(3) corrections" do
         .to include("correction.corrected[0].number")
     end
 
-    it "names a KSeF number that is not shaped like one" do
+    # Tier 2 owns the *format* of a referenced KSeF number, because the only pattern this gem
+    # holds is the OpenAPI contract's and the XSD's is wider — see the next example.
+    it "leaves a malformed KSeF number to the schema tier, which names the element" do
       broken = correction(corrected: corrected(ksef_number: "not-a-number"))
 
       expect(invoice(correction: broken).errors.map(&:to_s))
-        .to include(/ksef_number: "not-a-number" is not shaped like a KSeF number/)
+        .to include(/schema:.*NrKSeFFaKorygowanej.*not accepted by the pattern/)
+    end
+
+    # The two pinned artifacts genuinely differ (§8.4b): `KsefNumber::FORMAT` comes from the
+    # OpenAPI contract, which admits only the NIP issuer form, while `TNumerKSeF` also admits
+    # `M\d{9}` and `[A-Z]{3}\d{7}`. Judging a *document* field by the contract's pattern
+    # flagged this XSD-valid reference as malformed.
+    it "accepts an issuer form the XSD allows and the API contract does not" do
+      %w[M123456789-20260815-0100001AF629-AF ABC1234567-20260815-0100001AF629-AF].each do |number|
+        sound = invoice(correction: correction(corrected: corrected(ksef_number: number)))
+
+        expect(Ksef::FA3::Validator.errors_for(sound.to_xml)).to be_empty, number
+        expect(sound.errors).to be_empty, number
+        expect(Ksef::KsefNumber::FORMAT.match?(number)).to be(false), number
+      end
+    end
+
+    it "still reports a KSeF number that is not readable as UTF-8" do
+      broken = correction(corrected: corrected(ksef_number: "5265877635-2025\xFF"))
+
+      expect(invoice(correction: broken).errors.map(&:to_s))
+        .to include(/ksef_number: contains bytes that are not valid UTF-8/)
     end
 
     # §8.4a: all six KSeF numbers in the Ministry's own worked corrections fail §13's CRC-8.
@@ -514,6 +617,62 @@ RSpec.describe "FA(3) corrections" do
     # schema-valid and inventing a complaint would be synthesising a rule (§8.4).
     it "says nothing about a KOR that carries no correction group" do
       expect(invoice(correction: nil).errors).to be_empty
+    end
+
+    # The defect three audit lenses found independently on 2026-08-24, and the reason
+    # `state_before` is now a tier-1 concern rather than an inert flag on a row.
+    describe "a correction whose rows show the state before" do
+      def paired_without_totals(**overrides)
+        invoice(totals: nil, correction: correction, **overrides,
+                lines: [Ksef::FA3::Line.new(name: "Usługa", quantity: 1, unit: "szt.",
+                                            net_unit_price: "100.00", net_amount: "100.00",
+                                            vat_rate: "23", row_number: 1, state_before: true),
+                        Ksef::FA3::Line.new(name: "Usługa", quantity: 1, unit: "szt.",
+                                            net_unit_price: "80.00", net_amount: "80.00",
+                                            vat_rate: "23", row_number: 1)])
+      end
+
+      it "is refused unless it states its totals" do
+        expect(paired_without_totals.errors.map(&:to_s))
+          .to include(/totals: is required when a line is marked state_before/)
+      end
+
+      # What the derived summary would have said, and why it had to be stopped: the
+      # before-row is counted as a sale, so a 20.00 refund is declared as a 180.00 charge on
+      # a document the XSD accepts.
+      it "would otherwise have declared the sum of both states" do
+        derived = paired_without_totals
+
+        expect(derived.gross_total).to eq(BigDecimal("221.40"))
+        expect(Ksef::FA3::Validator.errors_for(derived.to_xml)).to be_empty
+      end
+
+      it "passes once the delta is stated" do
+        stated = paired_without_totals(
+          totals: Ksef::FA3::Totals.new(gross: "-24.60",
+                                        buckets: { "P_13_1" => "-20.00", "P_14_1" => "-4.60" })
+        )
+
+        expect(stated.errors).to be_empty
+        expect(stated.gross_total).to eq(BigDecimal("-24.60"))
+      end
+
+      # Scoped to the marker, not to the type: Przykład 3 is a correction whose single row
+      # already *is* the delta, and it computes correctly.
+      it "says nothing about a correction whose rows are already deltas" do
+        delta = invoice(totals: nil,
+                        lines: [Ksef::FA3::Line.new(name: "Usługa", quantity: 1, unit: "szt.",
+                                                    net_unit_price: "-162.60", net_amount: "-162.60",
+                                                    vat_rate: "23")])
+
+        expect(delta.errors).to be_empty
+        expect(delta.gross_total).to eq(BigDecimal("-200.00"))
+      end
+    end
+
+    it "reports a summary stated on a type that derives one" do
+      expect(invoice(invoice_type: "VAT", correction: nil).errors.map(&:to_s))
+        .to include(/totals: is set on a VAT invoice, whose summary this model computes/)
     end
 
     it "passes a well-formed correction" do

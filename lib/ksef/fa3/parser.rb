@@ -43,12 +43,6 @@ module Ksef
       # accepting one would be worse than refusing it.
       SUPPORTED_TYPES = %w[VAT KOR].freeze
 
-      # Types whose summaries are **read** rather than recomputed from the rows. A `KOR`
-      # states deltas its rows need not determine — three of the Ministry's five worked
-      # corrections have no usable rows at all — so recomputing would replace the document's
-      # own figures with an invented total (docs/REFERENCE.md §8.4).
-      STATED_TOTALS_TYPES = %w[KOR].freeze
-
       class << self
         # Namespace-aware element reading; see {NodeReader}.
         include NodeReader
@@ -72,8 +66,11 @@ module Ksef
           # same case, its rows being `minOccurs="0"` and explicitly "opcjonalny dla faktury
           # zaliczkowej". `totals` is now the field that decides whether rows are required at
           # all, so it has to be read here too.
-          type = supported_type!(text(fa_node, "RodzajFaktury") || "VAT")
-          totals = STATED_TOTALS_TYPES.include?(type) ? CorrectionReader.totals_from(fa_node) : nil
+          # Collapsed before comparing: `RodzajFaktury` is a token, so `<RodzajFaktury> VAT
+          # </RodzajFaktury>` is schema-valid and means `VAT`. Compared raw it was refused,
+          # with a message that read "This is a  VAT  invoice, and only VAT, KOR are modelled".
+          type = supported_type!(Formatting.text(text(fa_node, "RodzajFaktury")) || "VAT")
+          totals = Invoice::STATED_TOTALS_TYPES.include?(type) ? CorrectionReader.totals_from(fa_node) : nil
 
           resolve_rounding(build(document, root, fa_node, type, totals), fa_node, totals)
         end
@@ -120,7 +117,15 @@ module Ksef
             # accounting, reverse charge, split payment, an actual VAT exemption — and
             # re-emitting the defaults would silently deny every one of them
             # ({Invoice::DEFAULT_ANNOTATIONS}).
-            annotations: ElementTree.to_hash(element(fa_node, "Adnotacje")),
+            # **`|| {}`, never the defaults.** `Adnotacje` is `minOccurs="1"`, so a document
+            # without one is schema-invalid — but the parser is documented not to validate, and
+            # this is representable: nothing was declared. Routing absence through
+            # {Invoice::DEFAULT_ANNOTATIONS} instead emitted **eight affirmative tax
+            # declarations the document never made**, invisibly, because the element paths then
+            # match either way. An empty `Adnotacje` re-serialises to an empty `Adnotacje`,
+            # which tier 2 reports — the invalid input yields invalid output, which is honest.
+            # The defaults stay a *builder* convenience, applied only when nobody supplied any.
+            annotations: ElementTree.to_hash(element(fa_node, "Adnotacje")) || {},
             invoice_type: type,
             # Kept as the string it was written as, so a round trip reproduces it byte for
             # byte — {Formatting.date_time} passes a String through untouched. Parsing it

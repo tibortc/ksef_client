@@ -28,7 +28,8 @@ module Ksef
       def initialize(number:, issue_date:, ksef_number: nil)
         # Coerced here rather than at serialisation, so an invoice built from a String and
         # the same invoice parsed back from XML are one object (§8.2b).
-        super(number: number, issue_date: Formatting.to_date(issue_date), ksef_number: ksef_number)
+        super(number: Formatting.text(number), issue_date: Formatting.to_date(issue_date),
+              ksef_number: Formatting.text(ksef_number))
       end
 
       def to_fa3

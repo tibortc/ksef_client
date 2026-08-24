@@ -1359,7 +1359,8 @@ The correction elements are an **anonymous `<xsd:sequence minOccurs="0">`** sitt
 | `NrFaKorygowany` | 0–1, `TZnakowy` | `Correction#corrected_number` |
 | `Podmiot1K` | 0–1 | `Correction#previous_seller` |
 | `Podmiot2K` | 0–101 | `Correction#previous_buyers` |
-| `P_15ZK`, `KursWalutyZK` | 0–1 | **not modelled** — scoped by their own documentation to `KOR_ZAL`/`KOR_ROZ` |
+| `P_15ZK` | 0–1 | **not modelled** — its documentation scopes it to *"korekt faktur zaliczkowych"* and art. 106f ust. 3, i.e. `KOR_ZAL`/`KOR_ROZ` |
+| `KursWalutyZK` | 0–1 | **not modelled** — no documentation of its own; it sits in a nested sequence that `P_15ZK` opens, so it is gated structurally |
 
 Four consequences that are easy to get wrong:
 
@@ -1370,8 +1371,9 @@ as simply having no correction — inventing one would change the document.
 
 **`DaneFaKorygowanej` ends in a choice**, not two optional fields: either `NrKSeF` +
 `NrKSeFFaKorygowanej`, or `NrKSeFN` alone — *"znacznik faktury korygowanej wystawionej poza
-KSeF"*. Both branches are `etd:TWybor1`, which has exactly one member, `"1"`: these are
-markers, present or absent, with no "no" to write. Modelled as one nil-able `ksef_number`, so
+KSeF"*. The two *markers* — `NrKSeF` and `NrKSeFN` — are `etd:TWybor1`, which has exactly one
+member, `"1"`: they are present or absent, with no "no" to write. (The first branch is a
+sequence of the marker plus `NrKSeFFaKorygowanej`, which is a `TNumerKSeF`.) Modelled as one nil-able `ksef_number`, so
 emitting both branches or neither is unrepresentable.
 
 **`IDNabywcy` is the link between `Podmiot2K` and the `Podmiot2` it corrects** — *"unikalny
@@ -1415,25 +1417,90 @@ from an inference is the kind of thing §15.6 warns against. Callers state the d
 
 #### The one cross-field rule tier 1 carries
 
-`PrzyczynaKorekty` is documented as the reason *"dla faktur korygujących"*, so the group
-belongs to a correcting `RodzajFaktury` — `KOR`, `KOR_ZAL`, `KOR_ROZ`. The XSD cannot say so:
-the group sits in the same sequence whatever the type, and a `VAT` invoice carrying
-`DaneFaKorygowanej` validates clean. `ModelValidator` reports it. **The converse is not
-checked** — a `KOR` without the group is schema-valid, and complaining would be inventing a
-rule.
+**The XSD states this outright.** The anonymous sequence carries its own annotation:
+
+> Dane dla przypadków, gdy pole RodzajFaktury przyjmuje wartości KOR, KOR_ZAL lub KOR_ROZ
+
+— *data for the cases where the RodzajFaktury field takes the values KOR, KOR_ZAL or
+KOR_ROZ*. So the rule is a first-tier fact, not an inference from `PrzyczynaKorekty`'s
+*"dla faktur korygujących"*, as an earlier revision of this section said.
+
+What the XSD **cannot do is enforce it**: the group sits in the same sequence whatever the
+type, so a `VAT` invoice carrying `DaneFaKorygowanej` validates clean (measured, by injecting
+the group into Przykład 1). That gap is exactly what tier 1 is for, and `ModelValidator`
+reports it. **The converse is not checked** — a `KOR` without the group is schema-valid, and
+complaining would be inventing a rule.
 
 #### 8.4a The Ministry's KSeF numbers do not satisfy §13's checksum
 
-Measured 2026-08-24: **all six distinct `NrKSeFFaKorygowanej` values in the worked corrections
-fail the CRC-8 of §13**, including `9999999999-20230908-8BEF280C8D35-4D`, which appears in
-three samples. They match `TNumerKSeF`'s pattern — every sample is XSD-valid — so they are
-well-formed placeholders rather than numbers KSeF ever issued.
+Measured 2026-08-24: **all six distinct `NrKSeFFaKorygowanej` values in the five `KOR` samples
+fail the CRC-8 of §13**. The commonest, `9999999999-20230908-8BEF280C8D35-4D`, appears in
+**eleven of the twenty-six samples** — every `KOR`, every `KOR_ZAL`, the `KOR_ROZ` and both
+`ROZ` — as the sole reference in three of them. (An earlier revision of this section said
+"three samples", counting only the ones where it stands alone; corrected by audit.) All six
+match `TNumerKSeF`'s pattern — every sample is XSD-valid — so they are well-formed
+placeholders rather than numbers KSeF ever issued.
 
-Our CRC-8 is not the thing that is wrong: it reproduces the documented example (§13) and
-agreed with a real number assigned on live TEST (§12). So **tier 1 checks the shape of a
-referenced KSeF number and not its checksum.** Nothing upstream says KSeF verifies the
-checksum of a *referenced* number, and rejecting on it would make tier 1 refuse the Ministry's
-own documents — the same failure as the whitespace-collapse bug of §15.1. Do not add it.
+Our CRC-8 is not the thing that is wrong: it reproduces the documented example of §13, and
+agreed with a real number assigned on live TEST (recorded in DESIGN.md §11's run record for
+`32692339217`, asserted by `spec/integration/session_flow_spec.rb`). So **tier 1 does not
+check the checksum of a referenced KSeF number.** Nothing upstream says KSeF verifies it, and
+rejecting on it would make tier 1 refuse the Ministry's own documents — the same failure as
+the whitespace-collapse bug, whose record is the header comment of
+`lib/ksef/fa3/field_checks.rb`. Do not add it.
+
+#### 8.4b The five-lens audit of `KOR`, and the three facts it settled
+
+Run 2026-08-24 against the merged commit, five independent read-only lenses. Three of the five
+found the same top defect without conferring, which is worth recording as much as the defect
+is: **a rule enforced on one side of a boundary is not enforced.**
+
+**The derived summary.** §8.4 says a correction's summaries are *read, never computed*. That
+was true of {Parser} and false of the serializer: `DocumentMapping#summary` fell back to the
+line-derived buckets whenever no `Totals` was given, and nothing required a *built* correction
+to give one. Since a `StanPrzed` row is the position **as it was before the correction** — an
+amount already invoiced on the original document — summing it counts it twice with the wrong
+sign. The Ministry's Przykład 2, built through this gem's own DSL without `f.totals`, declared
+`P_15 = 3799.98` for a correction whose value is `-200.00`: a refund emitted as a charge,
+XSD-valid, tier 1 silent, `#unmapped_elements` empty. Tier 1a now requires stated totals
+whenever a line carries `state_before` — scoped to the marker rather than to the type, because
+a correction whose rows already *are* the deltas computes correctly and Przykład 3 is exactly
+that shape.
+
+**`Integer()` honours radix prefixes.** `NrWierszaFa` is `TNaturalny`, whose lexical space
+permits leading zeros, and fixed-width row numbering is an ordinary ERP convention. `Integer`
+without an explicit base reads `"010"` as **octal eight**, so a schema-valid document stating
+row ten parsed as row eight and re-serialised as `8` — in the one field that pairs a
+correction's before/after rows once `UU_ID` is dropped. `"08"` failed the other way, raising
+on a document the schema accepts. Fixed with base 10 on the String branch. The spec that
+should have caught it used `"03"`, where octal and decimal agree.
+
+**The two pinned artifacts disagree about a KSeF number, and each is right.** The OpenAPI
+contract's `KsefNumber` pattern admits the NIP issuer form alone:
+
+```
+^([1-9](\d[1-9]|[1-9]\d)\d{7})-…
+```
+
+The FA(3) XSD's `TNumerKSeF` admits two more:
+
+```
+^([1-9]((\d[1-9])|([1-9]\d))\d{7}|M\d{9}|[A-Z]{3}\d{7})-…
+```
+
+They are not in conflict — they govern different things. The contract says what a **lookup
+URL** may contain, and `Ksef::KsefNumber` serves lookups (`Invoices::Client#download`,
+`UPO::Client#for_ksef_number`), so its narrowness is correct there. The XSD says what a
+**document** may reference. Judging a document field by `KsefNumber::FORMAT` flagged an
+XSD-valid `M123456789-…` reference as malformed, so tier 1 no longer judges the format at all
+and tier 2 owns it. **Do not widen `KsefNumber::FORMAT` to "fix" this** — that would loosen
+the lookup path against its own contract. The layouts are the same length either way, so §13's
+CRC-8 input rule is unaffected.
+
+A fourth, smaller finding of the same shape: {Serializer} compared `values.keys.map(&:to_s)`
+against the schema when rejecting unknown element names, but wrote with `values.key?(name)`
+against a String. A symbol key therefore passed the check and was then **silently dropped**.
+Keys are normalised once, at the top of `write_children`.
 
 ---
 

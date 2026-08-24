@@ -84,10 +84,29 @@ RSpec.describe Ksef::FA3::Formatting do
   # For the handful of elements restricting xsd:integer — TypKorekty, NrWierszaFa — whose
   # value space is integers, so the lexical form is not the value.
   describe ".integer" do
-    it "reads the forms a document can carry" do
+    # **`"010"`, not `"03"`.** The original example used `"03"`, where octal and decimal agree
+    # — so it passed either way and the shipped octal bug sat squarely in its blind spot.
+    # `NrWierszaFa` is `TNaturalny`, whose lexical space permits leading zeros, and
+    # fixed-width row numbering is an ordinary ERP convention.
+    it "reads leading zeros as decimal, not as octal" do
+      expect(described_class.integer("010")).to eq(10)
+      expect(described_class.integer("08")).to eq(8)
       expect(described_class.integer("3")).to eq(3)
-      expect(described_class.integer("03")).to eq(3)
       expect(described_class.integer(3)).to eq(3)
+    end
+
+    # The other half of the same bug: with a radix prefix honoured, malformed text became a
+    # plausible number instead of an error.
+    it "refuses the other radix prefixes rather than honouring them" do
+      %w[0x1A 0b101 0o17].each do |prefixed|
+        expect { described_class.integer(prefixed) }
+          .to raise_error(Ksef::ValidationError, /Cannot read #{prefixed.inspect} as a whole number/)
+      end
+    end
+
+    it "refuses a Float rather than truncating it" do
+      expect { described_class.integer(2.9) }
+        .to raise_error(Ksef::ValidationError, /Float is not allowed for a whole number/)
     end
 
     # `#to_i` would answer 0 here, turning a malformed document into a plausible one.
@@ -145,6 +164,15 @@ RSpec.describe Ksef::FA3::Formatting do
 
     it "rejects anything else" do
       expect { described_class.flag("yes") }.to raise_error(Ksef::ValidationError, /boolean-ish/)
+    end
+  end
+
+  describe ".date_time on something that is not a time" do
+    # The `else` branch asks for `#utc`. An object without one used to surface as a bare
+    # NoMethodError from inside the serializer, outside this gem's hierarchy.
+    it "raises this gem's own error rather than NoMethodError" do
+      expect { described_class.date_time(123) }
+        .to raise_error(Ksef::ValidationError, /Cannot read 123 as a timestamp/)
     end
   end
 

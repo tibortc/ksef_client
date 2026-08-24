@@ -47,6 +47,13 @@ module Ksef
         "PMarzy" => { "P_PMarzyN" => "1" }
       }.freeze
 
+      # The invoice kinds whose tax summary is **stated** rather than derived from the rows.
+      # Lives here rather than on {Parser} because both halves need it: the parser reads a
+      # stated summary for these types, and {ModelValidator} reports one set on any other —
+      # where it would be emitted verbatim, never read back, and disagree with the lines with
+      # nothing to notice (docs/REFERENCE.md §8.4).
+      STATED_TOTALS_TYPES = %w[KOR].freeze
+
       NEEDS_LINES = "An invoice needs at least one line, unless it states its own totals. " \
                     "A collective correction may have no FaWiersz at all — see " \
                     "Ksef::FA3::Totals and docs/REFERENCE.md §8.4."
@@ -82,16 +89,13 @@ module Ksef
       def initialize(seller:, buyer:, number:, issue_date:, lines: [],
                      currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT",
                      annotations: nil, correction: nil, totals: nil, raw_document: nil)
-        unless ROUNDING_STRATEGIES.include?(rounding)
-          raise ValidationError,
-                "Unknown rounding strategy #{rounding.inspect}; expected one of #{ROUNDING_STRATEGIES.inspect}"
-        end
-        rows = lines.nil? ? [] : lines
-        raise ValidationError, NEEDS_LINES if rows.empty? && totals.nil?
+        rows = self.class.rows_for(lines, rounding: rounding, totals: totals)
 
         super(
-          seller: seller, buyer: buyer, number: number, lines: rows,
-          currency: currency, rounding: rounding, invoice_type: invoice_type,
+          seller: seller, buyer: buyer, lines: rows, rounding: rounding,
+          number: Formatting.text(number),
+          currency: Formatting.text(currency),
+          invoice_type: Formatting.text(invoice_type),
           correction: correction, totals: totals, raw_document: raw_document,
           # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
           # Date it denotes must not produce two unequal invoices (§8.2b).
@@ -101,6 +105,36 @@ module Ksef
           # invoice parsed back hold the same value and compare equal.
           annotations: annotations || DEFAULT_ANNOTATIONS
         )
+      end
+
+      # The two constructor invariants that are about the line list rather than a field, kept
+      # together because both have to hold before anything is stored.
+      def self.rows_for(lines, rounding:, totals:)
+        unless ROUNDING_STRATEGIES.include?(rounding)
+          raise ValidationError,
+                "Unknown rounding strategy #{rounding.inspect}; expected one of #{ROUNDING_STRATEGIES.inspect}"
+        end
+
+        rows = positioned(lines.nil? ? [] : lines)
+        raise ValidationError, NEEDS_LINES if rows.empty? && totals.nil?
+
+        rows.freeze
+      end
+
+      # `Line#row_number` means "this row's number is *not* its position" — nil says "number
+      # me by position". Only the invoice knows a line's position, so only the invoice can
+      # canonicalise: a caller who states `row_number: 1` on the first line describes exactly
+      # the document a caller who states nothing does, and leaving the two unequal broke
+      # DESIGN.md §7.6's round-trip law for an ERP that always supplies row numbers.
+      #
+      # `dup` first, so a caller's own array is never modified — and the copy is what gets
+      # frozen, since `lines` is an invariant of the object rather than a view onto theirs.
+      def self.positioned(lines)
+        lines.each_with_index.map do |line, index|
+          next line unless line.is_a?(Line) && line.row_number == index + 1
+
+          line.with(row_number: nil)
+        end
       end
 
       # Net totals per rate code, in the order the lines first mention each rate, so the

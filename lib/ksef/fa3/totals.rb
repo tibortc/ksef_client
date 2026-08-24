@@ -52,19 +52,26 @@ module Ksef
       # @raise [Ksef::ValidationError] on an element name that is not a summary bucket, or an
       #   amount that is not a decimal — a `Float` included (DESIGN.md §4.4)
       def initialize(gross:, buckets: {})
+        # Rounded to the scale `TKwotowy` permits, for the same reason {Line} rounds: the
+        # model reports the figure the document will actually carry (§8.2b).
+        super(
+          buckets: self.class.verified_buckets(buckets),
+          gross: Formatting.decimal(gross).round(Formatting::AMOUNT_SCALE)
+        )
+      end
+
+      # @return [Hash{String => BigDecimal}] frozen, checked for spelling and for collisions
+      def self.verified_buckets(buckets)
         unless buckets.respond_to?(:to_h)
           raise ValidationError, "Totals buckets must be a Hash of element name => amount, got #{buckets.inspect}"
         end
 
-        named = buckets.to_h { |name, amount| [name.to_s, amount] }
-        reject_unknown(named.keys)
+        pairs = buckets.to_h.map { |name, amount| [name.to_s, amount] }
+        reject_duplicates(pairs.map(&:first))
+        reject_unknown(pairs.map(&:first))
 
-        # Rounded to the scale `TKwotowy` permits, for the same reason {Line} rounds: the
-        # model reports the figure the document will actually carry (§8.2b).
-        super(
-          buckets: named.transform_values { |amount| Formatting.decimal(amount).round(Formatting::AMOUNT_SCALE) },
-          gross: Formatting.decimal(gross).round(Formatting::AMOUNT_SCALE)
-        )
+        pairs.to_h { |name, amount| [name, Formatting.decimal(amount).round(Formatting::AMOUNT_SCALE)] }
+             .freeze
       end
 
       # @return [BigDecimal] the sum of every `P_13_*` bucket stated
@@ -84,7 +91,21 @@ module Ksef
         buckets.sum(BigDecimal(0)) { |name, amount| elements.include?(name) ? amount : BigDecimal(0) }
       end
 
-      def reject_unknown(names)
+      # Keys are compared after `#to_s`, so `:P_13_1` and `"P_13_1"` are one bucket — and
+      # `Hash#to_h` would silently keep only the last of them, dropping a tax base without a
+      # word. {Builder#totals} accumulates colliding *rate codes* on purpose, because several
+      # share a bucket (§8.1a); two spellings of one element name are a mistake instead.
+      private_class_method def self.reject_duplicates(names)
+        repeated = names.tally.select { |_, count| count > 1 }.keys
+        return if repeated.empty?
+
+        raise ValidationError,
+              "Summary bucket(s) #{repeated.map(&:inspect).join(", ")} given more than once. " \
+              "Keys are compared as strings, so :P_13_1 and \"P_13_1\" are the same bucket; " \
+              "add the amounts up yourself rather than letting one of them win."
+      end
+
+      private_class_method def self.reject_unknown(names)
         unknown = names - ELEMENTS
         return if unknown.empty?
 

@@ -80,12 +80,17 @@ SimpleCov.start do
   # the paragraph above argues for. The eleven uncovered branches are all pre-existing `&.`
   # guards outside the FA(3) model.
   #
-  # Re-measured 2026-08-24 after `KOR`: line 100%, branch 98.31% (585/595), method 100%. **Still
-  # 97, and the same reasoning:** 98 would permit eleven uncovered branches against the ten that
-  # exist, so any new `&.` guard anywhere fails the build. But the caveat above is now visible in
-  # the numbers — the denominator went 530 -> 595, so an unchanged floor of 97 permits seventeen
-  # uncovered branches where it permitted fifteen. The slack a percentage grants really does
-  # drift upward, and the same ten pre-existing `&.` guards account for all of it.
+  # Re-measured 2026-08-24 after `KOR` and the audit that followed it: line 100%, branch 98.41%
+  # (619/629), method 100%. **Still 97**, because 98 would permit twelve uncovered branches
+  # against the ten that exist — two branches of slack, so the third new uncovered branch
+  # anywhere fails the build. But the caveat above is now visible in the numbers: the
+  # denominator went 530 -> 629, so an unchanged floor of 97 permits eighteen uncovered branches
+  # where it permitted fifteen. The slack a percentage grants really does drift upward.
+  #
+  # The ten are pre-existing and unchanged since 4a4d962 (checked by re-running the suite at
+  # that commit). Seven are `&.` guards; the other three are plain `if`/`return` guards —
+  # `serializer.rb`'s `return if values.nil?` and two in `tasks/ksef_bootstrap.rb` — so the
+  # earlier wording "the same ten `&.` guards, outside the FA(3) model" was wrong twice over.
   minimum_coverage line: 99, branch: 97, method: 100
 end
 

@@ -218,16 +218,45 @@ RSpec.describe Ksef::FA3::ModelValidator do
     end
 
     # JST and GV go through Formatting.flag, which raises on anything not boolean-ish.
-    it "checks the buyer's two yes/no flags" do
-      odd = subject_for(nip: "1111111111", name: "K", vat_group_member: "yes")
-
-      expect(fields_for(buyer: odd)).to include("buyer.vat_group_member")
+    # The *value* check moved to construction on 2026-08-24: `Subject` canonicalises both
+    # flags through `Formatting.unflag`, so an unreadable one can no longer reach a
+    # constructed object and tier 1 has nothing left to say about it. What tier 1 gained
+    # instead is the role check below.
+    it "refuses an unreadable yes/no flag at construction, so no invoice can carry one" do
+      expect { subject_for(nip: "1111111111", name: "K", vat_group_member: "yes") }
+        .to raise_error(Ksef::ValidationError, %r{Expected a 1/2 flag, got "yes"})
     end
 
-    it "does not look for those flags on a seller, which has no such elements" do
-      odd = subject_for(vat_group_member: "yes")
+    # `NIP.normalize` calls `strip` and `gsub`, both of which raise
+    # `Encoding::CompatibilityError` on text tagged UTF-8 that is not — outside this gem's
+    # hierarchy, and so outside `Invoice#errors`' rescue. A mojibake NIP out of an ERP is the
+    # case docs/REFERENCE.md §15.1 calls likely.
+    it "reports an unreadable NIP rather than raising out of the hierarchy" do
+      mojibake = +"999\xFF"
+      mojibake.force_encoding("UTF-8")
+      broken = invoice(seller: subject_for(nip: mojibake))
 
-      expect(described_class.errors_for(invoice(seller: odd))).to be_empty
+      expect { broken.errors }.not_to raise_error
+      expect(broken.errors.map(&:to_s)).to include(/seller.nip: contains bytes that are not valid UTF-8/)
+    end
+
+    # `Podmiot1` has no `IDNabywcy` either, so a seller carrying one would lose it silently.
+    it "names a linking key set on a seller, which would be dropped silently" do
+      expect(described_class.errors_for(invoice(seller: subject_for(buyer_id: "0001"))).map(&:to_s))
+        .to include(/seller.buyer_id: is set on a seller, whose element carries no IDNabywcy/)
+    end
+
+    it "says nothing about a seller whose flags are merely defaulted" do
+      expect(described_class.errors_for(invoice(seller: subject_for))).to be_empty
+    end
+
+    # `Podmiot1` has no JST/GV elements at all, so a seller carrying a *set* flag would have
+    # it dropped without a word — the one kind of loss the serializer otherwise refuses.
+    it "names a flag set on a seller, which would be dropped silently" do
+      odd = subject_for(vat_group_member: true)
+
+      expect(described_class.errors_for(invoice(seller: odd)).map(&:to_s))
+        .to include(%r{seller.vat_group_member: is set on a seller, whose element carries no JST/GV})
     end
   end
 

@@ -119,6 +119,32 @@ RSpec.describe Ksef::FA3::Subject do
       .to raise_error(Ksef::ValidationError, /Unknown subject role :vendor\. Permitted: :seller, :buyer/)
   end
 
+  # §8.2b: the model stores the document's representation. A NIP arrives from an ERP in
+  # several written forms, and all of them denote the ten digits a document carries.
+  describe "canonicalisation" do
+    it "normalises the written forms of a NIP, so they are one subject" do
+      expect(subject_with(nip: "PL999-999-99-99")).to eq(subject_with(nip: "9999999999"))
+    end
+
+    it "leaves a NIP alone when it cannot be read as UTF-8, for tier 1 to report" do
+      mojibake = +"999\xFF"
+      mojibake.force_encoding("UTF-8")
+
+      expect(described_class.new(nip: mojibake).nip).to eq(mojibake)
+    end
+
+    it "leaves a nil NIP alone rather than turning it into an empty string" do
+      expect(described_class.new(nip: nil).nip).to be_nil
+    end
+
+    # `SubjectReader` reads both flags back as booleans, so a caller passing "1" built an
+    # invoice that could never equal its own parsed form.
+    it "reads the 1/2 flags as booleans" do
+      expect(subject_with(local_government_unit: "1", vat_group_member: 2))
+        .to eq(subject_with(local_government_unit: true, vat_group_member: false))
+    end
+  end
+
   describe "#with" do
     it "re-runs the constructor, so the NIP is still normalised on serialisation" do
       changed = subject_with.with(nip: "PL111-111-11-11")

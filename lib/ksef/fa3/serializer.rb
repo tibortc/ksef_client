@@ -31,6 +31,18 @@ module Ksef
         end
       end
 
+      # Named types are keyed by name, anonymous ones by path (§7.1).
+      #
+      # Public because {ModelValidator} walks the same tree: its `Adnotacje` check has to
+      # resolve each nested element's type exactly as the serializer will, or the two disagree
+      # about what is permitted where.
+      def self.child_type_key(parent_key, particle)
+        named = particle[:type].to_s.sub(/\Atns:/, "")
+        return named if Generated::Types[named]
+
+        "#{parent_key}/#{particle[:name]}"
+      end
+
       # @param content [Hash] nested, keyed by XSD element name
       def initialize(content)
         @content = content
@@ -64,6 +76,12 @@ module Ksef
       def write_children(document, parent, type_key, values)
         return if values.nil?
 
+        # Keys are normalised to Strings first, because the two checks below disagreed
+        # otherwise: {#reject_unknown_keys} compares `keys.map(&:to_s)`, so a symbol key
+        # `:P_16` looked known, while the write loop asks `values.key?("P_16")` and found
+        # nothing — the element was **silently dropped**. Mandatory elements were caught by
+        # tier 2 as a side effect; an optional one would simply have vanished.
+        values = values.transform_keys(&:to_s)
         known = Generated::Types.ordered_elements(type_key)
         reject_unknown_keys(type_key, values, known)
 
@@ -85,7 +103,8 @@ module Ksef
         element = document.create_element(particle[:name])
 
         case value
-        when Hash then write_children(document, element, child_type_key(type_key, particle), value)
+        when Hash
+          write_children(document, element, self.class.child_type_key(type_key, particle), value)
         when Element then write_element_with_attributes(element, value)
         else element.content = value.to_s
         end
@@ -96,14 +115,6 @@ module Ksef
       def write_element_with_attributes(element, value)
         value.attributes.each { |name, attribute| element[name] = attribute.to_s }
         element.content = value.text.to_s unless value.text.nil?
-      end
-
-      # Named types are keyed by name, anonymous ones by path (§7.1).
-      def child_type_key(parent_key, particle)
-        named = particle[:type].to_s.sub(/\Atns:/, "")
-        return named if Generated::Types[named]
-
-        "#{parent_key}/#{particle[:name]}"
       end
 
       def reject_unknown_keys(type_key, values, known)
