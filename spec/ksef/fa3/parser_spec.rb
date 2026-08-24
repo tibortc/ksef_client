@@ -302,11 +302,16 @@ RSpec.describe Ksef::FA3::Parser do
         .to raise_error(Ksef::ValidationError, /no FaWiersz rows/)
     end
 
-    it "refuses a row whose net value cannot be established" do
+    # A row stating no price of any kind is not an incomplete priced row — it is the
+    # descriptive row of a collective correction (§8.4), and saying "cannot establish its
+    # net value" would blame the document for omitting something it never meant to state.
+    it "names a row that states no price at all for what it is" do
       xml = document(subjects, fa(one_row("P_11" => nil, "P_9A" => nil)))
 
       expect { described_class.parse(xml) }
-        .to raise_error(Ksef::ValidationError, /FaWiersz 1 has neither P_11 nor both of P_8B and P_9A/)
+        .to raise_error(Ksef::ValidationError, /FaWiersz 1 states no price at all/)
+      expect { described_class.parse(xml) }
+        .to raise_error(Ksef::ValidationError, /collective correction.*document itself is fine/m)
     end
 
     it "refuses a row missing P_11 and the quantity too" do
@@ -384,7 +389,7 @@ RSpec.describe Ksef::FA3::Parser do
       xml = document(subjects, fa(one_row("NrWierszaFa" => nil, "P_11" => nil, "P_9A" => nil)))
 
       expect { described_class.parse(xml) }
-        .to raise_error(Ksef::ValidationError, /FaWiersz \(unnumbered\) has neither P_11/)
+        .to raise_error(Ksef::ValidationError, /FaWiersz \(unnumbered\) states no price/)
     end
   end
 
@@ -498,10 +503,10 @@ RSpec.describe Ksef::FA3::Parser do
     end
   end
 
-  # Accepting a non-VAT type produced something worse than a refusal: a valid-looking invoice
-  # under the original's number with recomputed, sign-flipped totals.
+  # Accepting an unmodelled type produced something worse than a refusal: a valid-looking
+  # invoice under the original's number with recomputed, sign-flipped totals.
   describe "invoice types this model does not carry" do
-    %w[KOR ZAL ROZ UPR KOR_ZAL KOR_ROZ].each do |type|
+    %w[ZAL ROZ UPR KOR_ZAL KOR_ROZ].each do |type|
       it "refuses a #{type} document, explaining that the document is fine" do
         xml = document(subjects, fa("#{one_row}<RodzajFaktury>#{type}</RodzajFaktury>"))
 

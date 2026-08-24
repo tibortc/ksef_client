@@ -86,5 +86,9 @@ RSpec/DescribeClass:
     # A law over the pinned FA(3) corpus (DESIGN.md §7.6), holding across the parser, the
     # serializer and the validator together — no single class owns it.
     - "spec/ksef/fa3/round_trip_spec.rb"
+    # The KOR invoice end to end — four value objects, the DSL, the serializer, the parser
+    # and two validator tiers. Splitting it per class would scatter one feature across six
+    # files and lose the order the argument is made in.
+    - "spec/ksef/fa3/correction_spec.rb"
     - "spec/integration/**/*_spec.rb"  # describes a live flow, not a class
     - "spec/release_readiness_spec.rb"

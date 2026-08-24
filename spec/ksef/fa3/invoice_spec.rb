@@ -402,7 +402,11 @@ RSpec.describe Ksef::FA3::Invoice do
         number: "FV/OTHER", issue_date: Date.new(2026, 1, 1), currency: "EUR",
         issued_at: "2020-01-01T00:00:00Z", rounding: :per_summary, invoice_type: "KOR",
         annotations: Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS.merge("P_16" => "1"),
-        lines: [line(price: "999")], seller: buyer, buyer: seller
+        lines: [line(price: "999")], seller: buyer, buyer: seller,
+        correction: Ksef::FA3::Correction.new(
+          corrected: Ksef::FA3::CorrectedInvoice.new(number: "FV/2026/01", issue_date: "2026-01-15")
+        ),
+        totals: Ksef::FA3::Totals.new(gross: "1500.00", buckets: { "P_13_1" => "1500.00" })
       }
 
       expect(Ksef::FA3::Invoice::IDENTITY).to match_array(differences.keys)

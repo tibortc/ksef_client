@@ -81,6 +81,26 @@ RSpec.describe Ksef::FA3::Formatting do
     end
   end
 
+  # For the handful of elements restricting xsd:integer — TypKorekty, NrWierszaFa — whose
+  # value space is integers, so the lexical form is not the value.
+  describe ".integer" do
+    it "reads the forms a document can carry" do
+      expect(described_class.integer("3")).to eq(3)
+      expect(described_class.integer("03")).to eq(3)
+      expect(described_class.integer(3)).to eq(3)
+    end
+
+    # `#to_i` would answer 0 here, turning a malformed document into a plausible one.
+    it "refuses text that is not a number, rather than answering zero" do
+      expect { described_class.integer("later") }
+        .to raise_error(Ksef::ValidationError, /Cannot read "later" as a whole number/)
+    end
+
+    it "raises this gem's own error for nil, not a bare TypeError" do
+      expect { described_class.integer(nil) }.to raise_error(Ksef::ValidationError, /Cannot read nil/)
+    end
+  end
+
   describe ".unflag" do
     it "reads the codes back as booleans" do
       expect(described_class.unflag("1")).to be(true)

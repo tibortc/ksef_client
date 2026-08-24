@@ -65,9 +65,15 @@ submitted.
 > caused it (`lines[2].vat_rate`); the byte and schema checks run once the model is sound, and
 > report against `document` and `schema`.
 >
-> **Not yet:** validator tier 3 — the reconciliation rules — and six of the seven invoice
-> types: `VAT` builds and parses, `KOR`/`ZAL`/`ROZ`/`UPR` and the two `KOR_` combinations do
-> not. See [Roadmap](#roadmap).
+> **Corrections build and parse.** `KOR` carries what it corrects — one invoice or fifty
+> thousand — the reason, the effect date, the previous state of a party, and rows marked
+> before/after. Its tax summary is *stated* rather than derived, because a correction's
+> buckets are deltas its rows need not determine: three of the Ministry's five worked
+> corrections have no usable rows at all.
+>
+> **Not yet:** validator tier 3 — the reconciliation rules — and five of the seven invoice
+> types: `VAT` and `KOR` build and parse, `ZAL`/`ROZ`/`UPR` and the two remaining `KOR_`
+> combinations do not. See [Roadmap](#roadmap).
 
 ## Installation
 
@@ -226,6 +232,46 @@ branch of each mandatory choice wrapper. Omitting any of them is a schema error.
 Rounding is explicit, because Polish VAT law permits two approaches and they can differ by
 a grosz — pass `rounding: :per_line` (the default) or `:per_summary`.
 
+### Issuing a correction
+
+A `KOR` says what it corrects and by how much. `corrects` names one corrected invoice — call
+it again for each of them, up to fifty thousand, which is how a period discount under
+art. 106j ust. 3 is issued.
+
+```ruby
+correction = Ksef::FA3.build do |f|
+  f.seller nip: "9999999999", name: "ACME sp. z o.o.", address: "Prosta 1, 00-001 Warszawa"
+  f.buyer  nip: "1111111111", name: "Klient S.A.",     address: "Długa 2, 30-001 Kraków"
+  f.number "FK/2026/08/001"
+  f.issue_date Date.new(2026, 8, 22)
+  f.invoice_type "KOR"
+
+  f.correction reason: "obniżka ceny o 200 zł", effect: 3
+  f.corrects number: "FV/2026/02/150", issue_date: "2026-02-15",
+             ksef_number: "5265877635-20250826-0100001AF629-AF"
+
+  # The position as it was, then as it now is — two rows sharing one number.
+  f.line name: "lodówka", qty: 1, unit: "szt.", net_unit_price: "1626.01",
+         net_amount: "1626.01", vat: "23", state_before: true
+  f.line name: "lodówka", qty: 1, unit: "szt.", net_unit_price: "1463.41",
+         net_amount: "1463.41", vat: "23", row_number: 1
+
+  f.totals gross: "-200.00", net: { "23" => "-162.60" }, vat: { "23" => "-37.40" }
+end
+```
+
+**The totals are stated, not computed**, and that is deliberate. A correction's summary
+buckets are deltas, and FA(3) does not require its rows to determine them — three of the
+Ministry's five worked corrections have no usable rows at all, one of them no `FaWiersz`
+whatsoever. Deriving the figures would invent a tax base the document already states, so
+`f.totals` is how a correction says what it does. It takes rate codes, like `f.line`, and maps
+them to summary buckets for you.
+
+Omit `ksef_number` when the invoice being corrected was issued outside KSeF; the document then
+carries the `NrKSeFN` marker instead. If the buyer's details are what changed, pass the old
+ones as `previous_buyers:` on `f.correction` and give both the old and new record the same
+`buyer_id`, which is what links them.
+
 ### Reading an invoice back
 
 `Ksef::FA3.parse` turns FA(3) XML into the same model the builder produces — useful for an
@@ -264,9 +310,10 @@ One field is inherently exempt: **`rounding` is not recorded in an FA(3) documen
 is inferred by asking which strategy reproduces the tax summaries, so a `:per_summary` invoice
 whose summaries happen to match `:per_line`'s — the common case — comes back as `:per_line`.
 
-Parsing also refuses what it cannot represent faithfully, rather than guessing: a `KOR`
-correction or any other non-`VAT` type, and a row with no `P_12` rate code. The message says
-that the document is fine and the model is the limit.
+Parsing also refuses what it cannot represent faithfully, rather than guessing: an invoice
+type the model does not carry, a row with no `P_12` rate code, a row priced gross, and a buyer
+identified by anything other than a NIP. The message says that the document is fine and the
+model is the limit, and names the construct.
 
 ### Querying the schema
 

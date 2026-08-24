@@ -29,12 +29,15 @@ module Ksef
     #
     # **Sign.** `TKwotowy` permits negative amounts and corrections need them, so a negative
     # net is not an error here.
+    #
+    # ## Where the checks live
+    #
+    # This module decides *what an invoice has* — a seller, a buyer, a header, annotations,
+    # lines — and the checks for each subject live with that subject: {SubjectChecks} for the
+    # four `Podmiot` roles, {CorrectionChecks} for the correction group, {FieldChecks} for
+    # anything measured against an `xsd:token` facet. All three are mixed in here, so they
+    # share one `self` and can call each other.
     module ModelValidator
-      # `TZnakowy` and `TZnakowy512`: both `minLength="1"`, differing only in the ceiling. A
-      # value that is present but empty is a schema violation, not an absent value.
-      SHORT_TEXT = 256
-      LONG_TEXT = 512
-
       # `Adnotacje` is an anonymous complex type, so the generated metadata keys it by path
       # rather than by name — the same key {Serializer} resolves when it rejects an unknown
       # element there.
@@ -51,6 +54,11 @@ module Ksef
       class << self
         # Value-level checks: encoding, xsd:token collapse, lengths, enum membership.
         include FieldChecks
+        # The party checks, which all four `Podmiot` roles share.
+        include SubjectChecks
+        # The correction group and its value objects. It includes {SubjectChecks} itself,
+        # `Podmiot1K` and `Podmiot2K` being parties like any other.
+        include CorrectionChecks
 
         # @param invoice [Invoice]
         # @return [Array<Issue>] empty when the model is sound
@@ -60,6 +68,9 @@ module Ksef
             *subject_errors(invoice.buyer, "buyer", role: :buyer),
             *header_errors(invoice),
             *annotation_errors(invoice.annotations),
+            *totals_errors(invoice.totals),
+            *correction_errors(invoice.correction),
+            *correcting_type_errors(invoice),
             *invoice.lines.each_with_index.flat_map { |line, index| line_errors(line, index) }
           ]
         end
@@ -73,33 +84,6 @@ module Ksef
           issues << enum_issue("invoice_type", "TRodzajFaktury", invoice.invoice_type)
           issues << future_date_issue(invoice.issue_date)
           issues.compact
-        end
-
-        def subject_errors(subject, field, role:)
-          return [Issue.new(field: field, message: "is required")] if subject.nil?
-          unless subject.respond_to?(:nip) && subject.respond_to?(:address)
-            return [Issue.new(field: field, message: "is not a Ksef::FA3::Subject")]
-          end
-
-          [
-            *nip_errors(subject.nip, "#{field}.nip"),
-            *name_errors(subject.name, "#{field}.name", role: role),
-            *address_errors(subject.address, "#{field}.address", role: role),
-            *flag_errors(subject, field, role: role)
-          ]
-        end
-
-        # `JST` and `GV` are written through {Formatting.flag}, which raises on anything that is
-        # not boolean-ish. Only a buyer carries them, so only a buyer is checked.
-        def flag_errors(subject, field, role:)
-          return [] unless role == :buyer
-
-          { "local_government_unit" => subject.local_government_unit,
-            "vat_group_member" => subject.vat_group_member }.filter_map do |name, value|
-            next if [true, false, nil, "1", "2", 1, 2].include?(value)
-
-            Issue.new(field: "#{field}.#{name}", message: "#{value.inspect} is not a yes/no value")
-          end
         end
 
         # `annotations` is a public constructor field the model tier used to ignore entirely, so
@@ -119,41 +103,6 @@ module Ksef
           (annotations.keys.map(&:to_s) - permitted).map do |unknown|
             Issue.new(field: "annotations", message: "#{unknown.inspect} is not an element of Adnotacje")
           end
-        end
-
-        # Checked here as well as in {Subject#to_fa3} on purpose. Serialisation raises, which
-        # is the right last defence but a poor first one: it reports the first bad NIP and
-        # hides the second.
-        #
-        # Note this is **stricter than TEST**, deliberately: KSeF validates NIP checksums in
-        # production only (docs/REFERENCE.md §15.3), so a green TEST run proves nothing here
-        # and relaxing the check would move the failure to the worst possible moment.
-        def nip_errors(nip, field)
-          NIP.validate!(nip, field: field)
-          []
-        rescue ValidationError => e
-          [Issue.new(field: field, message: e.message.sub("#{field} ", ""))]
-        end
-
-        # `TPodmiot1` requires `Nazwa`; `TPodmiot2` leaves it optional (§8.2a).
-        def name_errors(name, field, role:)
-          return [Issue.new(field: field, message: "is required for a seller")] if name.nil? && role == :seller
-
-          text_errors(name, field, LONG_TEXT)
-        end
-
-        # `Podmiot1/Adres` is mandatory, `Podmiot2/Adres` is not (§8.2a).
-        def address_errors(address, field, role:)
-          if address.nil?
-            return role == :seller ? [Issue.new(field: field, message: "is required for a seller")] : []
-          end
-          return [Issue.new(field: field, message: "is not a Ksef::FA3::Address")] unless address.respond_to?(:line1)
-
-          [
-            *text_errors(address.line1, "#{field}.line1", LONG_TEXT, required: true),
-            *text_errors(address.line2, "#{field}.line2", LONG_TEXT),
-            enum_issue("#{field}.country", "TKodKraju", address.country)
-          ].compact
         end
 
         def line_errors(line, index)

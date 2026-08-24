@@ -22,6 +22,41 @@ gem version for which API state".
 
 ### Added
 
+- **`KOR`, the correction — building, parsing and validating** (DESIGN.md §7.4,
+  `docs/REFERENCE.md` §8.4). A correction says what it corrects, why, and when it takes effect:
+
+  ```ruby
+  f.invoice_type "KOR"
+  f.correction reason: "obniżka ceny o 200 zł", effect: 3
+  f.corrects number: "FV/2026/02/150", issue_date: "2026-02-15", ksef_number: "…"
+  f.totals gross: "-200.00", net: { "23" => "-162.60" }, vat: { "23" => "-37.40" }
+  ```
+
+  `corrects` may be called up to fifty thousand times — art. 106j ust. 3 lets one correction
+  carry a discount across a whole period — and takes no `ksef_number` when the corrected invoice
+  was issued outside KSeF, which writes the `NrKSeFN` marker instead. `Ksef::FA3::Correction`
+  also carries `period`, `corrected_number`, and the previous state of either party
+  (`Podmiot1K`/`Podmiot2K`), linked to the live record by the `buyer_id` the schema calls
+  `IDNabywcy`. A row can be marked `state_before: true` to show a position as it was, and
+  `row_number:` gives the before/after pair the shared number that ties them together.
+
+  **A correction's tax summary is stated, not computed**, through `f.totals` — and that is the
+  decision worth knowing about. Its buckets are *deltas*, and FA(3) does not require the rows to
+  determine them: of the Ministry's five worked corrections, two carry no `FaWiersz` at all and
+  a third has a row stating no amount anywhere. Deriving the figures would invent a tax base the
+  document already states. `Invoice#lines` may therefore be empty, but **only** when totals are
+  stated; without either there is nothing to declare tax from, and the constructor says so.
+
+  Four of the Ministry's five corrections now parse, re-serialise and validate; the fifth is
+  refused for a row that states no price at all, with a message naming the construct.
+  `Ksef::FA3::Totals` is keyed by summary-element name rather than rate code, because that
+  mapping is not invertible — `"23"` and `"22"` share `P_13_1`.
+
+  One thing validation deliberately does **not** do: check the CRC-8 of a referenced KSeF
+  number. All six such numbers in the Ministry's own worked corrections fail it — they are
+  well-formed placeholders — so the check would refuse the Ministry's own documents. The shape
+  is checked; the checksum is not (`docs/REFERENCE.md` §8.4a).
+
 - **`Ksef::FA3.parse` — reading an FA(3) document back into the model** (DESIGN.md §7.6).
   The round-trip law runs green over a pinned corpus of the Ministry's own sample invoices,
   which turned out not to live in `ksef-api` at all: they come from `CIRFMF/ksef-pdf-generator`
@@ -33,8 +68,9 @@ gem version for which API state".
   would drop, computed by difference against the serializer so it cannot drift from what is
   actually written; FA(3) is much larger than this model, so re-serialising a document you did
   not write is lossy. And it **refuses what it cannot represent faithfully** rather than
-  guessing: a `KOR` or any other non-`VAT` type, and a row with no `P_12` rate code. Those
-  messages say the document is fine and the model is the limit.
+  guessing: an invoice type the model does not carry, a row with no `P_12` rate code, a row
+  priced gross, and a buyer identified by anything but a NIP. Those messages say the document is
+  fine and the model is the limit, and name the construct.
 
 - **Validator tier 1, in two halves** (DESIGN.md §7.7, amended). `Ksef::FA3::ModelValidator`
   checks the invoice object — required fields, enum membership read from the generated schema

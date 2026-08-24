@@ -80,6 +80,45 @@ RSpec.describe Ksef::FA3::Subject do
     end
   end
 
+  # `Podmiot1K`/`Podmiot2K` carry the party as the *corrected* invoice stated them (§8.4).
+  # They follow their live counterparts on what is mandatory, and differ on the rest.
+  describe "the two correction roles" do
+    it "gives a previous buyer its linking key and neither JST nor GV" do
+      content = subject_with(buyer_id: "0001").to_fa3(role: :previous_buyer)
+
+      expect(content["IDNabywcy"]).to eq("0001")
+      expect(content.keys).not_to include("JST", "GV")
+    end
+
+    it "gives a live buyer the same linking key, which Podmiot2 also carries" do
+      expect(subject_with(buyer_id: "0001").to_fa3(role: :buyer)["IDNabywcy"]).to eq("0001")
+    end
+
+    it "omits the key entirely when there is none, rather than writing an empty element" do
+      expect(subject_with.to_fa3(role: :previous_buyer).keys).not_to include("IDNabywcy")
+    end
+
+    it "gives a previous seller no linking key at all, its type having no such element" do
+      expect(subject_with(buyer_id: "0001").to_fa3(role: :previous_seller).keys).not_to include("IDNabywcy")
+    end
+
+    it "requires a name and an address of a previous seller, as of a seller" do
+      bare = described_class.new(nip: "9999999999")
+
+      expect { bare.to_fa3(role: :previous_seller) }
+        .to raise_error(Ksef::ValidationError, /previous_seller \(Podmiot1K\) must have a name/)
+      expect { described_class.new(nip: "9999999999", name: "ACME").to_fa3(role: :previous_seller) }
+        .to raise_error(Ksef::ValidationError, /previous_seller \(Podmiot1K\) must have an address/)
+    end
+  end
+
+  # Silently treating an unrecognised role as a buyer would write `JST`/`GV` into an element
+  # that has neither, and {Serializer} would then blame the caller's element names.
+  it "refuses a role it does not know" do
+    expect { subject_with.to_fa3(role: :vendor) }
+      .to raise_error(Ksef::ValidationError, /Unknown subject role :vendor\. Permitted: :seller, :buyer/)
+  end
+
   describe "#with" do
     it "re-runs the constructor, so the NIP is still normalised on serialisation" do
       changed = subject_with.with(nip: "PL111-111-11-11")

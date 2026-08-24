@@ -23,6 +23,16 @@ module Ksef
     # rejection. `String#strip` raises `Encoding::CompatibilityError` on such a value, out of
     # this gem's hierarchy entirely — so encoding is checked before anything reads the string.
     module FieldChecks
+      # `TZnakowy` and `TZnakowy512`: both `minLength="1"`, differing only in the ceiling. A
+      # value that is present but empty is a schema violation, not an absent value. They live
+      # here rather than on {ModelValidator} because every module that measures a field
+      # includes this one.
+      SHORT_TEXT = 256
+      LONG_TEXT = 512
+
+      # `IDNabywcy` restricts `TZnakowy50` further, to 32.
+      BUYER_ID_TEXT = 32
+
       # `xsd:token`'s `whiteSpace="collapse"`.
       COLLAPSE = /\s+/
 
