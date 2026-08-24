@@ -133,4 +133,81 @@ RSpec.describe "the FA(3) round-trip law" do
       expect(Ksef::FA3.parse(xml).lines.size).to eq(3)
     end
   end
+
+  # The Ministry's own twenty-six worked examples (docs/REFERENCE.md §1.5). They matter for two
+  # opposite reasons: the twelve `VAT` ones are real invoices this model must handle, and the
+  # fourteen others are the only existing examples of the types it must **refuse** rather than
+  # quietly mangle.
+  describe "the Ministry's worked examples" do
+    it "finds all twenty-six, so a missing pin is not silent" do
+      expect(FA3Corpus.ministry.size).to eq(FA3Corpus::MINISTRY_COUNT)
+    end
+
+    it "covers every RodzajFaktury the schema defines" do
+      types = FA3Corpus.ministry.map { |relative| FA3Corpus.invoice_type(relative) }.uniq
+
+      expect(types).to match_array(Ksef::FA3::Generated::Enums.values_for("TRodzajFaktury"))
+    end
+
+    # Our XSD rewriting (§8.3) and validator, against the Ministry's own documents.
+    FA3Corpus.ministry.each do |relative|
+      it "#{relative} is schema-valid" do
+        expect(Ksef::FA3::Validator.errors_for(FA3Corpus.read(relative))).to be_empty
+      end
+    end
+
+    describe "the eight this model represents" do
+      FA3Corpus::MINISTRY_MODELLED.each do |relative|
+        it "#{relative} parses and re-serialises to a schema-valid document" do
+          parsed = Ksef::FA3.parse(FA3Corpus.read(relative))
+
+          expect(parsed.lines).not_to be_empty
+          expect(Ksef::FA3::Validator.errors_for(parsed.to_xml)).to be_empty
+        end
+      end
+
+      # Tier 1 must not reject a real invoice. The absence of exactly this check is what let the
+      # whitespace-collapse bug ship: the corpus was asserted against tier 2 only.
+      it "all pass validator tier 1" do
+        FA3Corpus::MINISTRY_MODELLED.each do |relative|
+          expect(Ksef::FA3.parse(FA3Corpus.read(relative)).errors).to be_empty, relative
+        end
+      end
+    end
+
+    # Four VAT invoices that are perfectly valid and beyond this model. Each refusal names the
+    # construct and says the document is fine — which is the whole point of refusing rather than
+    # parsing them into something lossy.
+    describe "the four VAT examples beyond the model" do
+      FA3Corpus::MINISTRY_BEYOND_MODEL.each do |relative, reason|
+        it "#{relative} is refused, naming the construct" do
+          expect { Ksef::FA3.parse(FA3Corpus.read(relative)) }
+            .to raise_error(Ksef::ValidationError, reason)
+          expect { Ksef::FA3.parse(FA3Corpus.read(relative)) }
+            .to raise_error(Ksef::ValidationError, /document itself is fine/)
+        end
+      end
+
+      it "accounts for every VAT sample, so none is quietly unclassified" do
+        vat = FA3Corpus.ministry.select { |r| FA3Corpus.invoice_type(r) == "VAT" }
+
+        expect(vat).to match_array(FA3Corpus::MINISTRY_MODELLED + FA3Corpus::MINISTRY_BEYOND_MODEL.keys)
+      end
+    end
+
+    # The refusal path, against the documents that motivate it. A KOR carries its corrections in
+    # `DaneFaKorygowanej` and its amounts as deltas; parsing one into this model would drop the
+    # first and recompute the second, producing a different invoice under the same number.
+    describe "the fourteen the model cannot represent" do
+      (FA3Corpus.ministry - FA3Corpus::MINISTRY_MODELLED - FA3Corpus::MINISTRY_BEYOND_MODEL.keys)
+        .each do |relative|
+        it "#{relative} is refused, naming the type and blaming the model" do
+          type = FA3Corpus.invoice_type(relative)
+
+          expect { Ksef::FA3.parse(FA3Corpus.read(relative)) }
+            .to raise_error(Ksef::ValidationError, /This is a #{type} invoice.*document itself is fine/m)
+        end
+      end
+    end
+  end
 end

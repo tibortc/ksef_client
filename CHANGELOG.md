@@ -61,6 +61,17 @@ gem version for which API state".
   re-serialising cannot deny a declaration the document made (cash accounting, reverse charge,
   split payment, a real VAT exemption).
 
+- **Pinned the Ministry's 26 worked FA(3) examples** as test fixtures
+  (`spec/fixtures/fa3/mf-samples/`, `docs/REFERENCE.md` §1.5) — all seven `RodzajFaktury` values,
+  and the only corpus of non-`VAT` invoice types in existence: two independent sweeps of every
+  CIRFMF repository, all branches and full history, found every FA(3) fixture there to be `VAT`.
+  All 26 validate against the pinned XSD. They are not packaged in the gem.
+
+  This is the first artifact pinned from outside the CIRFMF organisation, so §1.2's MIT reasoning
+  does not reach it; the redistribution rests on `podatki.gov.pl`'s site-wide statement that use
+  requires no consent, with the caveat — recorded rather than glossed — that the files sit on a
+  subdomain carrying no licence statement of its own.
+
 - **Pinned `faktury/weryfikacja-faktury.md`** (`docs/REFERENCE.md` §15), the invoice-admission
   rules KSeF applies on submission. It settles two open questions: validator tier 3's
   business-rule catalogue is **absent from upstream**, not merely unpinned (§15.6), while
@@ -426,6 +437,20 @@ gem version for which API state".
   validation rather than transport alone.
 
 ### Fixed
+
+- **VAT rate code `3` reported into the wrong summary bucket.** Buckets pair a current rate with
+  the one it replaced — 23/22, 8/7, 4/3 — and bucket 5 is not a rate bucket at all: `P_14_5` is
+  *"kwota podatku od wartości dodanej"*, foreign VAT under the OSS procedure, whose per-line rate
+  lives in `P_12_XII`. Mapping `3` there meant a domestic 3% sale was declared as OSS foreign VAT,
+  on a document the XSD accepts. Found by comparing against `ksef-pdf-generator`, the only
+  official code that renders these buckets (`docs/REFERENCE.md` §8.1a).
+
+- **`Ksef::FA3.parse` refused a valid document for the wrong reason.** Keyword arguments evaluate
+  in source order, so the row reader ran before the invoice-type check — and the Ministry's
+  collective corrections carry no `FaWiersz` at all, so a `KOR` was rejected with "Invoice has no
+  FaWiersz rows". True, and the wrong diagnosis. The type is now checked first, and a row priced
+  gross (`P_9B`/`P_11A` under art. 106e ust. 7-8) is named as such rather than reported as
+  missing a net value.
 
 - **Two failures from the first live nightly** (2026-08-24), both ours rather than the
   service's. An integration spec asserted `be_success` on a deliberately duplicated invoice —

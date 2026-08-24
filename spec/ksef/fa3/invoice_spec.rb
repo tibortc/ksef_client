@@ -278,6 +278,17 @@ RSpec.describe Ksef::FA3::Invoice do
       expect(doc.at_xpath("//Fa/P_14_2").text).to eq("15.00")
     end
 
+    # The pair a review found mis-mapped: 3% belongs with 4% in the passenger-taxi bucket,
+    # not in bucket five, which is OSS foreign VAT (§8.1a).
+    it "sums 4% and 3% into P_13_4, leaving the OSS bucket untouched" do
+      doc = rendered(%w[4 200], %w[3 100])
+
+      expect(doc.at_xpath("//Fa/P_13_4").text).to eq("300.00")
+      expect(doc.at_xpath("//Fa/P_14_4").text).to eq("11.00")
+      expect(doc.at_xpath("//Fa/P_13_5")).to be_nil
+      expect(doc.at_xpath("//Fa/P_14_5")).to be_nil
+    end
+
     # Two non-taxable categories sharing a net bucket with no tax element at all.
     it "sums np I and np II into P_13_8" do
       doc = rendered(["np I", "100"], ["np II", "200"])

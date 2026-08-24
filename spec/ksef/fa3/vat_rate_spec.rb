@@ -41,4 +41,32 @@ RSpec.describe Ksef::FA3::VatRate do
     expect(described_class.percentage("zw")).to be_nil
     expect(described_class.percentage("0 WDT")).to be_nil
   end
+
+  # Buckets pair a current rate with the one it replaced. Getting this wrong is invisible to
+  # the XSD: a mis-bucketed amount still validates, it just declares the wrong kind of tax.
+  describe "the current/historical rate pairs" do
+    it "puts 23 and 22 in bucket one, 8 and 7 in bucket two" do
+      expect(described_class.bucket("23")).to eq(described_class.bucket("22"))
+      expect(described_class.bucket("8")).to eq(described_class.bucket("7"))
+    end
+
+    # `"3"` used to map to bucket *five*, which is not a rate bucket at all: `P_14_5` is
+    # "kwota podatku od wartości dodanej" — foreign VAT under the OSS procedure of dział XII
+    # rozdział 6a — so a domestic 3% sale was declared as OSS foreign VAT (§8.1a).
+    it "puts 4 and 3 in bucket four, the passenger-taxi flat rate" do
+      expect(described_class.bucket("4")).to eq(%w[P_13_4 P_14_4])
+      expect(described_class.bucket("3")).to eq(%w[P_13_4 P_14_4])
+    end
+
+    # OSS lines carry their rate in `P_12_XII`, a percentage, not as a `P_12` code — so no
+    # rate code reaching this table should ever select bucket five.
+    it "leaves bucket five unreachable, because OSS has no P_12 code" do
+      expect(described_class::BUCKETS.values.flatten).not_to include("P_13_5", "P_14_5")
+      expect(described_class.unreachable_elements).to eq(%w[P_13_5 P_14_5])
+    end
+
+    it "still maps every code the schema defines" do
+      expect(described_class.unmapped_codes).to be_empty
+    end
+  end
 end

@@ -54,8 +54,16 @@ module Ksef
           document = xml.is_a?(Nokogiri::XML::Document) ? xml : Nokogiri::XML(xml)
           root = verified_root(document)
           fa_node = require_element(root, "Fa", context: Serializer::ROOT)
+          # **Before anything else is read.** Keyword arguments evaluate in source order, so
+          # doing this inside {#build} let the row reader run first — and the Ministry's own
+          # collective corrections carry no `FaWiersz` at all, so a `KOR` was refused with
+          # "Invoice has no FaWiersz rows". True, and the wrong diagnosis: it blamed a
+          # perfectly good document for lacking something its type does not need. A ZAL is the
+          # same case, its rows being `minOccurs="0"` and explicitly "opcjonalny dla faktury
+          # zaliczkowej".
+          type = supported_type!(text(fa_node, "RodzajFaktury") || "VAT")
 
-          resolve_rounding(build(document, root, fa_node), fa_node)
+          resolve_rounding(build(document, root, fa_node, type), fa_node)
         end
 
         private
@@ -83,7 +91,7 @@ module Ksef
         # Built with `:per_line`, which {#resolve_rounding} then confirms or replaces. The
         # strategy is not a field in the document, so it cannot be read — only inferred from
         # the summaries, and that needs the lines parsed first.
-        def build(document, root, fa_node)
+        def build(document, root, fa_node, type)
           Invoice.new(
             seller: subject_from(require_element(root, "Podmiot1", context: Serializer::ROOT), role: :seller),
             buyer: subject_from(require_element(root, "Podmiot2", context: Serializer::ROOT), role: :buyer),
@@ -98,7 +106,7 @@ module Ksef
             # re-emitting the defaults would silently deny every one of them
             # ({Invoice::DEFAULT_ANNOTATIONS}).
             annotations: ElementTree.to_hash(element(fa_node, "Adnotacje")),
-            invoice_type: supported_type!(text(fa_node, "RodzajFaktury") || "VAT"),
+            invoice_type: type,
             # Kept as the string it was written as, so a round trip reproduces it byte for
             # byte — {Formatting.date_time} passes a String through untouched. Parsing it
             # into a Time would re-render it, and `+02:00` would come back as `Z`.
