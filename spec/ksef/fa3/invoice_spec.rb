@@ -141,6 +141,7 @@ RSpec.describe Ksef::FA3::Invoice do
   describe "validation" do
     it "requires at least one line" do
       expect { invoice(lines: []) }.to raise_error(Ksef::ValidationError, /at least one line/)
+      expect { invoice(lines: nil) }.to raise_error(Ksef::ValidationError, /at least one line/)
     end
 
     it "rejects a seller NIP that fails its checksum" do
@@ -153,6 +154,87 @@ RSpec.describe Ksef::FA3::Invoice do
     it "exposes validate! and valid? against the schema" do
       expect(invoice.valid?).to be(true)
       expect(invoice.validate!).to be(true)
+    end
+  end
+
+  # Several rate codes report into one bucket (§8.1a). Assigning per code instead of
+  # accumulating let the last one win, understating the tax base while P_15 stayed correct —
+  # an internally inconsistent invoice that the XSD accepts.
+  describe "rate codes that share a summary bucket" do
+    def rendered(*rates)
+      lines = rates.map { |rate, price| line(rate: rate, price: price, quantity: 1) }
+      Nokogiri::XML(invoice(lines: lines).to_xml).remove_namespaces!
+    end
+
+    it "sums 23% and 22% into P_13_1 and P_14_1" do
+      doc = rendered(%w[23 100], %w[22 200])
+
+      expect(doc.at_xpath("//Fa/P_13_1").text).to eq("300.00")
+      expect(doc.at_xpath("//Fa/P_14_1").text).to eq("67.00")
+      expect(doc.at_xpath("//Fa/P_15").text).to eq("367.00")
+    end
+
+    it "sums 8% and 7% into bucket two" do
+      doc = rendered(%w[8 100], %w[7 100])
+
+      expect(doc.at_xpath("//Fa/P_13_2").text).to eq("200.00")
+      expect(doc.at_xpath("//Fa/P_14_2").text).to eq("15.00")
+    end
+
+    # Two non-taxable categories sharing a net bucket with no tax element at all.
+    it "sums np I and np II into P_13_8" do
+      doc = rendered(["np I", "100"], ["np II", "200"])
+
+      expect(doc.at_xpath("//Fa/P_13_8").text).to eq("300.00")
+      expect(doc.at_xpath("//Fa/P_14_8")).to be_nil
+    end
+
+    it "keeps the document internally consistent, which is the point" do
+      doc = rendered(%w[23 100], %w[22 200])
+      base = BigDecimal(doc.at_xpath("//Fa/P_13_1").text)
+      tax = BigDecimal(doc.at_xpath("//Fa/P_14_1").text)
+
+      expect(base + tax).to eq(BigDecimal(doc.at_xpath("//Fa/P_15").text))
+      expect(Ksef::FA3::Validator.errors_for(invoice(lines: [line(rate: "23", price: "100", quantity: 1),
+                                                             line(rate: "22", price: "200", quantity: 1)]).to_xml))
+        .to be_empty
+    end
+  end
+
+  describe "annotations" do
+    it "defaults to not-applicable, so an ordinary invoice needs no knowledge of them" do
+      expect(invoice.annotations).to eq(described_class::DEFAULT_ANNOTATIONS)
+    end
+
+    # The parser reads them; carrying them means re-serialising cannot deny a declaration the
+    # document made. Two invoices differing only here are different invoices.
+    it "is carried verbatim when given" do
+      declared = described_class::DEFAULT_ANNOTATIONS.merge("P_16" => "1")
+      doc = Nokogiri::XML(invoice(annotations: declared).to_xml).remove_namespaces!
+
+      expect(doc.at_xpath("//Adnotacje/P_16").text).to eq("1")
+      expect(invoice(annotations: declared)).not_to eq(invoice)
+    end
+  end
+
+  # `Data#with` does not call a custom initialize on Ruby 3.2, which is the declared floor, so
+  # every canonicalisation was bypassable through a public method there (see FA3::Canonical).
+  describe "#with" do
+    it "re-runs the constructor, so invariants still hold" do
+      expect { invoice.with(rounding: :bankers) }
+        .to raise_error(Ksef::ValidationError, /Unknown rounding strategy/)
+      expect { invoice.with(lines: []) }.to raise_error(Ksef::ValidationError, /at least one line/)
+    end
+
+    it "canonicalises the replacement value too" do
+      expect(invoice.with(issued_at: Time.utc(2026, 1, 2, 3, 4, 5)).issued_at)
+        .to eq("2026-01-02T03:04:05Z")
+    end
+
+    it "keeps the retained document" do
+      parsed = Ksef::FA3.parse(invoice.to_xml)
+
+      expect(parsed.with(number: "FV/OTHER").raw_document).to be(parsed.raw_document)
     end
   end
 
@@ -183,6 +265,111 @@ RSpec.describe Ksef::FA3::Invoice do
       expect(node.text).to eq("FA")
       expect(node["kodSystemowy"]).to eq("FA (3)")
       expect(node["wersjaSchemy"]).to eq("1-0E")
+    end
+  end
+
+  # raw_document is provenance, not identity (see {Ksef::FA3::Invoice::IDENTITY}). Without
+  # this, a parsed invoice could never equal the one that produced the document.
+  describe "identity" do
+    # Fully determined: every field the model holds is one the document will carry. A line
+    # that leaves `net_amount` to be derived comes back stating it, because `P_11` is in the
+    # document — a real difference, pinned by its own example in the parser spec.
+    def determined = invoice(lines: [line(net_amount: BigDecimal("1500"))])
+
+    it "ignores the retained document when comparing" do
+      built = determined
+      parsed = Ksef::FA3.parse(built.to_xml)
+
+      expect(parsed.raw_document).not_to be_nil
+      expect(built.raw_document).to be_nil
+      expect(parsed).to eq(built)
+      expect(parsed.hash).to eq(built.hash)
+    end
+
+    # Every member of IDENTITY, one at a time. Pinning inequality on `number` alone let a
+    # mutation that dropped `issued_at` from IDENTITY survive the whole suite — equality was
+    # thoroughly tested, inequality barely at all.
+    it "distinguishes invoices differing in any single identity field" do
+      differences = {
+        number: "FV/OTHER", issue_date: Date.new(2026, 1, 1), currency: "EUR",
+        issued_at: "2020-01-01T00:00:00Z", rounding: :per_summary, invoice_type: "KOR",
+        annotations: Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS.merge("P_16" => "1"),
+        lines: [line(price: "999")], seller: buyer, buyer: seller
+      }
+
+      expect(Ksef::FA3::Invoice::IDENTITY).to match_array(differences.keys)
+      differences.each do |field, value|
+        expect(invoice).not_to eq(invoice(**{ field => value })), "#{field} is not part of identity"
+        expect(invoice.hash).not_to eq(invoice(**{ field => value }).hash), "#{field} is not hashed"
+      end
+    end
+
+    # The `is_a?` guard in Provenance#==: comparing against another Data object is the case
+    # worth covering, since member-wise comparison would otherwise be attempted on it.
+    it "is not equal to something that is not an invoice" do
+      expect(invoice).not_to eq("FV/2026/08/001")
+      expect(invoice).not_to eq(invoice.lines.first)
+    end
+
+    it "works as a Hash key" do
+      table = { determined => :first }
+
+      expect(table[Ksef::FA3.parse(determined.to_xml)]).to be(:first)
+    end
+  end
+
+  describe "#inspect" do
+    # `Data#inspect` would dump the whole XML document into any line that mentions an
+    # invoice — including RSpec diffs and exception messages.
+    it "redacts the retained document rather than printing it" do
+      text = Ksef::FA3.parse(invoice.to_xml).inspect
+
+      expect(text).to include("#<data Ksef::FA3::Invoice", "raw_document=#<Nokogiri::XML::Document (retained)>")
+      expect(text).not_to include("Naglowek")
+    end
+
+    it "says so plainly when there is no document" do
+      expect(invoice.inspect).to include("raw_document=nil")
+    end
+
+    it "is what to_s gives too" do
+      expect(invoice.to_s).to eq(invoice.inspect)
+    end
+  end
+
+  describe "#unmapped_elements" do
+    it "is empty for an invoice that was built rather than parsed" do
+      expect(invoice.unmapped_elements).to eq([])
+      expect(invoice).to be_fully_mapped
+    end
+
+    it "returns the paths sorted, as documented" do
+      xml = invoice.to_xml
+                   .sub("<P_2>", "<P_1M>Warszawa</P_1M>\n      <P_2>")
+                   .sub("<Adnotacje>", "<P_6>2026-08-01</P_6>\n      <Adnotacje>")
+      paths = Ksef::FA3.parse(xml).unmapped_elements
+
+      expect(paths).to eq(paths.sort)
+      expect(paths).to eq(["Faktura/Fa/P_1M", "Faktura/Fa/P_6"])
+    end
+
+    # It serialises to find out what serialising would lose, so an invoice that cannot be
+    # serialised at all has to say that rather than leak the underlying complaint.
+    it "explains itself when the invoice cannot be re-serialised" do
+      # A NIP that fails its checksum: parse accepts it (§15.3), to_fa3 refuses it.
+      parsed = Ksef::FA3.parse(invoice.to_xml.sub("<NIP>1111111111</NIP>", "<NIP>1111111112</NIP>"))
+
+      expect { parsed.unmapped_elements }
+        .to raise_error(Ksef::ValidationError, /cannot be re-serialised.*invalid check digit/m)
+    end
+
+    it "reports an element the model cannot carry" do
+      # `P_1M`, the place of issue: valid FA(3), and not in this model.
+      xml = invoice.to_xml.sub("<P_2>", "<P_1M>Warszawa</P_1M>\n      <P_2>")
+      parsed = Ksef::FA3.parse(xml)
+
+      expect(parsed.unmapped_elements).to eq(["Faktura/Fa/P_1M"])
+      expect(parsed).not_to be_fully_mapped
     end
   end
 end

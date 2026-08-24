@@ -370,6 +370,8 @@ Nokogiri-based; consumes generated ordering; formatting rules centralized: BigDe
 
 `Ksef::FA3.parse(xml)` → model objects, best-effort typed; **always** retains the raw `Nokogiri::XML::Document` (`#raw_document`) so nothing unmapped is lost. Ministry-published FA(3) sample files are the fixture corpus. **Round-trip law:** for every builder golden file, `parse(serialize(invoice))` reproduces equivalent models, and `serialize(parse(sample))` is XSD-valid.
 
+**Corrected 2026-08-24 — the corpus is not where this said it was.** `ksef-api` publishes no example invoice at all; the samples live in `CIRFMF/ksef-pdf-generator` and `CIRFMF/ksef-client-csharp`, pinned per-repository at `spec/fixtures/fa3/` (`docs/REFERENCE.md` §1.4). Two consequences for the law above. The C# samples are **templates** carrying `#nip#`-style placeholders, so a fixture helper substitutes them; and `#raw_document` is load-bearing rather than a nicety, because a real sample uses `Podmiot3`, `DaneKontaktowe`, `OkresFa` and much else this model does not carry — so `serialize(parse(sample))` is XSD-valid *and lossy*, and the law says nothing stronger than validity on purpose. `#unmapped_elements` exists so that loss is visible before a caller re-serialises a document they did not write.
+
 ### 7.7 Validation — three tiers, one entry point
 
 `invoice.validate!` (and `#valid?` / `#errors`) runs:
@@ -379,6 +381,21 @@ Nokogiri-based; consumes generated ordering; formatting rules centralized: BigDe
 3. **Business tier:** reconciliation rules that pass XSD but bounce at KSeF — line sums vs rate summaries vs `P_15`, rate-bucket consistency, correction references present for KOR types. Seed from Ministry guidance **[VERIFY published business-rule list]**; the catalog grows over the gem's life.
 
 Transport's `send_invoice` runs `validate!` by default (`validate: false` opt-out).
+
+**Amended 2026-08-24 — tier 1 is two things, not one.** `docs/REFERENCE.md` §15.1 pins the
+admission rules KSeF actually applies, and four of the six are **byte-level properties of the
+serialized document**: no BOM, no processing instructions, a prolog that does not contradict
+UTF-8, and no discouraged Unicode characters. A model tier as described above — "required
+fields per invoice type, enum membership, NIP checksums, date sanity" — structurally cannot
+see any of them, because at that point there is no document yet. So tier 1 splits:
+
+1. **Model checks**, as originally described, on the object graph.
+2. **Document checks**, on the bytes `#to_xml` produces, run before they are hashed and
+   encrypted.
+
+Both belong under `validate!`, and (2) has to run last. Note tier 2 now also covers
+well-formedness, which the XSD does not: libxml2 recovers from broken XML by default, and
+`Validator` had to be taught to consult `document.errors` (§15.1).
 
 ---
 
@@ -460,17 +477,37 @@ Build the **certificate flow first**: it is the only one that can bootstrap a cr
 
 **Both auth flows and the crypto module have since landed** (`Ksef::Crypto`, `Ksef::Auth::Token`, `POST /auth/ksef-token`). One correction to §6.4 while doing it: the golden vectors it asks for **do not exist upstream** — neither reference client commits plaintext/ciphertext pairs — so the primitives are pinned to NIST SP 800-38A and FIPS 180-4 instead, and the OAEP digest and MGF1 digest are pinned behaviourally rather than by trusting an option name. `docs/REFERENCE.md` §10.1 records what replaced them and why it is at least as strong.
 
-**The session layer, UPO handling and the `Ksef::Client` facade have landed too**, so §8's snippet now runs end to end — `spec/ksef/client_spec.rb` drives it verbatim. **But it runs against stubs.** The first gate says "against TEST", and no session has ever been opened against the real service, so it is *not* met. `spec/integration/session_flow_spec.rb` is what will settle it — written 2026-08-23, and **not yet run against TEST**. Until this file existed, three documents said "the nightly will settle it" while the nightly contained no session spec at all: the claim was empty, and a documentation review caught it.
+**The session layer, UPO handling and the `Ksef::Client` facade have landed too**, so §8's snippet runs end to end — `spec/ksef/client_spec.rb` drives it verbatim against stubs, and `spec/integration/session_flow_spec.rb` drives it against the real service.
+
+**The first gate is met, as of 2026-08-24.** **Verified against live TEST on 2026-08-24** (nightly run `32692339217`): a session was opened, an invoice this gem built was encrypted, submitted and **accepted**, a KSeF number was assigned and its CRC-8 agreed with ours, the session reported processed after close, and the UPO came back in the `upo-v4-3` namespace with its bytes matching `x-ms-meta-hash`. Twenty-two of that run's twenty-four examples passed. It also answered §9's last session-layer question — the collective `downloadUrl` arrives **absolute** — and turned §14.6's `X-KSeF-Feature` header from believed into verified.
+
+The two failures were **ours, not the service's**, and both are now fixed. One spec asserted `be_success` on a deliberately duplicated invoice, which is a contradiction: KSeF did exactly what §12.1 describes, returning `440` with the original's `originalKsefNumber`. The other found a real defect — a genuine UPO is XAdES-signed and therefore fails upstream's own UPO schema, which declares no `ds:Signature`; none of the six published examples is signed, so nothing offline could have shown it (§14.7).
 
 Gate status, precisely:
 
 | Gate | State |
 |---|---|
-| §8 contract runs against TEST | **not met** — runs against stubs; awaiting a live session |
+| §8 contract runs against TEST | **met**, verified live 2026-08-24 (nightly run `32692339217`) |
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
-| All seven types build, validate, round-trip | **not met** — only `VAT`; validator tiers 1 and 3 outstanding |
+| All seven types build, validate, round-trip | **not met** — only `VAT`; validator tiers 1 and 3 outstanding. **Round-trip is now met for `VAT`**: the parser landed 2026-08-24 and the law runs green over the pinned corpus |
 
 Remaining for Phase 2: validator tiers 1 and 3, then the six other invoice types starting with KOR (§7.4).
+
+**The parser landed 2026-08-24**, with the sample corpus §7.6 assumed and did not have
+(`docs/REFERENCE.md` §1.4). Two findings changed the plan around it, both ledgered:
+
+- **Tier 3's rule catalogue does not exist upstream.** `faktury/weryfikacja-faktury.md` — the
+  document §9 named as the place to look — is a list of *technical admission* checks, and
+  turned out to be the missing first-tier source for tier **1** instead. No file in
+  `ksef-api` states a reconciliation rule (`docs/REFERENCE.md` §15.6). So tier 1 is now the
+  better-specified of the two and should be built first — which reverses **§9's** framing of
+  tier 3 as "the only genuinely open blocker", i.e. the thing to resolve first. (An earlier
+  version of this note said it reversed §7.7's order; §7.7 states the order the tiers *run*
+  in, which is unchanged. See §7.7's amendment for what did change there.)
+- **Tier 1 is provably not redundant with tier 2.** Upstream ships an invoice that is
+  XSD-valid — once its `#nip#` placeholder is substituted (§1.4) — and that the pinned rules
+  say KSeF rejects, on forbidden C1 characters a schema cannot see (§15.1). It is pinned, and
+  `spec/ksef/fa3/round_trip_spec.rb` asserts both halves.
 
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.

@@ -30,8 +30,19 @@ module Ksef
 
         # @param xml [String, Nokogiri::XML::Document]
         # @return [Array<String>] validation messages, empty when the document is valid
+        #
+        # **Well-formedness is checked first, and separately.** Nokogiri parses in recovery
+        # mode by default, so a document with an unclosed root or trailing text after it comes
+        # back as a usable tree — and that recovered tree validates clean against the schema.
+        # Until 2026-08-24 this method never looked at `document.errors`, so `valid?` returned
+        # true for XML that is not XML. KSeF's first admission rule is "a correct XML 1.0
+        # document" (docs/REFERENCE.md §15.1), and it is the rule most likely to be violated by
+        # a broken template or a truncated upload.
         def errors_for(xml)
           document = xml.is_a?(Nokogiri::XML::Document) ? xml : Nokogiri::XML(xml)
+          malformed = document.errors.map { |error| "not well-formed XML: #{error.message.strip}" }
+          return malformed unless malformed.empty?
+
           schema.validate(document).map(&:message)
         end
 

@@ -148,4 +148,68 @@ RSpec.describe Ksef::UPO::Validator do
       expect(messy.to_s).to eq("2 error(s), 1 warning(s)")
     end
   end
+
+  # A real UPO is XAdES-signed by the Ministry (§12) — that is what makes it proof of receipt.
+  # `upo-v4-3.xsd` declares no `ds:Signature` anywhere, and **not one of upstream's six
+  # examples is signed**, so offline nothing revealed that a genuine UPO fails upstream's own
+  # schema on the signature element. The first live nightly did, 2026-08-24 (§14.7).
+  describe "a signed UPO, as KSeF actually issues them" do
+    # The Ministry's enveloped signature, reduced to the part that matters here: an element in
+    # the xmldsig namespace that the UPO schema does not declare.
+    def signed(path)
+      xml = read(path)
+      signature = <<~SIG
+        <ds:Signature xmlns:ds="#{described_class::SIGNATURE_NAMESPACE}">
+          <ds:SignedInfo><ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/></ds:SignedInfo>
+          <ds:SignatureValue>Zm9v</ds:SignatureValue>
+        </ds:Signature>
+      SIG
+      root = Nokogiri::XML(xml).root.name
+      xml.sub("</#{root}>", "#{signature}</#{root}>")
+    end
+
+    it "would fail the pinned schema outright, which is the defect" do
+      document = Nokogiri::XML(signed(examples.first))
+      raw = described_class.schema.validate(document).map(&:message)
+
+      expect(raw.any? { |m| m.include?("Signature") && m.include?("not expected") }).to be(true)
+    end
+
+    it "validates once the signature is set aside" do
+      result = described_class.validate(signed(examples.first))
+
+      expect(result.errors).to be_empty
+      expect(result).to be_valid
+    end
+
+    it "keeps reporting the environment-marker warning of §14.3" do
+      result = described_class.validate(signed(examples.first))
+
+      expect(result.warnings.size).to eq(1)
+      expect(result.receiving_party).to include("Ministerstwo Finans")
+    end
+
+    # Stripping is not leniency: anything else wrong with the document still surfaces.
+    it "still reports a genuine violation alongside a signature" do
+      broken = signed(examples.first).sub("<NumerReferencyjny", "<Nieoczekiwany/><NumerReferencyjny")
+
+      expect(described_class.validate(broken).errors).not_to be_empty
+    end
+
+    it "does not mutate the document it was given" do
+      xml = signed(examples.first)
+      document = Nokogiri::XML(xml)
+      described_class.validate(document)
+
+      expect(document.xpath("//ds:Signature", "ds" => described_class::SIGNATURE_NAMESPACE))
+        .not_to be_empty
+    end
+
+    describe ".signed?" do
+      it "is true for a signed document and false for upstream's examples" do
+        expect(described_class.signed?(signed(examples.first))).to be(true)
+        examples.each { |path| expect(described_class.signed?(read(path))).to be(false) }
+      end
+    end
+  end
 end

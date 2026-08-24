@@ -44,14 +44,22 @@ submitted.
 > drives that exact snippet end to end, from `Ksef::FA3.build` through `send_invoice`,
 > `wait_until_accepted` and `upo`.
 >
-> **The honest caveat:** all of it above except the certificate flow is verified against
-> stubbed HTTP, not against KSeF. **No session has ever been opened against the real
-> service.** `spec/integration/session_flow_spec.rb` is what settles it, run by the nightly; until that has run green, treat the
-> transport layer as "believed correct" rather than "proven".
+> **It has now run against the real thing.** On 2026-08-24 the nightly opened a session on
+> KSeF TEST, encrypted and submitted an invoice this gem built, had it **accepted**, got a
+> KSeF number whose checksum our own code agrees with, and retrieved the signed UPO with its
+> bytes matching the hash the server published.
+>
+> **The honest caveat, narrowed:** what remains stub-only is token refresh, the KSeF-token
+> auth call, invoice download and anything batch. Those are still "believed correct" rather
+> than proven.
+>
+> **Reading invoices back works** — `Ksef::FA3.parse` turns FA(3) XML into the same model the
+> builder produces, tested against the Ministry's own published sample invoices. It refuses
+> what it cannot represent faithfully rather than guessing.
 >
 > **Not yet:** validator tiers 1 and 3 (only the XSD tier exists), and six of the seven
-> invoice types — `VAT` builds, `KOR`/`ZAL`/`ROZ`/`UPR` and the two `KOR_` combinations do
-> not. See [Roadmap](#roadmap).
+> invoice types — `VAT` builds and parses, `KOR`/`ZAL`/`ROZ`/`UPR` and the two `KOR_`
+> combinations do not. See [Roadmap](#roadmap).
 
 ## Installation
 
@@ -209,6 +217,48 @@ branch of each mandatory choice wrapper. Omitting any of them is a schema error.
 
 Rounding is explicit, because Polish VAT law permits two approaches and they can differ by
 a grosz — pass `rounding: :per_line` (the default) or `:per_summary`.
+
+### Reading an invoice back
+
+`Ksef::FA3.parse` turns FA(3) XML into the same model the builder produces — useful for an
+invoice you fetched from KSeF, or for inspecting one KSeF rejected.
+
+```ruby
+invoice = Ksef::FA3.parse(File.read("faktura.xml", encoding: "UTF-8"))
+invoice.number        # => "FA/2026/08/001"
+invoice.gross_total   # => BigDecimal("1845")
+invoice.lines.size    # => 3
+```
+
+Two things to know, because they matter more than the happy path.
+
+**Parsing is not validating.** A document KSeF refused still parses — that is the point, since
+you usually parse one in order to find out what was wrong with it. Run `invoice.validate!`
+yourself if you want the schema checked.
+
+**FA(3) is much larger than this model, so re-serialising a document you did not write loses
+whatever it does not cover.** Nothing is thrown away — the whole document stays on
+`#raw_document` — but check before you round-trip:
+
+```ruby
+invoice.fully_mapped?       # => false
+invoice.unmapped_elements   # => ["Faktura/Fa/Platnosc", "Faktura/Podmiot3", ...]
+invoice.raw_document        # the complete Nokogiri document, always
+```
+
+For an invoice this gem built, the XML always round-trips byte for byte, and
+`Ksef::FA3.parse(invoice.to_xml) == invoice` holds whenever the invoice states everything the
+document will carry — in practice, set `issued_at` and a `net_amount` per line. Leave them out
+and serialisation supplies them (a generation timestamp, and each line's net from quantity ×
+price), so the parsed invoice knows two things the original did not.
+
+One field is inherently exempt: **`rounding` is not recorded in an FA(3) document at all**. It
+is inferred by asking which strategy reproduces the tax summaries, so a `:per_summary` invoice
+whose summaries happen to match `:per_line`'s — the common case — comes back as `:per_line`.
+
+Parsing also refuses what it cannot represent faithfully, rather than guessing: a `KOR`
+correction or any other non-`VAT` type, and a row with no `P_12` rate code. The message says
+that the document is fine and the model is the limit.
 
 ### Querying the schema
 

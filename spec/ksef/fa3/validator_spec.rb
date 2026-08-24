@@ -101,4 +101,40 @@ RSpec.describe Ksef::FA3::Validator do
       expect(described_class.valid?(valid_xml.sub("<JST>2</JST>", "<JST>3</JST>"))).to be(false)
     end
   end
+
+  # Nokogiri parses in recovery mode, so a broken document comes back as a usable tree — and
+  # that recovered tree validates clean. Well-formedness is KSeF's first admission rule
+  # (docs/REFERENCE.md §15.1) and the one a truncated upload breaks.
+  describe "documents that are not well-formed XML" do
+    let(:valid) do
+      File.read(File.expand_path("../../fixtures/fa3/golden/vat_single_line.xml", __dir__), encoding: "UTF-8")
+    end
+
+    it "rejects an unclosed root" do
+      errors = described_class.errors_for(valid.sub("</Faktura>", ""))
+
+      expect(errors).not_to be_empty
+      expect(errors.first).to start_with("not well-formed XML:")
+    end
+
+    it "rejects trailing content after the root" do
+      expect(described_class.valid?("#{valid}JUNK")).to be(false)
+    end
+
+    it "rejects text that is not XML at all" do
+      expect(described_class.valid?("not xml")).to be(false)
+    end
+
+    it "still accepts a well-formed valid document" do
+      expect(described_class.valid?(valid)).to be(true)
+    end
+
+    # Reported as malformed rather than as a list of schema violations, because a recovered
+    # tree's schema errors describe a document nobody wrote.
+    it "reports malformedness instead of schema errors" do
+      errors = described_class.errors_for(valid.sub("</Faktura>", ""))
+
+      expect(errors.none? { |e| e.include?("Element") }).to be(true)
+    end
+  end
 end
