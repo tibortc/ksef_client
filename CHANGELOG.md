@@ -14,11 +14,11 @@ gem version for which API state".
 `CIRFMF/ksef-client-csharp@406904d6`, `CIRFMF/ksef-pdf-generator@2b7c1dae` (sample corpus,
 `docs/REFERENCE.md` §1.4)
 
-> **What "works" means in this section.** Only the certificate/XAdES authentication flow has
-> ever run against the live KSeF TEST service, and only four of its endpoints. Everything
-> else below — sessions, encryption, UPO, invoice download, the facade — is verified against
-> **WebMock stubs**: no session has ever been opened against the real service.
-> `spec/integration/session_flow_spec.rb` is what will settle that, and it has not run yet.
+> **What "works" means in this section.** As of 2026-08-24 the certificate/XAdES flow **and**
+> the full send path have run against the live KSeF TEST service: a session opened, an invoice
+> built by this gem encrypted, submitted and accepted, a KSeF number assigned, and the signed
+> UPO retrieved and hash-verified. What is still **WebMock stubs** only: token refresh, the
+> KSeF-token auth call, invoice download, and anything batch.
 
 ### Added
 
@@ -405,6 +405,17 @@ gem version for which API state".
   validation rather than transport alone.
 
 ### Fixed
+
+- **Two failures from the first live nightly** (2026-08-24), both ours rather than the
+  service's. An integration spec asserted `be_success` on a deliberately duplicated invoice —
+  a contradiction, since `440` is a terminal rejection; KSeF behaved exactly as
+  `docs/REFERENCE.md` §12.1 describes, returning the original's `originalKsefNumber`. And
+  **`Ksef::UPO::Validator` reported an error on every real UPO**: a genuine one is
+  XAdES-signed by the Ministry, `upo-v4-3.xsd` declares no `ds:Signature`, and **none of
+  upstream's six published examples is signed** — so nothing offline could reveal it. The
+  signature is now removed from a copy before the schema runs, which leaves §14.3's warning
+  and every other violation intact, and `UPO::Validator.signed?` tells the two kinds of
+  document apart (§14.7).
 
 - **Summary buckets are accumulated, not overwritten.** Several VAT rate codes report into one
   bucket — `"23"` and `"22"` both into `P_13_1`/`P_14_1`, `"np I"` and `"np II"` into `P_13_8`

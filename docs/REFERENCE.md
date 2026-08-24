@@ -1295,14 +1295,12 @@ Carried forward; must be resolved before the code that depends on them is writte
   recomputes both from the real certificates.
 - **Nightly higher rate limits** (§6.1) — the 20:00–06:00 values are explicitly
   unpublished pending production tuning. Do not hard-code a nightly multiplier.
-- **Whether `upo.pages[].downloadUrl` arrives absolute or host-relative** — see §14.2. Still
-  unverified, but **no longer blocking**: `Ksef::UPO::Client` handles both, resolving a
-  relative value against the API host and using an absolute one untouched (§12.3). A live
-  session settles which is actually sent; until then neither branch is dead code, because
-  either could be the real one.
-  `srodowiska.md` states only that a returned URL's *host* matches the environment called,
-  so the code must resolve a relative value against that host and use an absolute one as
-  is. Needs a live session to settle. (An earlier revision of this bullet said the field
+- ~~**Whether `upo.pages[].downloadUrl` arrives absolute or host-relative**~~ — **resolved
+  2026-08-24: it arrives ABSOLUTE.** Observed on the first live nightly (run
+  `32692339217`), which reported it explicitly. `Ksef::UPO::Client` handles both forms and
+  will keep doing so — `srodowiska.md` promises only that a returned URL's *host* matches
+  the environment called, not that the URL is absolute, so the relative branch stays as
+  defence rather than dead code. (An earlier revision of this bullet said the field
   should simply be ignored; that was the superseded reading, corrected in §14.2 — the link
   is unmetered and hash-verified, so ignoring it costs something real.)
 
@@ -2010,10 +2008,45 @@ so a default exists and is not ours to guess. And §14.3 already establishes tha
 validation is delicate enough — TEST's own examples fail upstream's own schema — without
 adding version drift to it.
 
-Being contract-silent, this is the least certain fact in this section: it cannot be checked
-offline, only observed. `spec/integration/session_flow_spec.rb` asserts that a live session's
-UPO really is 4.3 — written 2026-08-23 and **not yet run against TEST**, so the header stays
-*believed* rather than *verified*, and §9 carries it as such.
+Being contract-silent, this could not be checked offline, only observed — and it now has
+been. **Verified against live TEST on 2026-08-24** (nightly run `32692339217`): a session
+opened with the header returned a UPO in the `upo-v4-3` namespace, which is the one whose
+schema this gem bundles. The header does what both reference clients assume, and this section
+is no longer the least certain fact in it.
+
+### 14.7 A real UPO fails upstream's UPO schema on its own signature
+
+Found on the **first live nightly**, 2026-08-24 (run `32692339217`), and invisible to every
+offline test before it.
+
+A UPO is *"an XML document XAdES-signed by the Ministry of Finance"* (§12) — the signature is
+what makes it proof of receipt. `upo-v4-3.xsd` **declares no `ds:Signature` element anywhere**,
+so a genuine UPO validated against it reports:
+
+```
+Element '{http://www.w3.org/2000/09/xmldsig#}Signature': This element is not expected.
+```
+
+Every UPO KSeF has ever issued fails upstream's own schema, for the same reason §14.3's six
+examples do — except this one is worse, because it applies to the real artifact rather than to
+the published samples.
+
+**And the samples are exactly why nobody noticed.** All six pinned worked examples are
+**unsigned** — measured: zero `Signature` elements between them. Upstream publishes the
+business content without the envelope, so the offline corpus cannot exhibit the defect that
+every live document has. `spec/ksef/upo/validator_spec.rb` now signs one of them to close that
+gap, so the next occurrence is caught without a live run.
+
+**Resolution: `UPO::Validator` removes the enveloped signature from a *copy* before validating.**
+Not leniency — an enveloped signature wraps the business document, and the schema describes the
+business document, so setting it aside is what makes the remaining errors mean anything. §14.3's
+environment-marker warning and every other violation still surface unchanged, and the caller's
+bytes are never touched, which §12 requires. `UPO::Validator.signed?` exposes whether the
+signature is there, since that distinguishes a real UPO from a published example.
+
+**What this does *not* do is verify the signature.** Checking the Ministry's XAdES would need
+its certificate chain and the W3C/ETSI schemas, which §1.2 keeps out of `lib/` on licensing
+grounds. Validation here stays a diagnostic on content, exactly as the rest of §14.3 says.
 
 ---
 

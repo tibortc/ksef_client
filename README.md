@@ -44,10 +44,14 @@ submitted.
 > drives that exact snippet end to end, from `Ksef::FA3.build` through `send_invoice`,
 > `wait_until_accepted` and `upo`.
 >
-> **The honest caveat:** all of it above except the certificate flow is verified against
-> stubbed HTTP, not against KSeF. **No session has ever been opened against the real
-> service.** `spec/integration/session_flow_spec.rb` is what settles it, run by the nightly; until that has run green, treat the
-> transport layer as "believed correct" rather than "proven".
+> **It has now run against the real thing.** On 2026-08-24 the nightly opened a session on
+> KSeF TEST, encrypted and submitted an invoice this gem built, had it **accepted**, got a
+> KSeF number whose checksum our own code agrees with, and retrieved the signed UPO with its
+> bytes matching the hash the server published.
+>
+> **The honest caveat, narrowed:** what remains stub-only is token refresh, the KSeF-token
+> auth call, invoice download and anything batch. Those are still "believed correct" rather
+> than proven.
 >
 > **Reading invoices back works** — `Ksef::FA3.parse` turns FA(3) XML into the same model the
 > builder produces, tested against the Ministry's own published sample invoices. It refuses

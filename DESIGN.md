@@ -477,13 +477,17 @@ Build the **certificate flow first**: it is the only one that can bootstrap a cr
 
 **Both auth flows and the crypto module have since landed** (`Ksef::Crypto`, `Ksef::Auth::Token`, `POST /auth/ksef-token`). One correction to §6.4 while doing it: the golden vectors it asks for **do not exist upstream** — neither reference client commits plaintext/ciphertext pairs — so the primitives are pinned to NIST SP 800-38A and FIPS 180-4 instead, and the OAEP digest and MGF1 digest are pinned behaviourally rather than by trusting an option name. `docs/REFERENCE.md` §10.1 records what replaced them and why it is at least as strong.
 
-**The session layer, UPO handling and the `Ksef::Client` facade have landed too**, so §8's snippet now runs end to end — `spec/ksef/client_spec.rb` drives it verbatim. **But it runs against stubs.** The first gate says "against TEST", and no session has ever been opened against the real service, so it is *not* met. `spec/integration/session_flow_spec.rb` is what will settle it — written 2026-08-23, and **not yet run against TEST**. Until this file existed, three documents said "the nightly will settle it" while the nightly contained no session spec at all: the claim was empty, and a documentation review caught it.
+**The session layer, UPO handling and the `Ksef::Client` facade have landed too**, so §8's snippet runs end to end — `spec/ksef/client_spec.rb` drives it verbatim against stubs, and `spec/integration/session_flow_spec.rb` drives it against the real service.
+
+**The first gate is met, as of 2026-08-24.** **Verified against live TEST on 2026-08-24** (nightly run `32692339217`): a session was opened, an invoice this gem built was encrypted, submitted and **accepted**, a KSeF number was assigned and its CRC-8 agreed with ours, the session reported processed after close, and the UPO came back in the `upo-v4-3` namespace with its bytes matching `x-ms-meta-hash`. Twenty-two of that run's twenty-four examples passed. It also answered §9's last session-layer question — the collective `downloadUrl` arrives **absolute** — and turned §14.6's `X-KSeF-Feature` header from believed into verified.
+
+The two failures were **ours, not the service's**, and both are now fixed. One spec asserted `be_success` on a deliberately duplicated invoice, which is a contradiction: KSeF did exactly what §12.1 describes, returning `440` with the original's `originalKsefNumber`. The other found a real defect — a genuine UPO is XAdES-signed and therefore fails upstream's own UPO schema, which declares no `ds:Signature`; none of the six published examples is signed, so nothing offline could have shown it (§14.7).
 
 Gate status, precisely:
 
 | Gate | State |
 |---|---|
-| §8 contract runs against TEST | **not met** — runs against stubs; awaiting a live session |
+| §8 contract runs against TEST | **met**, verified live 2026-08-24 (nightly run `32692339217`) |
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
 | All seven types build, validate, round-trip | **not met** — only `VAT`; validator tiers 1 and 3 outstanding. **Round-trip is now met for `VAT`**: the parser landed 2026-08-24 and the law runs green over the pinned corpus |
 

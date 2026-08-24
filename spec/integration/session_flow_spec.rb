@@ -167,19 +167,59 @@ RSpec.describe "an online session against TEST", :integration do
   describe "a rejected invoice" do
     # Sending the same document twice is the one rejection we can provoke deliberately, and
     # §12.1 says the second comes back as 440 carrying the *original's* references — the fact
-    # that makes a resend reconcilable. Asserted here because nothing offline can produce it.
-    it "reports a duplicate with the original's KSeF number" do
-      document = invoice_for(seller_nip)
-      first = client.send_invoice(document)
-      client.wait_until_accepted(first, deadline: 240)
+    # that makes a resend reconcilable. Nothing offline can produce it.
+    #
+    # **The first live run (2026-08-24) failed here on the assertion, not the behaviour.** It
+    # asserted `be_success` on a deliberate duplicate, which is a contradiction: 440 is a
+    # terminal *rejection*. KSeF did exactly what §12.1 describes, including returning
+    # `originalKsefNumber`. Corrected to assert the duplicate itself.
+    let(:duplicated) do
+      @duplicated ||= begin
+        document = invoice_for(seller_nip)
+        first = client.send_invoice(document)
+        original = client.wait_until_accepted(first, deadline: 240)
+        { receipt: first, original: original, second: terminal_state(client.send_invoice(document)) }
+      end
+    end
 
-      second = client.send_invoice(document)
-      state = client.invoice_status(second)
-      state = client.wait_until_accepted(second, deadline: 240) if state.in_progress?
+    # The duplicate may already be decided on the first status read — it was, on the first
+    # live run — or may need polling. A terminal non-success reaches the caller as an
+    # exception from `wait_until_accepted`, so the state is re-read to inspect it.
+    def terminal_state(receipt)
+      state = client.invoice_status(receipt)
+      return state if state.terminal?
 
-      expect(state).to be_success
-    rescue Ksef::InvoiceRejectedError => e
-      expect(e.message).to match(/440|[Dd]uplikat/)
+      client.wait_until_accepted(receipt, deadline: 240)
+    rescue Ksef::InvoiceRejectedError
+      client.invoice_status(receipt)
+    end
+
+    it "is rejected as a duplicate rather than accepted twice" do
+      expect(duplicated[:second]).to be_duplicate
+      expect(duplicated[:second]).not_to be_success
+      expect(duplicated[:second].code).to eq(Ksef::Sessions::InvoiceCodes::DUPLICATE)
+    end
+
+    # The reconcilable half of §12.1: the rejection names the invoice it collided with, so a
+    # resend after an uncertain response can be resolved without a search.
+    it "names the original's KSeF number" do
+      expect(duplicated[:second].original_ksef_number).to eq(duplicated[:original].ksef_number)
+    end
+
+    # `send_invoice` opens a fresh session per call, so the original's session is the one the
+    # first send used. Asserted separately: it is a deduction rather than something the first
+    # live run showed, and it should not be able to mask the two facts above.
+    it "names the original's session" do
+      expect(duplicated[:second].original_session_reference)
+        .to eq(duplicated[:receipt].session_reference)
+    end
+  end
+
+  # A UPO fetched from KSeF is XAdES-signed by the Ministry; none of upstream's published
+  # examples is, so this is the only place the difference shows up (§14.7).
+  describe "the signature on a real UPO" do
+    it "is present, unlike every offline fixture" do
+      expect(Ksef::UPO::Validator.signed?(client.upo(receipt).xml)).to be(true)
     end
   end
 end

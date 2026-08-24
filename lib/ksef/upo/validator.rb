@@ -31,8 +31,29 @@ module Ksef
     # `fixed` value is presumably correct, so a mismatch there would be a genuine anomaly —
     # and relaxing the schema would mean never hearing about it. The observed value is read
     # from the document rather than scraped out of the error message, so it is reliable.
+    #
+    # ## Why the signature is removed before validating
+    #
+    # A real UPO is **XAdES-signed by the Ministry** (§12) — that is the entire point of the
+    # document. `upo-v4-3.xsd` declares no `ds:Signature` element anywhere, so a genuine UPO
+    # fails it with `Element '{http://www.w3.org/2000/09/xmldsig#}Signature': This element is
+    # not expected`, and validating one straight off the wire reports an error on every single
+    # UPO KSeF has ever issued.
+    #
+    # **None of upstream's six worked examples reveals this, because all six are unsigned** —
+    # measured on the pinned fixtures, zero `Signature` elements between them. So the defect
+    # was invisible offline and surfaced on the first live nightly, 2026-08-24 (§14.7).
+    #
+    # The signature is stripped from a *copy* before the schema runs. That is not leniency: an
+    # enveloped signature is a wrapper around the business document, and the schema describes
+    # the business document. Removing it is what makes the remaining errors mean something —
+    # and every other violation, including §14.3's, still surfaces exactly as before. The
+    # caller's bytes are untouched, which §12 requires.
     module Validator
       SOURCE = File.expand_path("schema/upo-v4-3.xsd", __dir__)
+
+      # W3C XML Signature. The Ministry's enveloped signature lives in this namespace.
+      SIGNATURE_NAMESPACE = "http://www.w3.org/2000/09/xmldsig#"
 
       # libxml2's wording for a `fixed` violation. Matched on the element name as well, so
       # a fixed-value complaint about any *other* element stays an error.
@@ -47,7 +68,7 @@ module Ksef
         # @return [Validation]
         def validate(xml)
           document = parse(xml)
-          messages = schema.validate(document).map(&:message)
+          messages = schema.validate(without_signature(document)).map(&:message)
           expected, real = messages.partition { |message| FIXED_VALUE_COMPLAINT.match?(message) }
 
           Validation.new(
@@ -56,6 +77,10 @@ module Ksef
             receiving_party: receiving_party(document)
           )
         end
+
+        # @return [Boolean] whether the document carries the Ministry's enveloped signature.
+        #   A UPO fetched from KSeF does; upstream's published examples do not.
+        def signed?(xml) = !signatures(parse(xml)).empty?
 
         # @return [Boolean] true when the document has no violation beyond the known
         #   upstream environment-marker defect
@@ -72,6 +97,21 @@ module Ksef
         end
 
         private
+
+        def signatures(document)
+          document.xpath("//ds:Signature", "ds" => SIGNATURE_NAMESPACE)
+        end
+
+        # Works on a duplicate: the caller's document — and, through {Document}, the archived
+        # bytes — must not be mutated by a diagnostic. Returns the original untouched when
+        # there is nothing to remove, which is the case for every offline fixture.
+        def without_signature(document)
+          return document if signatures(document).empty?
+
+          copy = document.dup
+          signatures(copy).each(&:remove)
+          copy
+        end
 
         def parse(xml)
           return xml if xml.is_a?(Nokogiri::XML::Document)
