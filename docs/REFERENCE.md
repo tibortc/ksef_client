@@ -2098,10 +2098,17 @@ existing at all — and it is not hypothetical. The C# client's own test corpus 
   substituted (§1.4) — `Ksef::FA3::Validator` returns zero errors, so tier 2 passes it;
 - it carries **U+0087** and **U+009B**, both inside the forbidden `[#x86-#x9F]` range.
 
+**Implemented 2026-08-24** as `Ksef::FA3::DocumentValidator` (validator tier 1b, DESIGN.md
+§7.7). It runs on `#to_xml`'s output, before those bytes are hashed and encrypted — after that
+point a rejection costs a round trip and a session. All four otherwise-invisible rules are
+covered, plus the 1 000 000-byte ceiling of §15.5.
+
 A schema-only validator ships that invoice, and the pinned rule above says KSeF rejects it.
 **That rejection is derived, not observed** — it follows from *"Niespełnienie któregokolwiek z
-powyższych wymagań spowoduje odrzucenie faktury"*, and no session has ever reached live KSeF
-(§9). One fixture, and it settles whether tier 1 is worth building.
+powyższych wymagań spowoduje odrzucenie faktury"*, and nobody has submitted this fixture. (An
+earlier version of this sentence justified it with "no session has ever reached live KSeF",
+which §14.6 in this same document contradicts as of 2026-08-24: sessions reach it nightly. The
+conclusion stands on the narrower ground.) One fixture, and it settles whether tier 1 is worth building.
 
 **Where those characters come from matters more than the rule.** The offending text reads
 `iloĹ›Ä‡` — that is `ilość` encoded as UTF-8 and then decoded as Latin-1. **Double-encoded
@@ -2175,7 +2182,7 @@ claiming a confirmation it cannot make.
 |---|---|---|
 | AES-256-CBC, 256-bit key, 128-bit IV, PKCS#7; symmetric key under RSAES-OAEP **SHA-256/MGF1** | §10.1 | A **fifth** witness, and the first from first-tier prose. Note it writes "SHA-256/MGF1" as one unit, pairing the two digests exactly as §10.1 requires |
 | Hash **and size** of both the plaintext and the encrypted invoice | §11.1 | Confirms all four values, and that the check is KSeF's, not decoration. Note upstream heads this rule *"Zgodność metadanych faktury **w sesji interaktywnej**"* — it is scoped to the interactive session; the batch flow of 0.2 will need its own reading |
-| 1 MB without attachments, 3 MB with; 10 000 invoices per session | §6.2 | Identical, plus batch: 50 ZIP files, 100 MB each before encryption, 5 GB per package |
+| 1 MB (1 000 000 bytes) without attachments, 3 MB with; 10 000 invoices per session | §6.2 | Identical, plus batch: 50 ZIP files, 100 MB each before encryption, 5 GB per package. **Three of these carry an asterisk and are defaults, not ceilings of the format:** *"Jeżeli w scenariuszach biznesowych organizacji dostępne limity są niewystarczające, prosimy o kontakt z działem wsparcia KSeF"* — and `limity.md` heads the same numbers *"Wartość domyślna"*, with `GET /limits/context` reporting the live values. The asterisk attaches to 1 MB, 3 MB and 10 000; **not** to the batch ZIP figures. `DocumentValidator` takes `max_bytes:` for that reason: hard-coding the default as absolute rejected invoices KSeF would accept |
 | Attachments are **batch-only** | *nothing — this is the first source* | DESIGN.md §7.4 only puts *operational* attachment constraints out of scope for 0.1; it never said batch-only, and no document here did. So this row is **new**, not a confirmation, and the section heading above overstates it. With one exception — an offline *technical correction* may use an interactive session — plus a requirement of prior opt-in in `e-Urząd Skarbowy`. Both are 0.2/0.3 concerns; recorded so the exception is not rediscovered |
 
 ### 15.6 Tier 3's catalogue is in none of the 77 files

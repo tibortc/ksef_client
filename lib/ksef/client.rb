@@ -147,13 +147,27 @@ module Ksef
 
     # Runs the FA(3) validator, if the document knows how to validate itself.
     #
-    # A raw XML String does not, and is passed through: the transport layer accepts any
-    # `#to_xml` or a String (DESIGN.md §5), and refusing a String here would break that
-    # contract to enforce a check the caller may have already done.
+    # A raw XML String does not — the transport layer accepts any `#to_xml` or a String
+    # (DESIGN.md §5), and refusing one here would break that contract to enforce a check the
+    # caller may already have done. But it is still **bytes**, and the byte-level admission
+    # rules of docs/REFERENCE.md §15.1 apply to bytes whatever produced them. So a String gets
+    # tier 1b: a review on 2026-08-24 pointed out that the gem, handed the poison fixture as a
+    # String, would have shipped the very document tier 1 was built to stop — mis-encoded ERP
+    # text being precisely the case §15.1 calls likely.
+    #
+    # Not the schema tier: validating a caller's own XML against FA(3) would reject the batch
+    # and RR structures the transport layer is meant to carry.
     #
     # @raise [Ksef::ValidationError]
     def validate_invoice!(invoice)
-      invoice.validate! if invoice.respond_to?(:validate!)
+      return invoice.validate! if invoice.respond_to?(:validate!)
+      return unless invoice.is_a?(String)
+
+      issues = FA3::DocumentValidator.errors_for(invoice)
+      return if issues.empty?
+
+      raise ValidationError,
+            "The XML given is not admissible:\n#{issues.sort.map { |issue| "  - #{issue}" }.join("\n")}"
     end
 
     # @return [Ksef::Sessions::Online]
