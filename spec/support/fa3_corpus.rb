@@ -23,6 +23,37 @@ module FA3Corpus
     ksef-pdf-generator/invoice.xml
   ].freeze
 
+  # The Ministry's own worked examples, redistributed under the terms recorded in
+  # `mf-samples/NOTICE.md` and ledgered at docs/REFERENCE.md §1.5. Twenty-six invoices covering
+  # **all seven** `RodzajFaktury` values — the only corpus of non-`VAT` types that exists, since
+  # no CIRFMF repository contains one.
+  #
+  # Listed as a count rather than by name: they are `przyklad-01` … `przyklad-26`, and a gap
+  # would mean a missing pin rather than a deliberate omission.
+  MINISTRY_COUNT = 26
+
+  # The eight this model can represent today. Twelve of the twenty-six are `RodzajFaktury=VAT`,
+  # and four of *those* still exceed the model — a useful map of what 0.1 cannot do, measured
+  # against real Ministry documents rather than guessed:
+  #
+  # - `08`, `19` — **gross-priced rows** (`P_9B`/`P_11A` under art. 106e ust. 7-8) where this
+  #   model carries net pricing only.
+  # - `22`, `23` — a buyer identified by `NrVatUE` and by `NrID`, where {Subject} holds a NIP
+  #   only (§8.2a).
+  #
+  # The other fourteen samples are non-`VAT` types, which {Parser} refuses outright rather than
+  # emitting a plausible impostor. All six exceptions are the corpus for DESIGN.md §7.4's
+  # remaining work.
+  MINISTRY_MODELLED = %w[01 04 09 20 21 24 25 26].map { |n| "mf-samples/przyklad-#{n}.xml" }.freeze
+
+  # Valid FA(3), beyond this model, and refused with a message that says so.
+  MINISTRY_BEYOND_MODEL = {
+    "mf-samples/przyklad-08.xml" => /priced gross/,
+    "mf-samples/przyklad-19.xml" => /priced gross/,
+    "mf-samples/przyklad-22.xml" => /identified by KodUE, NrVatUE/,
+    "mf-samples/przyklad-23.xml" => /identified by KodKraju, NrID/
+  }.freeze
+
   # This gem's own *serializer output*, which is fully within the model and so round-trips byte
   # for byte. `minimal_vat_invoice.xml` is deliberately absent: it is hand-written for
   # `validator_spec`, and writes `<P_8B>10.00</P_8B>` where {Ksef::FA3::Formatting.quantity}
@@ -51,6 +82,23 @@ module FA3Corpus
     end
 
     def ours = OURS
+
+    # @return [Array<String>] all twenty-six Ministry samples, verified present
+    # @raise [RuntimeError] if the count is short, which means a pin went missing
+    def ministry
+      found = Dir.glob("mf-samples/przyklad-*.xml", base: DIR).sort
+      unless found.size == MINISTRY_COUNT
+        raise "Expected #{MINISTRY_COUNT} Ministry samples in #{DIR}/mf-samples, found #{found.size}"
+      end
+
+      found
+    end
+
+    # The `RodzajFaktury` a sample declares, read from the document rather than from a table
+    # here — a table would be one more thing to keep in step with the pinned bytes.
+    def invoice_type(relative)
+      Nokogiri::XML(read(relative)).remove_namespaces!.at_xpath("//Fa/RodzajFaktury")&.text
+    end
 
     # @return [String] the sample's XML, with placeholders substituted
     def read(relative)

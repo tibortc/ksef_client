@@ -157,6 +157,74 @@ One practical note for a re-verifier: upstream's licence file in `ksef-client-cs
 `LICENCE.txt`, with the British spelling. There is no `LICENSE`, and a fetch of that name
 404s.
 
+### 1.5 The Ministry's own worked examples — and the first artifact from outside CIRFMF
+
+Pinned 2026-08-24 to `spec/fixtures/fa3/mf-samples/`. **Twenty-six FA(3) invoices covering all
+seven `RodzajFaktury` values** — 12 `VAT`, 5 `KOR`, 3 `KOR_ZAL`, 2 `ROZ`, 2 `UPR`, 1 `KOR_ROZ`,
+1 `ZAL` — plus a five-page descriptions PDF that is *not* redistributed.
+
+| | |
+|---|---|
+| Package | *Przykładowe pliki dla struktury logicznej e-Faktury FA(3)* |
+| URL | `https://ksef.podatki.gov.pl/media/e5cia0ey/przykladowe-pliki-dla-struktury-logicznej-e-faktury-fa-3.zip` |
+| Archive SHA-256 | `41ebd3c57144951c65d68a36fbe433285b5791a86a8bd46cb059503e3f8b1e10` (200 512 bytes) |
+| Retrieved | 2026-08-24 |
+
+**This is the only corpus of non-`VAT` invoice types that exists.** Two independent sweeps of
+every CIRFMF repository — all branches, the whole history of all six — found every FA(3) fixture
+to be `RodzajFaktury=VAT`. The two files named "pef-correction" are UBL 2.1 `CreditNote`
+documents, not FA(3) corrections. So DESIGN.md §7.4's remaining six types had no worked example
+anywhere until this package was found, by following an issue in `CIRFMF/ksef-schematy` to the
+Ministry's downloads page.
+
+All twenty-six validate against the pinned FA(3) XSD with **zero errors** (measured 2026-08-24),
+which is a second independent confirmation that §8.3's in-memory import rewriting is sound.
+
+#### The licence position, and the decision taken
+
+**This is the first artifact pinned from outside the CIRFMF GitHub organisation, and §1.2's MIT
+reasoning does not reach it.** That grant arrives through the repositories; these files are in
+none of them.
+
+`podatki.gov.pl` states site-wide that using its content *"niezależnie od celu i sposobu
+korzystania, nie wymaga zgody Ministerstwa Finansów"* — regardless of purpose or manner, requires
+no consent from the Ministry — with CC BY 3.0 PL for material marked as copyright. **But the files
+are hosted on `ksef.podatki.gov.pl`**, a subdomain carrying no licence statement of its own, and
+they bear no internal notice. Whether the parent statement reaches the subdomain is an
+interpretive question nobody has answered in writing.
+
+**Decision (human, 2026-08-24, DESIGN.md §12): redistribute the twenty-six XML files as test
+fixtures, with attribution.** `spec/fixtures/fa3/mf-samples/NOTICE.md` carries the source, the
+retrieval date, the archive checksum, the licence statement in Polish and English, and the caveat
+above stated plainly. The descriptions PDF is *not* redistributed — it is referenced by URL and
+checksum only, which needs no licence at all. Nothing here is packaged: the gemspec ships
+`lib/**` and `docs/*.md`, and a built gem contains 91 files and zero fixtures.
+
+Filenames were normalised to `przyklad-01.xml` … `przyklad-26.xml`. Upstream's carry Polish
+diacritics and an inconsistent `FA_3_`/`Fa_3_` prefix, which travel badly across case-insensitive
+filesystems and Windows checkouts; the **bytes are untouched**, and the bytes are what
+`docs/artifacts.sha256` pins. `NOTICE.md` holds the full mapping.
+
+#### What the corpus establishes, beyond being a corpus
+
+- **`Σ P_13_* + Σ P_14_* == P_15` holds exactly in 24 of the 26** — including every correction.
+  The two exceptions are the useful part, and they constrain any future tier 3: **Przykład 1 is
+  off by 0.01** (a gross-priced invoice, where bucket-level tax rounding loses a grosz) and
+  **Przykład 16 (`UPR`) omits the buckets entirely**, the descriptions PDF stating that a
+  simplified invoice may carry `P_15` alone. **A zero-tolerance equality check would reject the
+  Ministry's own first example**, so that rule needs a one-grosz tolerance and a
+  bucket-presence guard — see §15.6.
+- **A `KOR` carries deltas in the buckets**, confirming the XSD annotations: Przykład 2 uses
+  before/after rows (`StanPrzed=1` on the before row, same `NrWierszaFa`) with header
+  `P_13_1=-162.60`, `P_14_1=-37.40`, `P_15=-200`, reconciling exactly. Amounts are unpadded
+  (`P_15=2051`, `P_15=-200`), so any comparison must be numeric and never on strings.
+- **Four of the twelve `VAT` samples are beyond this model**, which is a measured map of 0.1's
+  limits rather than a guess: `08` and `19` price rows **gross** (`P_9B`/`P_11A` under art. 106e
+  ust. 7-8) where the model carries net pricing only, and `22`/`23` identify the buyer by
+  `NrVatUE` and by `NrID` (§8.2a). Each is refused with a message naming the construct and saying
+  the document is fine; `spec/ksef/fa3/round_trip_spec.rb` asserts every one, and asserts that no
+  `VAT` sample is left unclassified.
+
 ---
 
 ## 2. Environments — resolves DESIGN.md §6.1 [VERIFY]
@@ -1122,6 +1190,16 @@ Three things that fall out of this and matter for the builder:
 - **The zero-rated and exempt buckets have no `P_14_*` counterpart.** There is no tax
   amount to report, so a summary builder must not emit a paired tax field for them —
   the schema has no element to put it in.
+- **Bucket 4 takes rate codes `4` *and* `3`; bucket 5 takes none.** Each bucket pairs a current
+  rate with the one it replaced — 23/22, 8/7, 4/3 — and bucket 5 is not a rate bucket at all:
+  `P_13_5` is the special procedure of *"dział XII rozdział 6a"* and `P_14_5` is **"kwota podatku
+  od wartości dodanej"**, foreign VAT under OSS, whose per-line rate lives in `P_12_XII` (a
+  percentage) rather than in `P_12`. **Until 2026-08-24 this table mapped code `3` to bucket 5**,
+  so a domestic 3% sale was declared as OSS foreign VAT on an XSD-valid document. Found by
+  comparing against `ksef-pdf-generator`, whose summary labels read *"4% lub 3%"* for bucket 4 and
+  *"OSS"* for bucket 5 — the only official code that renders these buckets, and an independent
+  witness to a mapping this ledger had wrong. `VatRate.unreachable_elements` now names bucket 5
+  so the gap is assertable rather than merely commented.
 - **The mapping is many-to-one, so summaries must *accumulate*.** `"23"` and `"22"` both
   report into `P_13_1`/`P_14_1`, `"8"` and `"7"` into bucket 2, `"np I"` and `"np II"` into
   `P_13_8`. Assigning per rate code rather than summing lets the last code win — which is
@@ -2212,6 +2290,30 @@ So tier 3 has three possible groundings, and they are not equal:
    artifact from outside the repositories §1 covers, under a licence nobody here has read.
 3. **Observation against TEST.** Reliable, slow, and it only ever finds rules we thought to
    probe for.
+
+**Why it does not exist yet, and where it will appear.** `CIRFMF/ksef-api` issue **#837**
+(author `kw-cirf`, a collaborator) announced the **first business validation KSeF ever proposed**:
+for `KodWaluty != PLN`, at least one `P_14_x` + `P_14_xW` pair must be filled, rejection status
+**`425` "Faktura nie spełnia wymagań dotyczących danych"**, scheduled TEST 2026-07-21 / PROD
+2026-07-28, *"to be added to `faktury/weryfikacja-faktury.md`"*. It was **withdrawn back to
+analysis** after the community showed it rejects legal foreign-currency invoices carrying only
+`np`/`zw`/`0%`/`oo`/margin rates. The live `weryfikacja-faktury.md` was diffed against our pinned
+copy on 2026-08-24: **identical** — the section never landed. Two things follow. The catalogue's
+future address is known (that file, plus status `425`), and the Ministry's own remark in the
+thread — that not one production invoice violated the proposed rule — is evidence **KSeF today
+enforces nothing beyond the schema**.
+
+**And the error codes are not the catalogue either.** A natural hope is that a rejection code list
+is the rule list seen from the failure side. It is not: the reference clients' catalogues
+(`InvoiceInSessionStatusCodeResponse` and siblings) funnel *every* content violation into one
+code — **`450` "Błąd weryfikacji semantyki dokumentu faktury"** — with free-text details. There is
+no code for "totals do not reconcile" and none for a malformed correction reference.
+
+**What the Ministry's samples add.** §1.5 records the measurement: `Σ P_13_* + Σ P_14_* == P_15`
+holds in 24 of 26 official examples, failing on Przykład 1 by one grosz (gross-priced rounding)
+and on Przykład 16 by omission (a `UPR` may carry `P_15` alone). That is *empirical* grounding —
+grounding 3 — for a rule the text does not state, and it fixes the rule's shape: a tolerance of a
+grosz and a guard for absent buckets, or it rejects the Ministry's own first example.
 
 **Recommendation, for the human to decide (DESIGN.md §12):** build tier 3's engine now on
 grounding 1, where the rule *is* the field definition, and let the catalogue grow — which

@@ -26,11 +26,7 @@ module Ksef
           quantity = text(row, "P_8B")
           unit_price = text(row, "P_9A")
 
-          if net_amount.nil? && (quantity.nil? || unit_price.nil?)
-            raise ValidationError,
-                  "FaWiersz #{text(row, "NrWierszaFa") || "(unnumbered)"} has neither P_11 " \
-                  "nor both of P_8B and P_9A, so its net value cannot be established"
-          end
+          raise ValidationError, missing_net(row) if net_amount.nil? && (quantity.nil? || unit_price.nil?)
 
           # Passed as the strings they were written as; {Line} converts them, so decimal
           # coercion lives in one place rather than being repeated per caller.
@@ -45,6 +41,22 @@ module Ksef
             quantity: quantity, net_unit_price: unit_price,
             vat_rate: rate_for(row), net_amount: net_amount
           )
+        end
+
+        # A row with no net value is usually a **gross-priced** row: under art. 106e ust. 7-8 an
+        # invoice may state `P_9B` (unit gross price) and `P_11A` (gross sales value) instead of
+        # `P_9A`/`P_11`, and two of the Ministry's own worked examples do exactly that. Saying
+        # "has neither P_11 nor both of P_8B and P_9A" blames the document for lacking a field
+        # its pricing convention does not use, so the gross case is named for what it is.
+        def missing_net(row)
+          where = "FaWiersz #{text(row, "NrWierszaFa") || "(unnumbered)"}"
+          if text(row, "P_11A") || text(row, "P_9B")
+            return "#{where} is priced gross, stating P_11A/P_9B rather than P_11/P_9A. That is " \
+                   "valid under art. 106e ust. 7-8, and this model carries net pricing only " \
+                   "(DESIGN.md §7.4) — the document itself is fine."
+          end
+
+          "#{where} has neither P_11 nor both of P_8B and P_9A, so its net value cannot be established"
         end
 
         def rate_for(row)
