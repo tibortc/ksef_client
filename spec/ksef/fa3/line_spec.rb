@@ -75,9 +75,22 @@ RSpec.describe Ksef::FA3::Line do
       expect(line(net_amount: "18000").net).to eq(BigDecimal("18000"))
     end
 
-    it "says what is missing when it can neither read nor derive one" do
-      expect { line(quantity: nil, net_unit_price: nil).net }
-        .to raise_error(Ksef::ValidationError, /"Consulting" needs either net_amount, or both/)
+    # This used to raise. It cannot now: a simplified invoice's row names the goods and states
+    # no amount at all, and so does a collective correction's descriptive row, so "no amount"
+    # is a state the model has to hold. Tier 1 is what refuses one on an invoice that derives
+    # its summary from its rows (docs/REFERENCE.md §8.6).
+    it "is nil when the row states no amount, which is legal and not zero" do
+      bare = line(quantity: nil, net_unit_price: nil)
+
+      expect(bare.net).to be_nil
+      expect(bare.gross).to be_nil
+      expect(bare.vat).to eq(0)
+      expect(bare).not_to be_priced
+    end
+
+    it "is not summarised without a rate to bucket it under" do
+      expect(line(vat_rate: nil)).not_to be_summarised
+      expect(line).to be_summarised
     end
   end
 

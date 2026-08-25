@@ -52,6 +52,14 @@ module Ksef
       # it.
       FUTURE_TOLERANCE_DAYS = 1
 
+      NO_RATE = "states an amount but no P_12 rate code, so there is no bucket to put it in. " \
+                "This invoice derives its summary from its rows, so the amount would simply be " \
+                "missing from the tax base (docs/REFERENCE.md §8.6)."
+
+      NO_AMOUNT = "states no amount, and this invoice derives its summary from its rows. A row " \
+                  "that names goods and no amount belongs to a type that states its summary " \
+                  "instead — UPR, or a collective correction (docs/REFERENCE.md §8.6)."
+
       class << self
         # Value-level checks: encoding, xsd:token collapse, lengths, enum membership.
         include FieldChecks
@@ -75,7 +83,9 @@ module Ksef
             *annotation_errors(invoice.annotations),
             *summary_errors(invoice),
             *type_specific_errors(invoice),
-            *invoice.lines.each_with_index.flat_map { |line, index| line_errors(line, index) }
+            *invoice.lines.each_with_index.flat_map do |line, index|
+              line_errors(line, index, derived: invoice.totals.nil?)
+            end
           ]
         end
 
@@ -152,25 +162,31 @@ module Ksef
           end
         end
 
-        def line_errors(line, index)
+        # @param derived [Boolean] whether this invoice computes its summary from its rows.
+        #   When it does, every row has to be placeable in a bucket; when it states its summary
+        #   instead, a row may name goods and no amount at all (docs/REFERENCE.md §8.6).
+        def line_errors(line, index, derived:)
           field = "lines[#{index}]"
           return [Issue.new(field: field, message: "is not a Ksef::FA3::Line")] unless line.is_a?(Line)
 
           [
             *text_errors(line.name, "#{field}.name", LONG_TEXT),
             *text_errors(line.unit, "#{field}.unit", SHORT_TEXT),
-            enum_issue("#{field}.vat_rate", "TStawkaPodatku", line.vat_rate),
-            net_issue(line, field)
+            # `P_12` is `minOccurs="0"`, so nil is a value rather than an omission — what it
+            # costs is checked below, and only where it costs anything.
+            line.vat_rate.nil? ? nil : enum_issue("#{field}.vat_rate", "TStawkaPodatku", line.vat_rate),
+            derived ? unsummarised_issue(line, field) : nil
           ].compact
         end
 
-        # {Line#net} raises when it can neither read a net nor derive one; the same condition,
-        # reported rather than thrown.
-        def net_issue(line, field)
-          return nil unless line.net_amount.nil? && (line.quantity.nil? || line.net_unit_price.nil?)
+        # A row that cannot be placed in a summary bucket, on an invoice whose summary is built
+        # by adding the rows up. Either way the row's amount is absent from the tax base, and
+        # neither the XSD nor `#unmapped_elements` can see that — the second is blind to values
+        # and the first to arithmetic.
+        def unsummarised_issue(line, field)
+          return nil if line.summarised?
 
-          Issue.new(field: field,
-                    message: "needs either net_amount, or both quantity and net_unit_price")
+          Issue.new(field: field, message: line.priced? ? NO_RATE : NO_AMOUNT)
         end
 
         def future_date_issue(issue_date)

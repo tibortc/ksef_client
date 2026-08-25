@@ -11,16 +11,20 @@ module Ksef
     # no corrected invoice. A `KOR` carrying `PrzyczynaKorekty` and nothing else is a
     # document the XSD rejects, and the useful moment to say so is at construction.
     #
-    # ## What it does not carry
+    # ## `paid_before` reads two ways, and the type decides which
     #
-    # `P_15ZK` and `KursWalutyZK` — the amount paid before correction — live in the same
-    # group and are **not** modelled. Their documentation scopes them to *"korekt faktur
-    # zaliczkowych"* and art. 106f ust. 3, i.e. `KOR_ZAL` and `KOR_ROZ`, which are separate
-    # invoice types and later work (DESIGN.md §7.4). A document carrying them parses; they
-    # surface through {Invoice#unmapped_elements}, because they are whole elements and that
-    # is precisely the loss a path diagnostic can see.
+    # `P_15ZK` is documented as *"w przypadku korekt faktur zaliczkowych — kwota zapłaty przed
+    # korektą. W przypadku korekt faktur, o których mowa w art. 106f ust. 3 ustawy — kwota
+    # pozostała do zapłaty przed korektą"*: the amount **paid** before the correction on a
+    # `KOR_ZAL`, and the amount **left to pay** before it on a `KOR_ROZ`. One element, two
+    # readings, and the invoice type is what tells them apart — so the model carries the figure
+    # and does not try to name it more precisely than the schema does.
+    #
+    # All four of the Ministry's `KOR_ZAL`/`KOR_ROZ` samples carry it; `KursWalutyZK`, which
+    # sits in the nested sequence `P_15ZK` opens, appears in none of the twenty-six.
     Correction = Data.define(
-      :reason, :effect, :corrected, :period, :corrected_number, :previous_seller, :previous_buyers
+      :reason, :effect, :corrected, :period, :corrected_number, :previous_seller,
+      :previous_buyers, :paid_before, :exchange_rate_before
     )
 
     # Construction, canonicalisation and serialisation for {Ksef::FA3::Correction}.
@@ -59,24 +63,41 @@ module Ksef
       #   additional buyers, as the corrected invoice stated them
       # @raise [Ksef::ValidationError] if no corrected invoice is named
       def initialize(corrected:, reason: nil, effect: nil, period: nil, corrected_number: nil,
-                     previous_seller: nil, previous_buyers: [])
+                     previous_seller: nil, previous_buyers: [], paid_before: nil,
+                     exchange_rate_before: nil)
         entries = self.class.wrap(corrected)
         raise ValidationError, NAMES_NOTHING if entries.empty?
 
+        # `dup` before freezing: `Array(x)` returns `x` itself when it is already an Array, so
+        # freezing in place froze the *caller's* array and made their next `<<` raise.
         super(
           previous_seller: previous_seller,
+          corrected: entries.dup.freeze,
+          previous_buyers: self.class.wrap(previous_buyers).dup.freeze,
+          **self.class.canonical_fields(reason, period, corrected_number, effect),
+          **self.class.canonical_amounts(paid_before, exchange_rate_before)
+        )
+      end
+
+      # `TypKorekty` restricts `xsd:integer`, whose value space is integers — so `"03"` and `3`
+      # denote the same thing and the model stores the value, not the lexical form (§8.2b).
+      # Contrast {Line#vat_rate}, a token whose value space *is* strings.
+      def self.canonical_fields(reason, period, corrected_number, effect)
+        {
           reason: Formatting.text(reason),
           period: Formatting.text(period),
           corrected_number: Formatting.text(corrected_number),
-          # `dup` before freezing: `Array(x)` returns `x` itself when it is already an Array,
-          # so freezing in place froze the *caller's* array and made their next `<<` raise.
-          corrected: entries.dup.freeze,
-          previous_buyers: self.class.wrap(previous_buyers).dup.freeze,
-          # `TypKorekty` restricts `xsd:integer`, whose value space is integers — so `"03"`
-          # and `3` denote the same thing and the model stores the value, not the lexical
-          # form (§8.2b). Contrast {Line#vat_rate}, a token whose value space *is* strings.
           effect: effect.nil? ? nil : Formatting.integer(effect)
-        )
+        }
+      end
+
+      # `P_15ZK` is `TKwotowy`, so two places; `KursWalutyZK` is `TIlosci`, which allows six
+      # and is a rate rather than an amount, so it keeps its own precision.
+      def self.canonical_amounts(paid_before, exchange_rate_before)
+        {
+          paid_before: paid_before && Formatting.decimal(paid_before).round(Formatting::AMOUNT_SCALE),
+          exchange_rate_before: exchange_rate_before && Formatting.decimal(exchange_rate_before)
+        }
       end
 
       # `Array()` is not usable here: it splats a Hash into an array of pairs, so
@@ -94,10 +115,26 @@ module Ksef
           "TypKorekty" => effect&.to_s,
           "DaneFaKorygowanej" => corrected.map(&:to_fa3),
           "OkresFaKorygowanej" => period,
-          "NrFaKorygowany" => corrected_number,
+          "NrFaKorygowany" => corrected_number
+        }.merge(parties).merge(amounts).compact
+      end
+
+      private
+
+      def parties
+        {
           "Podmiot1K" => previous_seller&.to_fa3(role: :previous_seller),
           "Podmiot2K" => previous_buyers.map { |subject| subject.to_fa3(role: :previous_buyer) }
-        }.compact
+        }
+      end
+
+      # `KursWalutyZK` sits in the nested sequence `P_15ZK` opens, so the schema will not take
+      # one without the other; nothing enforces that here, and tier 2 reports it if it happens.
+      def amounts
+        {
+          "P_15ZK" => paid_before && Formatting.amount(paid_before),
+          "KursWalutyZK" => exchange_rate_before && Formatting.quantity(exchange_rate_before)
+        }
       end
     end
   end

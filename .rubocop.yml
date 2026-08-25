@@ -93,5 +93,8 @@ RSpec/DescribeClass:
     # Likewise ZAL and ROZ: Order, OrderLine, AdvanceInvoice, the DSL, the parser and tier 1
     # are one feature, and the argument only reads in order.
     - "spec/ksef/fa3/advance_invoices_spec.rb"
+    # And UPR, whose subject is a *mechanism* — a row that states no amount — shared by two
+    # invoice types rather than owned by a class.
+    - "spec/ksef/fa3/simplified_invoices_spec.rb"
     - "spec/integration/**/*_spec.rb"  # describes a live flow, not a class
     - "spec/release_readiness_spec.rb"

@@ -4,15 +4,15 @@ module Ksef
   module FA3
     # A complete FA(3) invoice.
     #
-    # Covers `VAT`, the correction `KOR`, and the advance-payment pair `ZAL` and `ROZ`. The
-    # remaining three types (DESIGN.md §7.4) reuse this core and add their own required and
-    # forbidden fields.
+    # Covers **all seven** of `TRodzajFaktury` (DESIGN.md §7.4), which differ from the common
+    # core in four optional fields and one relaxation.
     #
-    # What the four have beyond the common core is four optional fields. A correction carries a
-    # {Correction} saying what it corrects (§8.4); an advance invoice carries an {Order}, and a
-    # settlement invoice the {AdvanceInvoice}s it settles (§8.5). All three may state their
-    # {Totals} rather than have them derived — and because they may, they may have no lines at
-    # all.
+    # A correction carries a {Correction} saying what it corrects — `KOR`, `KOR_ZAL`, `KOR_ROZ`
+    # (§8.4). An advance invoice carries an {Order} and a settlement invoice the
+    # {AdvanceInvoice}s it settles — `ZAL`, `ROZ`, and their corrections (§8.5). Every type but
+    # `VAT` may state its {Totals} rather than have them derived, and because it may, it may
+    # have no lines at all — or lines that name goods and state no amount, which is what a
+    # simplified `UPR` invoice is (§8.6).
     Invoice = Data.define(
       :seller, :buyer, :number, :issue_date, :lines,
       :currency, :issued_at, :rounding, :invoice_type, :annotations,
@@ -61,7 +61,7 @@ module Ksef
       # more varied — Przykład 3's single delta row reproduces its buckets exactly. That is why
       # {SummaryChecks} keys the *requirement* to what a document carries rather than to its
       # type; making it type-based would reject that worked example.
-      STATED_TOTALS_TYPES = %w[KOR ZAL ROZ].freeze
+      STATED_TOTALS_TYPES = %w[KOR ZAL ROZ UPR KOR_ZAL KOR_ROZ].freeze
 
       NEEDS_LINES = "An invoice needs at least one line, unless it states its own totals. " \
                     "A collective correction may have no FaWiersz at all — see " \
@@ -160,8 +160,12 @@ module Ksef
       # @return [Hash{String => BigDecimal}]
       def net_by_rate
         lines.each_with_object({}) do |line, acc|
-          code = line.vat_rate.to_s
-          acc[code] = (acc[code] || BigDecimal(0)) + line.net
+          # A row with no amount, or none with a rate to bucket it under, contributes nothing.
+          # It is legal — see {Line#net} — and tier 1 is what stops one appearing on an invoice
+          # that derives its summary from its rows.
+          next unless line.summarised?
+
+          acc[line.vat_rate] = (acc[line.vat_rate] || BigDecimal(0)) + line.net
         end
       end
 
@@ -225,8 +229,9 @@ module Ksef
       # Round each line, then sum. Matches an ERP that prices line by line.
       def vat_rounded_per_line
         lines.each_with_object({}) do |line, acc|
-          code = line.vat_rate.to_s
-          acc[code] = (acc[code] || BigDecimal(0)) + line.vat
+          next unless line.summarised?
+
+          acc[line.vat_rate] = (acc[line.vat_rate] || BigDecimal(0)) + line.vat
         end
       end
 

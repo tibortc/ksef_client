@@ -116,6 +116,47 @@ gem version for which API state".
 
 ### Added
 
+- **`UPR`, `KOR_ZAL` and `KOR_ROZ` — the last three types. All seven now build, parse,
+  round-trip and validate** (DESIGN.md §7.4, `docs/REFERENCE.md` §8.6). Twenty-two of the
+  Ministry's twenty-six worked examples go through end to end; the four that do not are
+  refused for a **construct** rather than for their type — two priced gross, two identifying
+  their buyer by something other than a NIP.
+
+  `KOR_ZAL` and `KOR_ROZ` needed one element between them. **`P_15ZK` means two different
+  things**, and the invoice type decides which: the amount *paid* before the correction on a
+  `KOR_ZAL`, the amount *left to pay* before it on a `KOR_ROZ`. `Correction#paid_before`
+  carries the figure and does not name it more precisely than the schema does.
+
+  `UPR` needed the real change: **a row that states no amount at all.**
+
+  ```ruby
+  f.invoice_type "UPR"
+  f.line name: "wiertarka Wiertex mk5"        # and nothing else — this is the whole row
+  f.totals gross: "450", net: { "23" => "365.85" }, vat: { "23" => "84.15" }
+  ```
+
+  Every child of `TFaWiersz` but `NrWierszaFa` is `minOccurs="0"`, so an amount-less row is
+  the schema's own default and this model was the strict one. `Ksef::FA3::Line#net` now
+  answers **nil rather than raising**, and nil is not zero: the row states nothing, rather
+  than stating that it is worth nothing. The same change unblocked **Przykład 7**, the one
+  Ministry correction this model could not read — its single row names goods, a `CN` code and
+  a quantity, with no amount anywhere — so all five corrections now go through.
+
+  **The parser stopped refusing two shapes, and tier 1 took them over.** An unpriced row, and
+  a row with an amount but no `P_12`, are both legal. But on an invoice that *derives* its
+  summary from its rows the amount is simply absent from the tax base, and neither tier can
+  see that — the XSD is blind to arithmetic and `#unmapped_elements` to values. So the check
+  is line-addressed and fires only where the summary is derived:
+
+  ```
+  lines[0]: states no amount, and this invoice derives its summary from its rows…
+  lines[1]: states an amount but no P_12 rate code, so there is no bucket to put it in…
+  ```
+
+  **Gross pricing is still refused at parse time**, and the distinction is deliberate: a
+  gross-priced row carries a number this model has nowhere to put, so reading it would drop a
+  real amount. An unpriced row has no number to drop.
+
 - **`ZAL` and `ROZ` — the advance invoice and the settlement invoice that closes it out**
   (DESIGN.md §7.4, `docs/REFERENCE.md` §8.5). Four of the seven types now build, parse,
   round-trip and validate, and fifteen of the Ministry's twenty-six worked examples go through

@@ -39,10 +39,10 @@ module Ksef
     # whatever its NIP, and PROD is the only environment that checks the digits anyway
     # (docs/REFERENCE.md §15.3).
     module Parser
-      # The invoice kinds {Invoice} can represent faithfully. The other three of
-      # `TRodzajFaktury` — `UPR`, `KOR_ZAL`, `KOR_ROZ` — are DESIGN.md §7.4's remaining work;
-      # see {#supported_type!} for why accepting one would be worse than refusing it.
-      SUPPORTED_TYPES = %w[VAT KOR ZAL ROZ].freeze
+      # **All seven of `TRodzajFaktury`**, as of 2026-08-26. A spec asserts this list equals
+      # the schema's enumeration, so a future revision that adds a type fails loudly here
+      # rather than being refused at runtime by {#supported_type!}.
+      SUPPORTED_TYPES = %w[VAT KOR ZAL ROZ UPR KOR_ZAL KOR_ROZ].freeze
 
       class << self
         # Namespace-aware element reading; see {NodeReader}.

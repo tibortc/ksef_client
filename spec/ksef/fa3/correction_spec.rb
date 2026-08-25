@@ -432,6 +432,51 @@ RSpec.describe "FA(3) corrections" do
     end
   end
 
+  # `P_15ZK` is the only element the two `KOR_` combinations needed beyond what `KOR`,
+  # `ZAL` and `ROZ` already had (docs/REFERENCE.md §8.6).
+  describe "the amount before correction" do
+    it "writes P_15ZK, whose meaning the invoice type decides" do
+      combined = invoice(invoice_type: "KOR_ZAL", correction: correction(paid_before: "20000"))
+
+      expect(rendered(combined).at_xpath("//Fa/P_15ZK").text).to eq("20000.00")
+      expect(Ksef::FA3::Validator.errors_for(combined.to_xml)).to be_empty
+    end
+
+    it "writes KursWalutyZK alongside it, which no Ministry sample carries" do
+      combined = invoice(invoice_type: "KOR_ROZ",
+                         correction: correction(paid_before: "300000", exchange_rate_before: "4.2515"))
+      document = rendered(combined)
+
+      expect(document.at_xpath("//Fa/KursWalutyZK").text).to eq("4.2515")
+      expect(Ksef::FA3::Validator.errors_for(combined.to_xml)).to be_empty
+    end
+
+    it "omits both when the correction states neither" do
+      expect(rendered(invoice).xpath("//Fa/P_15ZK | //Fa/KursWalutyZK")).to be_empty
+    end
+
+    it "round-trips both" do
+      combined = invoice(invoice_type: "KOR_ZAL",
+                         correction: correction(paid_before: "20000", exchange_rate_before: "4.2515"))
+
+      expect(Ksef::FA3.parse(combined.to_xml)).to eq(combined)
+    end
+
+    it "refuses a Float, as everywhere money flows" do
+      expect { correction(paid_before: 1.5) }
+        .to raise_error(Ksef::ValidationError, /Float is not allowed/)
+    end
+
+    it "reproduces the KOR_ZAL golden byte for byte, losing nothing" do
+      xml = File.read(FA3Corpus.path("golden/kor_zal_order.xml"), encoding: "UTF-8")
+      parsed = Ksef::FA3.parse(xml)
+
+      expect(parsed.invoice_type).to eq("KOR_ZAL")
+      expect(parsed.to_xml).to eq(xml)
+      expect(parsed).to be_fully_mapped
+    end
+  end
+
   describe "reading one back" do
     let(:parsed) { Ksef::FA3.parse(invoice.to_xml) }
 

@@ -51,8 +51,13 @@ module Ksef
       # linking them. Storing the number unconditionally would make a parsed ordinary invoice
       # unequal to the built invoice it came from, and DESIGN.md §7.6's round-trip law with
       # it.
-      def initialize(name:, quantity:, unit:, net_unit_price:, vat_rate:, net_amount: nil,
-                     row_number: nil, state_before: false)
+      # Every child of `TFaWiersz` but `NrWierszaFa` is `minOccurs="0"`, so every field here is
+      # optional — a simplified invoice's row states a name and nothing else. `name:` stays a
+      # required *keyword* rather than gaining a default, because a row that names nothing at
+      # all is a caller mistake far more often than it is a document; pass `name: nil`
+      # deliberately if a document really omits `P_7`, which the parser does.
+      def initialize(name:, quantity: nil, unit: nil, net_unit_price: nil, vat_rate: nil,
+                     net_amount: nil, row_number: nil, state_before: false)
         super(
           # `TZnakowy`/`TStawkaPodatku` are token types, so these are canonicalised the way
           # every other field is (§8.2b). `vat_rate` matters most: {VatRate.bucket} looks the
@@ -74,28 +79,45 @@ module Ksef
       def self.scaled(value, scale) = value.nil? ? nil : Formatting.decimal(value).round(scale)
 
       # Computed unless overridden — ERP-as-source-of-truth callers can supply their own
-      # figure and have it round-tripped verbatim (DESIGN.md §7.3). A parsed line always
+      # figure and have it round-tripped verbatim (DESIGN.md §7.3). A parsed line usually
       # states it, because `P_11` is in the document and may disagree with quantity × price.
+      #
+      # **`nil` when the row states no amount, which is legal** and not the same as zero. A
+      # simplified invoice under art. 106e ust. 5 pkt 3 names the goods and nothing else —
+      # both of the Ministry's `UPR` samples do — and a collective correction's descriptive
+      # row does the same. Such a row contributes nothing to a summary, which is why every
+      # type that carries one states its summary instead ({Invoice::STATED_TOTALS_TYPES}), and
+      # why tier 1 refuses one on an invoice that derives its summary from its rows: the
+      # amount would otherwise be silently absent from the tax base.
+      #
+      # This used to raise. It could, while every modelled type priced its rows; it cannot
+      # now, because "the row states no amount" is a thing the model has to be able to hold.
+      # @return [BigDecimal, nil]
       def net
         return net_amount unless net_amount.nil?
-
-        if quantity.nil? || net_unit_price.nil?
-          raise ValidationError,
-                "Line #{name.inspect} needs either net_amount, or both quantity and net_unit_price"
-        end
+        return nil if quantity.nil? || net_unit_price.nil?
 
         quantity * net_unit_price
       end
 
-      # @return [BigDecimal] tax on this line, or zero for a non-numeric rate code
+      # @return [Boolean] whether this row states an amount at all
+      def priced? = !net.nil?
+
+      # Whether this row can be placed in a summary bucket: it needs an amount *and* a rate to
+      # put it under. {ModelValidator} refuses a row that cannot, on an invoice that derives.
+      def summarised? = priced? && !vat_rate.nil?
+
+      # @return [BigDecimal] tax on this line — zero for a non-numeric rate code, and zero for
+      #   a row that states no amount to tax
       def vat
         percentage = VatRate.percentage(vat_rate)
-        return BigDecimal(0) unless percentage
+        return BigDecimal(0) if percentage.nil? || net.nil?
 
         (net * percentage / 100).round(Formatting::AMOUNT_SCALE)
       end
 
-      def gross = net + vat
+      # @return [BigDecimal, nil] nil for a row that states no amount
+      def gross = net.nil? ? nil : net + vat
 
       # Every child of `TFaWiersz` except `NrWierszaFa` is `minOccurs="0"`, and the parser
       # accepts a row that states only its net. Absent fields are therefore **omitted**, not
@@ -113,8 +135,8 @@ module Ksef
           "P_8A" => unit,
           "P_8B" => quantity && Formatting.quantity(quantity),
           "P_9A" => net_unit_price && Formatting.amount(net_unit_price),
-          "P_11" => Formatting.amount(net),
-          "P_12" => vat_rate&.to_s,
+          "P_11" => net && Formatting.amount(net),
+          "P_12" => vat_rate,
           # `TWybor1` has one member: the marker is present or it is absent, and there is no
           # "no" to write.
           "StanPrzed" => state_before ? Formatting.flag(true) : nil

@@ -180,13 +180,17 @@ Ministry's downloads page.
 All twenty-six validate against the pinned FA(3) XSD with **zero errors** (measured 2026-08-24),
 which is a second independent confirmation that §8.3's in-memory import rewriting is sound.
 
-**They earned their keep the same day.** `KOR` was built against the five corrections here and
-nothing else — no upstream code models an FA(3) correction — and four of the five parse,
+**They earned their keep the same day, and kept doing so.** `KOR` was built against the five
+corrections here and nothing else — no upstream code models an FA(3) correction — and four of the five parse,
 re-serialise and validate. Every structural decision in §8.4 was taken by reading them, and two
 were taken *against* what the schema documentation alone would have suggested: Przykład 2 gives
 a before/after pair the same `NrWierszaFa` where the annotation says *"z odrębną numeracją"*,
 and three of the five make it plain that a correction's summary cannot be derived from its rows.
-§8.4a is a third finding they produced: their KSeF numbers do not satisfy §13's checksum.
+§8.4a is a third finding they produced: their KSeF numbers do not satisfy §13's checksum. `ZAL`
+and `ROZ` followed on 2026-08-25 (§8.5) and the last three types on 2026-08-26 (§8.6), each
+built the same way. **Twenty-two of the twenty-six now parse, re-serialise, validate and
+round-trip**; the four that do not are refused for a construct — two priced gross, two
+identifying their buyer by something other than a NIP — rather than for their type.
 
 #### The licence position, and the decision taken
 
@@ -1397,8 +1401,8 @@ The correction elements are an **anonymous `<xsd:sequence minOccurs="0">`** sitt
 | `NrFaKorygowany` | 0–1, `TZnakowy` | `Correction#corrected_number` |
 | `Podmiot1K` | 0–1 | `Correction#previous_seller` |
 | `Podmiot2K` | 0–101 | `Correction#previous_buyers` |
-| `P_15ZK` | 0–1 | **not modelled** — its documentation scopes it to *"korekt faktur zaliczkowych"* and art. 106f ust. 3, i.e. `KOR_ZAL`/`KOR_ROZ` |
-| `KursWalutyZK` | 0–1 | **not modelled** — its own documentation (*"kurs waluty … przed korektą"*) names no type, but it sits in the nested sequence `P_15ZK` opens, so it is gated structurally to the same two |
+| `P_15ZK` | 0–1, `TKwotowy` | `Correction#paid_before` — scoped to `KOR_ZAL`/`KOR_ROZ`, and it means a different thing on each; see §8.6 |
+| `KursWalutyZK` | 0–1, `TIlosci` | `Correction#exchange_rate_before`; sits in the nested sequence `P_15ZK` opens, so the schema takes neither without the other |
 
 Four consequences that are easy to get wrong:
 
@@ -1620,14 +1624,76 @@ figures then reconcile is tier 3's, and tier 3 is not built.
 - **`ZaliczkaCzesciowa`** — instalments of a partial advance. It appears in **none of the
   twenty-six samples**, so there is nothing to build against; it is a whole element and is
   therefore visible through `#unmapped_elements`.
-- **`P_15ZK` / `KursWalutyZK`** — the amount paid before correction. Still scoped to `KOR_ZAL`
-  and `KOR_ROZ`, which are the remaining work; three `KOR_ZAL` samples and the `KOR_ROZ` one
-  carry `P_15ZK`, so it lands with them rather than here. `KursWalutyZK` appears in none of the
-twenty-six.
+- ~~**`P_15ZK` / `KursWalutyZK`**~~ — **modelled 2026-08-26**, with `KOR_ZAL` and `KOR_ROZ`.
+  See §8.6.
 - **`Platnosc`** and **`DodatkowyOpis`** — payment details and free-form key/value notes. Both
   appear across `VAT`, `ZAL` and `ROZ` alike and have never been modelled; both are
   path-visible. `Platnosc` on a `ZAL` carries *when* the advance was paid, which is worth
   having eventually, but it is not what makes a `ZAL` a `ZAL`.
+
+
+### 8.6 The last three types, and the row that states no amount
+
+Recorded 2026-08-26, when `UPR`, `KOR_ZAL` and `KOR_ROZ` landed. **All seven `RodzajFaktury`
+values are now modelled**, and twenty-two of the Ministry's twenty-six samples parse,
+re-serialise, validate and round-trip. The four that do not are refused for a *construct* —
+two priced gross, two identifying their buyer by something other than a NIP — not for a type.
+
+Two of the three needed almost nothing new. `KOR_ZAL` is the correction group of §8.4 plus the
+`Zamowienie` of §8.5; `KOR_ROZ` is the correction group plus `FakturaZaliczkowa`. Between them
+they added one element:
+
+**`P_15ZK` means two different things, and the invoice type decides which.** Its documentation
+reads *"W przypadku korekt faktur zaliczkowych - kwota zapłaty przed korektą. W przypadku
+korekt faktur, o których mowa w art. 106f ust. 3 ustawy - kwota pozostała do zapłaty przed
+korektą"* — the amount **paid** before the correction on a `KOR_ZAL`, the amount **left to
+pay** before it on a `KOR_ROZ`. One element, two readings. `Correction#paid_before` carries the
+figure and does not try to name it more precisely than the schema does. All four `KOR_ZAL` and
+`KOR_ROZ` samples carry it; `KursWalutyZK`, which sits in the nested sequence it opens, appears
+in none of the twenty-six.
+
+#### `UPR` needed a row that states no amount at all
+
+A simplified invoice under art. 106e ust. 5 pkt 3 names the goods and stops. Both Ministry
+samples are exactly that:
+
+| Sample | The whole row | Summary |
+|---|---|---|
+| Przykład 15 | `NrWierszaFa`, `P_7` | `P_13_1`, `P_14_1`, `P_15` |
+| Przykład 16 | `NrWierszaFa`, `P_7`, `P_12` | `P_15` alone |
+
+Every child of `TFaWiersz` but `NrWierszaFa` is `minOccurs="0"`, so this is not a special case
+in the schema — it is the schema's default, and the model was the thing being strict. `Line`
+now carries every field optionally, and **`Line#net` answers `nil` rather than raising**: "the
+row states no amount" is a state the model has to hold, and it is not the same as zero.
+
+**The same shape unblocked Przykład 7**, the one Ministry correction this model could not read
+— its single row names goods, a `CN` code and a quantity, with no amount anywhere. So all five
+corrections now go through, and the refusal that used to name it is gone.
+
+#### What replaced the refusals, and why it had to
+
+`RowReader` used to refuse two shapes: a row with no price, and a row with no `P_12`. Both are
+now read, because both are legal and the parser is documented not to validate. But an unpriced
+row on an invoice that *derives* its summary from its rows is a real hazard — the amount is
+simply absent from the tax base, and **neither tier can see it**: the XSD is blind to
+arithmetic, and `#unmapped_elements` to values. That is the §8.4b bug class again.
+
+So tier 1 took it over, addressed to the line and scoped to where it costs something:
+
+| Row states | On a deriving invoice | On one that states its summary |
+|---|---|---|
+| amount + rate | fine | fine |
+| amount, no rate | **reported** — no bucket to put it in | fine |
+| no amount | **reported** — absent from the tax base | fine, this is `UPR` |
+
+`Invoice#net_by_rate` skips what it cannot place, which is exactly why the rule is needed:
+without it the document would quietly understate.
+
+The one shape still refused at parse time is **gross pricing** (`P_9B`/`P_11A`), and the
+distinction is worth keeping: a gross-priced row carries a number this model has nowhere to
+put, so reading it would drop a real amount. An unpriced row carries no number to drop.
+
 
 ---
 
