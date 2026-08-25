@@ -32,46 +32,52 @@ module FA3Corpus
   # would mean a missing pin rather than a deliberate omission.
   MINISTRY_COUNT = 26
 
-  # The fifteen this model can represent today: eight of the twelve `VAT` samples, four of the
-  # five `KOR` ones, the `ZAL` and both `ROZ`. What is left out is a useful map of what the
-  # model cannot do, measured against real Ministry documents rather than guessed:
+  # **Twenty-two of the twenty-six**, as of 2026-08-26 — every sample of every one of the seven
+  # `RodzajFaktury` values except four, and those four are refused for a *construct* rather
+  # than for their type:
   #
   # - `08`, `19` — **gross-priced rows** (`P_9B`/`P_11A` under art. 106e ust. 7-8) where this
   #   model carries net pricing only.
   # - `22`, `23` — a buyer identified by `NrVatUE` and by `NrID`, where {Subject} holds a NIP
   #   only (§8.2a).
-  # - `07` — a collective correction whose single row states **no price at all**, naming what
-  #   the discount relates to while the amounts sit in the summary buckets (§8.4).
   #
-  # The remaining six samples are the three types {Parser} still refuses outright rather than
-  # emitting a plausible impostor. They are the corpus for DESIGN.md §7.4's remaining work.
-  MINISTRY_MODELLED = %w[01 02 03 04 05 06 09 10 14 17 20 21 24 25 26]
-                      .map { |n| "mf-samples/przyklad-#{n}.xml" }.freeze
+  # Derived rather than listed: with every type modelled, "everything but those four" is the
+  # honest statement, and a list would go stale silently the next time one is unblocked.
+  MINISTRY_MODELLED = ((1..26).map { |n| format("mf-samples/przyklad-%02d.xml", n) } -
+                       %w[08 19 22 23].map { |n| "mf-samples/przyklad-#{n}.xml" }).freeze
 
   # Samples with no `FaWiersz` at all, which is legal — `minOccurs="0"` — and is how the
   # Ministry writes a correction of buyer data or a collective discount. Listed so the
   # "modelled samples have lines" assertion can exempt exactly these rather than being
   # weakened for all twelve (§8.4).
-  # A `ZAL` joins them for a different reason: its `Zamowienie` positions take the place of
-  # `FaWiersz` entirely (§8.5).
+  # A `ZAL` and its corrections join them for a different reason: `Zamowienie`'s positions take
+  # the place of `FaWiersz` entirely (§8.5).
   MINISTRY_WITHOUT_LINES = %w[
     mf-samples/przyklad-05.xml
     mf-samples/przyklad-06.xml
     mf-samples/przyklad-10.xml
+    mf-samples/przyklad-11.xml
+    mf-samples/przyklad-12.xml
+    mf-samples/przyklad-13.xml
   ].freeze
 
   # Valid FA(3), beyond this model, and refused with a message that says so.
   MINISTRY_BEYOND_MODEL = {
-    "mf-samples/przyklad-07.xml" => /states no price at all/,
     "mf-samples/przyklad-08.xml" => /priced gross/,
     "mf-samples/przyklad-19.xml" => /priced gross/,
     "mf-samples/przyklad-22.xml" => /identified by KodUE, NrVatUE/,
     "mf-samples/przyklad-23.xml" => /identified by KodKraju, NrID/
   }.freeze
 
-  # The types {Parser} refuses by `RodzajFaktury` alone. Named rather than derived, so
-  # supporting one is a deliberate edit here as well as in {Ksef::FA3::Parser::SUPPORTED_TYPES}.
-  MINISTRY_UNSUPPORTED_TYPES = %w[UPR KOR_ZAL KOR_ROZ].freeze
+  # **Empty, and measured to be.** Every `RodzajFaktury` the schema defines is modelled, so
+  # nothing is refused by type any more. Kept as a constant rather than deleted: the round-trip
+  # spec parses all twenty-six and collects the ones refused *for their type*, then asserts the
+  # result equals this — so re-introducing a type-level refusal without saying so here fails.
+  #
+  # It previously asserted `be_empty` against this literal, which is a statement about the
+  # constant and not about the parser: removing `UPR` from `Parser::SUPPORTED_TYPES` left that
+  # example passing.
+  MINISTRY_UNSUPPORTED_TYPES = [].freeze
 
   # This gem's own *serializer output*, which is fully within the model and so round-trips byte
   # for byte. `minimal_vat_invoice.xml` is deliberately absent: it is hand-written for
@@ -83,6 +89,8 @@ module FA3Corpus
     golden/kor_before_after.xml
     golden/zal_order.xml
     golden/roz_settlement.xml
+    golden/upr_simplified.xml
+    golden/kor_zal_order.xml
   ].freeze
 
   # The C# samples are *templates*, not documents: they carry placeholders, and `#nip#` is not

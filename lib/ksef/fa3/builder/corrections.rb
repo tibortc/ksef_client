@@ -13,7 +13,8 @@ module Ksef
         # actually needs; call this for the reason, the effect date and the rest.
         #
         # @param attributes [Hash] `:reason`, `:effect`, `:period`, `:corrected_number`,
-        #   `:previous_seller`, `:previous_buyers` — see {Correction}
+        #   `:previous_seller`, `:previous_buyers`, and for a `KOR_ZAL`/`KOR_ROZ`
+        #   `:paid_before` (`P_15ZK`) and `:exchange_rate_before` — see {Correction}
         def correction(**attributes)
           @correction = normalise(attributes, CORRECTION_KEYS, {}, "correction")
         end

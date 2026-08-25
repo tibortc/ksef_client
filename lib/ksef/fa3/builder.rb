@@ -19,7 +19,8 @@ module Ksef
       SUBJECT_KEYS = %i[nip name address local_government_unit vat_group_member buyer_id].freeze
       ADDRESS_KEYS = %i[line1 line2 country street city postal_code].freeze
       LINE_KEYS = %i[name quantity unit net_unit_price vat_rate net_amount row_number state_before].freeze
-      CORRECTION_KEYS = %i[reason effect period corrected_number previous_seller previous_buyers].freeze
+      CORRECTION_KEYS = %i[reason effect period corrected_number previous_seller previous_buyers
+                           paid_before exchange_rate_before].freeze
       CORRECTED_KEYS = %i[number issue_date ksef_number].freeze
       ORDER_KEYS = %i[total].freeze
       ORDER_LINE_KEYS = %i[name quantity unit net_unit_price net_amount vat_amount vat_rate

@@ -84,6 +84,16 @@ RSpec.describe "the FA(3) round-trip law" do
         expect(parsed.unmapped_elements).to be_empty
         expect(parsed).to be_fully_mapped
       end
+
+      # "Goldens must validate against the pinned XSD" (CLAUDE.md) was true of these by
+      # accident rather than by assertion: `vat_single_line` and `kor_before_after` were
+      # validated incidentally by other specs, and `zal_order`, `roz_settlement` and
+      # `kor_zal_order` were validated **nowhere**. All six were valid in fact — a missing
+      # guard rather than a live defect — and a golden that stops being schema-valid is
+      # exactly the regression this suite exists to catch.
+      it "#{relative} is schema-valid" do
+        expect(Ksef::FA3::Validator.errors_for(sample(relative))).to be_empty
+      end
     end
   end
 
@@ -134,10 +144,11 @@ RSpec.describe "the FA(3) round-trip law" do
     end
   end
 
-  # The Ministry's own twenty-six worked examples (docs/REFERENCE.md §1.5). They matter for two
-  # opposite reasons: the twelve `VAT` ones are real invoices this model must handle, and the
-  # fourteen others are the only existing examples of the types it must **refuse** rather than
-  # quietly mangle.
+  # The Ministry's own twenty-six worked examples (docs/REFERENCE.md §1.5). They are the only
+  # examples of the six non-`VAT` types that exist anywhere, and every one of the seven is now
+  # modelled — so where this corpus once proved what the parser must **refuse**, it now proves
+  # what it must **represent**. Four samples are still beyond the model, all four for a
+  # construct rather than a type; see {FA3Corpus::MINISTRY_BEYOND_MODEL}.
   describe "the Ministry's worked examples" do
     it "finds all twenty-six, so a missing pin is not silent" do
       expect(FA3Corpus.ministry.size).to eq(FA3Corpus::MINISTRY_COUNT)
@@ -156,7 +167,7 @@ RSpec.describe "the FA(3) round-trip law" do
       end
     end
 
-    describe "the fifteen this model represents" do
+    describe "the twenty-two this model represents" do
       FA3Corpus::MINISTRY_MODELLED.each do |relative|
         it "#{relative} parses and re-serialises to a schema-valid document" do
           parsed = Ksef::FA3.parse(FA3Corpus.read(relative))
@@ -194,10 +205,11 @@ RSpec.describe "the FA(3) round-trip law" do
       end
     end
 
-    # Five invoices of a modelled *type* that are still beyond the model — a construct at a
-    # time, not a type. Each refusal names the construct and says the document is fine, which
-    # is the whole point of refusing rather than parsing them into something lossy.
-    describe "the five examples of a supported type that are beyond the model" do
+    # With every `RodzajFaktury` modelled, what is left is four invoices refused for a
+    # *construct*: two priced gross, two identifying their buyer by something other than a NIP.
+    # Each refusal names the construct and says the document is fine, which is the whole point
+    # of refusing rather than parsing them into something lossy.
+    describe "the four beyond the model — a construct at a time, no longer a type" do
       FA3Corpus::MINISTRY_BEYOND_MODEL.each do |relative, reason|
         it "#{relative} is refused, naming the construct" do
           expect { Ksef::FA3.parse(FA3Corpus.read(relative)) }
@@ -207,39 +219,52 @@ RSpec.describe "the FA(3) round-trip law" do
         end
       end
 
-      it "accounts for every sample of a supported type, so none is quietly unclassified" do
-        supported = FA3Corpus.ministry.select do |relative|
-          Ksef::FA3::Parser::SUPPORTED_TYPES.include?(FA3Corpus.invoice_type(relative))
-        end
-
-        expect(supported)
+      it "accounts for every sample, so none is quietly unclassified" do
+        expect(FA3Corpus.ministry)
           .to match_array(FA3Corpus::MINISTRY_MODELLED + FA3Corpus::MINISTRY_BEYOND_MODEL.keys)
+      end
+
+      # The no-rows exemption is checked per modelled sample, so an entry that is *not* in the
+      # modelled set is never iterated and sits there inert — a bogus path could be added and
+      # nothing would fail. The subset is what makes the exemption list mean something.
+      it "exempts only samples it actually iterates" do
+        expect(FA3Corpus::MINISTRY_WITHOUT_LINES - FA3Corpus::MINISTRY_MODELLED).to be_empty
       end
     end
 
-    # The refusal path, against the documents that motivate it. A `KOR_ZAL` carries the amount
-    # paid before correction in `P_15ZK`, a `ZAL` its instalments in `ZaliczkaCzesciowa`;
-    # parsing one into this model would drop them and re-serialise a different invoice under
-    # the original's number.
-    describe "the six whose type the model cannot represent" do
-      (FA3Corpus.ministry - FA3Corpus::MINISTRY_MODELLED - FA3Corpus::MINISTRY_BEYOND_MODEL.keys)
-        .each do |relative|
-        it "#{relative} is refused, naming the type and blaming the model" do
-          type = FA3Corpus.invoice_type(relative)
-
-          expect { Ksef::FA3.parse(FA3Corpus.read(relative)) }
-            .to raise_error(Ksef::ValidationError, /This is a #{type} invoice.*document itself is fine/m)
+    # Nothing is refused by type any more. The refusal path itself still exists and still
+    # matters — a future FA(4) type, or a schema revision adding one, must not be parsed into
+    # a plausible impostor — so it is asserted directly rather than through a sample.
+    describe "refusal by type, now unreachable from the corpus" do
+      # `expect(MINISTRY_UNSUPPORTED_TYPES).to be_empty` was a literal asserted against its
+      # own definition — it passed with `UPR` removed from `SUPPORTED_TYPES`. The constant is
+      # now measured: every sample is parsed, and the ones that fail *for their type* are
+      # collected. That is the set the constant claims to name, so drift fails here.
+      it "leaves no sample refused for its RodzajFaktury" do
+        refused = FA3Corpus.ministry.reject do |relative|
+          Ksef::FA3.parse(FA3Corpus.read(relative))
+          true
+        rescue Ksef::ValidationError => e
+          !e.message.include?("are modelled so far")
         end
+
+        expect(refused).to eq(FA3Corpus::MINISTRY_UNSUPPORTED_TYPES)
+        expect(FA3Corpus.ministry - FA3Corpus::MINISTRY_MODELLED - FA3Corpus::MINISTRY_BEYOND_MODEL.keys)
+          .to be_empty
       end
 
-      # The list above is a set difference, so a sample slipping out of MINISTRY_MODELLED
-      # would silently join it and still pass. This pins what is actually left.
-      it "is exactly the three unsupported types" do
-        refused = FA3Corpus.ministry - FA3Corpus::MINISTRY_MODELLED - FA3Corpus::MINISTRY_BEYOND_MODEL.keys
+      # The list and the schema must not drift apart: a revision that adds a `RodzajFaktury`
+      # should fail here, where the message is about coverage, rather than at runtime.
+      it "models every type the schema defines" do
+        expect(Ksef::FA3::Parser::SUPPORTED_TYPES)
+          .to match_array(Ksef::FA3::Generated::Enums.values_for("TRodzajFaktury"))
+      end
 
-        expect(refused.size).to eq(6)
-        expect(refused.map { |relative| FA3Corpus.invoice_type(relative) }.uniq)
-          .to match_array(FA3Corpus::MINISTRY_UNSUPPORTED_TYPES)
+      it "still refuses a type the schema does not define, rather than guessing" do
+        xml = FA3Corpus.read("mf-samples/przyklad-01.xml").sub("<RodzajFaktury>VAT<", "<RodzajFaktury>FA4<")
+
+        expect { Ksef::FA3.parse(xml) }
+          .to raise_error(Ksef::ValidationError, /This is a FA4 invoice.*document itself is fine/m)
       end
     end
   end

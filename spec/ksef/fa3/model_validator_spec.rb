@@ -123,7 +123,18 @@ RSpec.describe Ksef::FA3::ModelValidator do
 
     it "reports a missing enum value rather than treating nil as valid" do
       expect(fields_for(currency: nil)).to include("currency")
-      expect(fields_for(lines: [line(vat_rate: nil)])).to include("lines[0].vat_rate")
+    end
+
+    # `P_12` is minOccurs="0", so a nil rate is a value rather than an omission. What it costs
+    # is a summary bucket, and tier 1 says *that* instead — addressed to the line, and only on
+    # an invoice whose summary is derived from its rows.
+    it "reports a rateless line for the bucket it cannot go in, not for a missing enum" do
+      issues = described_class.errors_for(invoice(lines: [line(vat_rate: nil)])).map(&:to_s)
+
+      expect(issues).to include(/lines\[0\].vat_rate: states an amount but no P_12 rate code/)
+      # The address is the field, because supplying `P_12` is the whole remedy. What must not
+      # come back is the *enum* complaint — a nil rate is a legal value, not a bad one.
+      expect(issues).not_to include(/lines\[0\].vat_rate: is required/)
     end
   end
 

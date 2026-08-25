@@ -24,18 +24,28 @@ RSpec.describe Ksef::FA3::Line do
       expect(from_integer.hash).to eq(from_document.hash)
     end
 
-    # Quantity and unit price are both optional in TFaWiersz, so nil has to survive.
+    # Quantity and unit price are both optional in FaWiersz, so nil has to survive.
     it "leaves nil alone" do
       expect(line(quantity: nil, net_amount: "100").quantity).to be_nil
       expect(line.net_amount).to be_nil
     end
 
-    # `TKwotowy` is fractionDigits="2" and `TIlosci` fractionDigits="6", so a finer value is
-    # not something FA(3) can express. Rounding on the way in means the model reports the
-    # figure the document will carry, and `#net` agrees with the invoice as printed.
+    # The row's three numeric elements have **three different scales**: `P_11` is `TKwotowy`
+    # (2), `P_8B` is `TIlosci` (6) and `P_9A` is `TKwotowy2` (8). Rounding on the way in means
+    # the model reports the figure the document will carry — but only if it rounds each to its
+    # own scale. Rounding `P_9A` to two silently altered a stated unit price.
     it "rounds an amount to the two places its element allows" do
-      expect(line(net_unit_price: "150.125").net_unit_price).to eq(BigDecimal("150.13"))
       expect(line(net_amount: "100.004").net_amount).to eq(BigDecimal("100.00"))
+    end
+
+    it "keeps a unit price at the eight places TKwotowy2 allows" do
+      expect(line(net_unit_price: "150.125").net_unit_price).to eq(BigDecimal("150.125"))
+      expect(line(net_unit_price: "1.123456789").net_unit_price).to eq(BigDecimal("1.12345679"))
+    end
+
+    it "writes a fine unit price out in full, padded to two places when it is round" do
+      expect(line(net_unit_price: "150.125").to_fa3(row_number: 1)["P_9A"]).to eq("150.125")
+      expect(line(net_unit_price: "150").to_fa3(row_number: 1)["P_9A"]).to eq("150.00")
     end
 
     it "rounds a quantity to the six places its element allows" do
@@ -51,9 +61,14 @@ RSpec.describe Ksef::FA3::Line do
     end
 
     it "makes net agree with the price the document shows" do
-      # 3 x 150.13 (the representable price), not 3 x 150.125.
-      expect(line(quantity: 3, net_unit_price: "150.125", net_amount: nil).net)
-        .to eq(BigDecimal("450.39"))
+      # 3 x 150.125, the price the document actually carries — `P_9A` can express it, so the
+      # derived net is taken from it rather than from a two-place approximation of it. `P_11`
+      # is `TKwotowy`, so the *emitted* net is rounded, and that rounding belongs at emit
+      # where the schema imposes it.
+      row = line(quantity: 3, net_unit_price: "150.125", net_amount: nil)
+
+      expect(row.net).to eq(BigDecimal("450.375"))
+      expect(row.to_fa3(row_number: 1)["P_11"]).to eq("450.38")
     end
 
     # DESIGN.md §4.4. Rejected at construction, where the caller can see which line it
@@ -75,9 +90,24 @@ RSpec.describe Ksef::FA3::Line do
       expect(line(net_amount: "18000").net).to eq(BigDecimal("18000"))
     end
 
-    it "says what is missing when it can neither read nor derive one" do
-      expect { line(quantity: nil, net_unit_price: nil).net }
-        .to raise_error(Ksef::ValidationError, /"Consulting" needs either net_amount, or both/)
+    # This used to raise. It cannot now: a simplified invoice's row names the goods and states
+    # no amount at all, and so does a collective correction's descriptive row, so "no amount"
+    # is a state the model has to hold. Tier 1 is what refuses one on an invoice that derives
+    # its summary from its rows (docs/REFERENCE.md §8.6).
+    it "is nil when the row states no amount, which is legal and not zero" do
+      bare = line(quantity: nil, net_unit_price: nil)
+
+      expect(bare.net).to be_nil
+      expect(bare.gross).to be_nil
+      # Unknown, not zero — the same distinction `#net` makes. A rate code that carries no tax
+      # is the other case, and that one really is zero (see below).
+      expect(bare.vat).to be_nil
+      expect(bare).not_to be_priced
+    end
+
+    it "is not summarised without a rate to bucket it under" do
+      expect(line(vat_rate: nil)).not_to be_summarised
+      expect(line).to be_summarised
     end
   end
 
@@ -94,7 +124,7 @@ RSpec.describe Ksef::FA3::Line do
     end
   end
 
-  # Every child of TFaWiersz except NrWierszaFa is minOccurs="0", and the parser accepts a row
+  # Every child of FaWiersz except NrWierszaFa is minOccurs="0", and the parser accepts a row
   # stating only its net. Writing those fields empty produced `<P_8A/>`, which fails
   # TZnakowy512 — and formatting a nil quantity raised, which took #unmapped_elements with it.
   describe "#to_fa3 with optional fields absent" do

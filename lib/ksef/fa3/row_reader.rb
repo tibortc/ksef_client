@@ -5,13 +5,9 @@ module Ksef
     # Reads the `FaWiersz` rows of an invoice into {Line} objects.
     #
     # Split out of {Parser} because a row is where FA(3)'s optionality is at its most
-    # aggressive: every child of `TFaWiersz` except `NrWierszaFa` is `minOccurs="0"`, so most
+    # aggressive: every child of `FaWiersz` except `NrWierszaFa` is `minOccurs="0"`, so most
     # of what this does is decide which absences the model can absorb and which it cannot.
     module RowReader
-      # The elements a row can state a price or a value in. A row with none of them is not a
-      # priced row at all; see {#missing_net}.
-      PRICE_ELEMENTS = %w[P_11 P_11A P_9A P_9B].freeze
-
       class << self
         # Namespace-aware element reading; see {NodeReader}.
         include NodeReader
@@ -33,67 +29,36 @@ module Ksef
         private
 
         def line_from(row)
-          net_amount = text(row, "P_11")
-          quantity = text(row, "P_8B")
-          unit_price = text(row, "P_9A")
-
-          raise ValidationError, missing_net(row) if net_amount.nil? && (quantity.nil? || unit_price.nil?)
+          # **Gross pricing is the only shape still refused.** A row that simply states no
+          # amount is read as one: {Line#net} answers nil, and tier 1 refuses such a row on an
+          # invoice that derives its summary from its rows. A gross-priced row is different —
+          # `P_9B`/`P_11A` carry a number this model has nowhere to put, so reading it would
+          # drop a real amount rather than record its absence.
+          raise ValidationError, priced_gross(row) if text(row, "P_11A") || text(row, "P_9B")
 
           # Passed as the strings they were written as; {Line} converts them, so decimal
           # coercion lives in one place rather than being repeated per caller.
           #
-          # `P_7` is `minOccurs="0"` ("optional for art. 106j ust. 3 pkt 2" — corrections), so
-          # it is read leniently and omitted again on the way out. `P_12` is optional too, but
-          # unlike a name it is not something this model can do without: every summary bucket
-          # is chosen by rate code, so a row without one cannot be re-serialised at all. Hence
-          # a refusal that says so, rather than one implying the document is malformed.
+          # Every field here is `minOccurs="0"`, and all of them are now read leniently —
+          # including `P_12`, which a simplified invoice's row omits. What a missing rate costs
+          # is a summary bucket, which only matters when the invoice derives its summary; tier
+          # 1 knows whether it does, and this does not.
           Line.new(
             name: text(row, "P_7"), unit: text(row, "P_8A"),
-            quantity: quantity, net_unit_price: unit_price,
-            vat_rate: rate_for(row), net_amount: net_amount,
+            quantity: text(row, "P_8B"), net_unit_price: text(row, "P_9A"),
+            vat_rate: text(row, "P_12"), net_amount: text(row, "P_11"),
             row_number: text(row, "NrWierszaFa"), state_before: text(row, "StanPrzed")
           )
         end
 
-        # A row with no net value is usually a **gross-priced** row: under art. 106e ust. 7-8 an
-        # invoice may state `P_9B` (unit gross price) and `P_11A` (gross sales value) instead of
-        # `P_9A`/`P_11`, and two of the Ministry's own worked examples do exactly that. Saying
-        # "has neither P_11 nor both of P_8B and P_9A" blames the document for lacking a field
-        # its pricing convention does not use, so the gross case is named for what it is — as is
-        # the row that states no price at all.
-        def missing_net(row)
-          where = "FaWiersz #{text(row, "NrWierszaFa") || "(unnumbered)"}"
-          if text(row, "P_11A") || text(row, "P_9B")
-            return "#{where} is priced gross, stating P_11A/P_9B rather than P_11/P_9A. That is " \
-                   "valid under art. 106e ust. 7-8, and this model carries net pricing only " \
-                   "(DESIGN.md §7.4) — the document itself is fine."
-          end
-          return descriptive(where) if PRICE_ELEMENTS.none? { |name| text(row, name) }
-
-          "#{where} has neither P_11 nor both of P_8B and P_9A, so its net value cannot be established"
-        end
-
-        # The Ministry's Przykład 7: a collective correction whose single row names the goods
-        # the discount relates to — `P_7`, `CN`, a unit and a quantity — and states no amount
-        # anywhere, the whole effect being in the summary buckets. {Line} is built round a net
-        # value, so such a row cannot be represented; saying it "cannot establish its net
-        # value" would imply the document forgot something it deliberately omitted.
-        def descriptive(where)
-          "#{where} states no price at all — no P_11, P_11A, P_9A or P_9B. A row like this " \
-            "belongs to a collective correction, where it names what the correction relates to " \
-            "while the amounts sit in the summary buckets (docs/REFERENCE.md §8.4). This model's " \
-            "Line is built round a net value (DESIGN.md §7.4) — the document itself is fine."
-        end
-
-        def rate_for(row)
-          rate = text(row, "P_12")
-          return rate if rate
-
-          raise ValidationError,
-                "FaWiersz #{text(row, "NrWierszaFa") || "(unnumbered)"} states no P_12 rate code. " \
-                "The document may be valid — P_12 is optional for the simplified and margin " \
-                "invoices of art. 106e ust. 2-3 — but this model derives every tax summary " \
-                "from the rate, so it cannot represent the row (DESIGN.md §7.4)."
+        # Under art. 106e ust. 7-8 an invoice may state `P_9B` (unit gross price) and `P_11A`
+        # (gross sales value) instead of `P_9A`/`P_11`, and two of the Ministry's own worked
+        # examples do. This model carries net pricing only, so the amount has nowhere to go —
+        # which is a limit of the model, not a fault in the document, and the message says so.
+        def priced_gross(row)
+          "FaWiersz #{text(row, "NrWierszaFa") || "(unnumbered)"} is priced gross, stating " \
+            "P_11A/P_9B rather than P_11/P_9A. That is valid under art. 106e ust. 7-8, and this " \
+            "model carries net pricing only (DESIGN.md §7.4) — the document itself is fine."
         end
       end
     end

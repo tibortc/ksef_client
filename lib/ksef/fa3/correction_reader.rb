@@ -32,7 +32,9 @@ module Ksef
             previous_seller: previous_seller_from(fa_node),
             previous_buyers: elements(fa_node, "Podmiot2K").map do |node|
               SubjectReader.subject_from(node, role: :previous_buyer)
-            end
+            end,
+            paid_before: text(fa_node, "P_15ZK"),
+            exchange_rate_before: text(fa_node, "KursWalutyZK")
           )
         end
 

@@ -39,10 +39,10 @@ module Ksef
     # whatever its NIP, and PROD is the only environment that checks the digits anyway
     # (docs/REFERENCE.md §15.3).
     module Parser
-      # The invoice kinds {Invoice} can represent faithfully. The other three of
-      # `TRodzajFaktury` — `UPR`, `KOR_ZAL`, `KOR_ROZ` — are DESIGN.md §7.4's remaining work;
-      # see {#supported_type!} for why accepting one would be worse than refusing it.
-      SUPPORTED_TYPES = %w[VAT KOR ZAL ROZ].freeze
+      # **All seven of `TRodzajFaktury`**, as of 2026-08-26. A spec asserts this list equals
+      # the schema's enumeration, so a future revision that adds a type fails loudly here
+      # rather than being refused at runtime by {#supported_type!}.
+      SUPPORTED_TYPES = %w[VAT KOR ZAL ROZ UPR KOR_ZAL KOR_ROZ].freeze
 
       class << self
         # Namespace-aware element reading; see {NodeReader}.
@@ -145,8 +145,8 @@ module Ksef
         end
 
         # {Invoice} models the types in {SUPPORTED_TYPES} (DESIGN.md §7.4). Accepting an
-        # unmodelled type
-        # produces something far worse than a refusal, and `KOR` is the case that showed it:
+        # unmodelled type produces something far worse than a refusal, and `KOR` is the case
+        # that showed it:
         # before 2026-08-24 one parsed and re-serialised kept its `RodzajFaktury` and `P_2` —
         # and therefore KSeF's whole duplicate key (docs/REFERENCE.md §15.2) — while dropping
         # `DaneFaKorygowanej` and recomputing the summaries from rows whose `StanPrzed` marker

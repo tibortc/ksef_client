@@ -314,23 +314,37 @@ RSpec.describe Ksef::FA3::Parser do
         .to raise_error(Ksef::ValidationError, /no FaWiersz rows/)
     end
 
-    # A row stating no price of any kind is not an incomplete priced row — it is the
-    # descriptive row of a collective correction (§8.4), and saying "cannot establish its
-    # net value" would blame the document for omitting something it never meant to state.
-    it "names a row that states no price at all for what it is" do
-      xml = document(subjects, fa(one_row("P_11" => nil, "P_9A" => nil)))
+    # A row stating no price of any kind is legal — it is what a simplified `UPR` invoice
+    # carries, and what a collective correction's descriptive row is — so the parser reads it
+    # rather than refusing it. Tier 1 is what objects, and only on an invoice that derives its
+    # summary from its rows (§8.6).
+    it "reads a row that states no price at all, leaving the objection to tier 1" do
+      parsed = described_class.parse(document(subjects, fa(one_row("P_11" => nil, "P_9A" => nil))))
 
-      expect { described_class.parse(xml) }
-        .to raise_error(Ksef::ValidationError, /FaWiersz 1 states no price at all/)
-      expect { described_class.parse(xml) }
-        .to raise_error(Ksef::ValidationError, /collective correction.*document itself is fine/m)
+      expect(parsed.lines.first.net).to be_nil
+      expect(parsed.errors.map(&:to_s)).to include(/lines\[0\]: states no amount/)
     end
 
-    it "refuses a row missing P_11 and the quantity too" do
-      xml = document(subjects, fa(one_row("P_11" => nil, "P_8B" => nil)))
+    it "reads a row missing P_11 and the quantity too" do
+      parsed = described_class.parse(document(subjects, fa(one_row("P_11" => nil, "P_8B" => nil))))
+
+      expect(parsed.lines.first.net).to be_nil
+      # This example used to assert a refusal. When the refusal moved to tier 1 the assertion
+      # was dropped rather than moved, leaving the sibling above as the only guard on
+      # `NO_AMOUNT` — so this one would not have noticed the rule disappearing.
+      expect(parsed.errors.map(&:to_s)).to include(/lines\[0\]: states no amount/)
+    end
+
+    # **`P_9B` alone.** Both of the Ministry's gross-priced samples carry `P_11A` as well, so
+    # nothing in the corpus makes the second half of the refusal the deciding operand — and an
+    # `||` operand is not a branch, so neither coverage criterion could see the gap. Dropping
+    # `P_9B` from the check left the whole suite green while a stated gross unit price was
+    # silently discarded, which is precisely what the refusal exists to prevent.
+    it "refuses a row priced gross by P_9B alone, with no P_11A to give it away" do
+      xml = document(subjects, fa(one_row("P_11" => nil, "P_9A" => nil, "P_9B" => "123.00")))
 
       expect { described_class.parse(xml) }
-        .to raise_error(Ksef::ValidationError, /FaWiersz 1 has neither P_11 nor both/)
+        .to raise_error(Ksef::ValidationError, %r{is priced gross, stating P_11A/P_9B})
     end
 
     it "accepts a row with no P_11 when quantity and unit price are both present" do
@@ -396,12 +410,14 @@ RSpec.describe Ksef::FA3::Parser do
     end
 
     # NrWierszaFa is how a row identifies itself, so a row that has none has to be described
-    # some other way when it is the one being complained about.
+    # some other way when it is the one being complained about. Gross pricing is the one shape
+    # the parser still refuses, so it is what the message has to cope with.
     it "describes an unnumbered row rather than naming it" do
-      xml = document(subjects, fa(one_row("NrWierszaFa" => nil, "P_11" => nil, "P_9A" => nil)))
+      xml = document(subjects, fa(one_row("NrWierszaFa" => nil, "P_11" => nil, "P_9A" => nil,
+                                          "P_11A" => "123.00")))
 
       expect { described_class.parse(xml) }
-        .to raise_error(Ksef::ValidationError, /FaWiersz \(unnumbered\) states no price/)
+        .to raise_error(Ksef::ValidationError, /FaWiersz \(unnumbered\) is priced gross/)
     end
   end
 
@@ -459,13 +475,13 @@ RSpec.describe Ksef::FA3::Parser do
         .to raise_error(Ksef::ValidationError, /Podmiot1 is missing the mandatory <Adres>/)
     end
 
-    # P_12 is optional too, but unlike a name the model cannot do without it: every summary
-    # bucket is chosen by rate code. So the refusal has to say that, not imply bad input.
-    it "refuses a row with no P_12, as a model limit rather than a malformed document" do
-      xml = document(subjects, fa(one_row("P_12" => nil)))
+    # `P_12` is `minOccurs="0"`, and a simplified invoice's row omits it. What a missing rate
+    # costs is a summary bucket, so tier 1 reports it — and only where the summary is derived.
+    it "reads a row with no P_12, leaving the objection to tier 1" do
+      parsed = described_class.parse(document(subjects, fa(one_row("P_12" => nil))))
 
-      expect { described_class.parse(xml) }
-        .to raise_error(Ksef::ValidationError, /states no P_12 rate code.*document may be valid/m)
+      expect(parsed.lines.first.vat_rate).to be_nil
+      expect(parsed.errors.map(&:to_s)).to include(/lines\[0\].vat_rate: states an amount but no P_12/)
     end
   end
 
@@ -528,13 +544,24 @@ RSpec.describe Ksef::FA3::Parser do
 
   # Accepting an unmodelled type produced something worse than a refusal: a valid-looking
   # invoice under the original's number with recomputed, sign-flipped totals.
-  describe "invoice types this model does not carry" do
-    %w[UPR KOR_ZAL KOR_ROZ].each do |type|
-      it "refuses a #{type} document, explaining that the document is fine" do
-        xml = document(subjects, fa("#{one_row}<RodzajFaktury>#{type}</RodzajFaktury>"))
+  describe "invoice types" do
+    # Every `RodzajFaktury` the schema defines is modelled now, so the refusal is reachable
+    # only by a type the schema does not define — a future FA(4), or a typo.
+    it "refuses a type the schema does not define, rather than guessing" do
+      xml = document(subjects, fa("#{one_row}<RodzajFaktury>FA4</RodzajFaktury>"))
 
-        expect { described_class.parse(xml) }
-          .to raise_error(Ksef::ValidationError, /This is a #{type} invoice.*document itself is fine/m)
+      expect { described_class.parse(xml) }
+        .to raise_error(Ksef::ValidationError, /This is a FA4 invoice.*document itself is fine/m)
+    end
+
+    Ksef::FA3::Parser::SUPPORTED_TYPES.each do |type|
+      it "accepts an explicit #{type}" do
+        # Every type but VAT states its summary, so `P_15` has to be there for the parser to
+        # read one — {Ksef::FA3::Invoice::STATED_TOTALS_TYPES}.
+        totals = Ksef::FA3::Invoice::STATED_TOTALS_TYPES.include?(type) ? "<P_15>123.00</P_15>" : ""
+        xml = document(subjects, fa("#{one_row}#{totals}<RodzajFaktury>#{type}</RodzajFaktury>"))
+
+        expect(described_class.parse(xml).invoice_type).to eq(type)
       end
     end
 

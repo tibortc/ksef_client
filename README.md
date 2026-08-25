@@ -76,9 +76,13 @@ submitted.
 > (`Zamowienie`) and has no invoice rows at all; a `ROZ` names every advance invoice it settles
 > and states what is left to pay.
 >
-> **Not yet:** validator tier 3 — the reconciliation rules — and three of the seven invoice
-> types: `VAT`, `KOR`, `ZAL` and `ROZ` build and parse; `UPR` and the two remaining `KOR_`
-> combinations do not. See [Roadmap](#roadmap).
+> **All seven invoice types build and parse**, as of 2026-08-26 — `VAT`, `KOR`, `ZAL`, `ROZ`,
+> `UPR` and the two `KOR_` combinations. Twenty-two of the Ministry's twenty-six worked
+> examples go through end to end; the four that do not are refused for a *construct* — two
+> priced gross, two identifying their buyer by something other than a NIP — rather than for
+> their type.
+>
+> **Not yet:** validator tier 3, the reconciliation rules. See [Roadmap](#roadmap).
 
 ## Installation
 
@@ -357,11 +361,15 @@ One field is inherently exempt: **`rounding` is not recorded in an FA(3) documen
 is inferred by asking which strategy reproduces the tax summaries, so a `:per_summary` invoice
 whose summaries happen to match `:per_line`'s — the common case — comes back as `:per_line`.
 
-Parsing also refuses what it cannot represent faithfully, rather than guessing: an invoice
-type the model does not carry, a row with no `P_12` rate code, a row priced gross, a row that
-states no price at all — the descriptive row of a collective correction — and a buyer
-identified by anything other than a NIP. The message says that the document is fine and the
+Parsing also refuses what it cannot represent faithfully, rather than guessing: a row priced
+gross (`P_9B`/`P_11A`), a buyer identified by anything other than a NIP, and any
+`RodzajFaktury` the schema does not define. The message says that the document is fine and the
 model is the limit, and names the construct.
+
+A row that simply states *no* amount is **not** in that list — it is legal FA(3), it is what a
+simplified `UPR` invoice carries, and `Line#net` answers nil for it. What such a row costs is a
+summary bucket, so `Invoice#errors` objects to one only on an invoice that derives its summary
+from its rows.
 
 ### Querying the schema
 
@@ -402,7 +410,7 @@ integrators.
 - **MRI >= 3.2**, with **no upper bound, ever.** `required_ruby_version` resolves at
   install time, so an upper bound strands users on each new Ruby release.
 - CI covers 3.2, 3.3, 3.4, 4.0 and `head`, and the full suite is run locally on 3.2 at every
-  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1282
+  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1314
   examples green.
 - **The 3.2 floor is a commitment, not a default.** Ruby 3.2 is EOL upstream, and this gem
   still supports it deliberately: Polish tax-compliance software upgrades slowly, and 3.2
