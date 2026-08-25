@@ -85,10 +85,16 @@ jobs:
           # github-token defaults to ${{ github.token }}, so there is no secret to
           # create or rotate.
           #
-          # Coveralls is reporting, not enforcement: the SimpleCov gate in
-          # spec_helper.rb already fails the build in-repo. A third-party outage should
-          # not turn this matrix leg red.
-          fail-on-error: false
+          # **Enforcement, not reporting** (decided 2026-08-26). This said the opposite,
+          # on the reasoning that spec_helper.rb's SimpleCov gate already fails the build
+          # and a third-party outage should not redden the leg. The reasoning was sound
+          # and the flag did not implement it: `fail-on-error` covers only the *action*
+          # erroring, while the `coverage/coveralls` commit status Coveralls posts on its
+          # own gates the PR regardless — so the leg stayed green while the PR went
+          # UNSTABLE, and the workflow claimed a policy it was not applying. Given the
+          # status blocks either way, the honest setting is the one that reports the
+          # failure where it happens.
+          fail-on-error: true
 
   rubocop:
     runs-on: ubuntu-latest
