@@ -188,9 +188,12 @@ module Ksef
       #
       # **Tier 1a first, and nothing else runs if it fails.** {ModelValidator}'s contract is
       # that a model it passes can be serialized; a model it rejects generally cannot, because
-      # serialisation *raises* on a bad NIP, a nameless seller or a line with no derivable net.
-      # Attempting `#to_xml` anyway would replace a list of addressed errors with a single
-      # exception about whichever one came first.
+      # serialisation *raises* on a bad NIP, a nameless seller or a rate code with no summary
+      # bucket. Attempting `#to_xml` anyway would replace a list of addressed errors with a
+      # single exception about whichever one came first. ("A line with no derivable net" was
+      # on that list until 2026-08-26, when such a row became legal — {Line#net} answers nil
+      # and the row serialises without a `P_11`. The short-circuit's justification survives on
+      # the remaining three; the guard against that row is now tier 1's alone.)
       #
       # Then {DocumentValidator} (tier 1b) and {Validator} (tier 2) on the same bytes. Tier 3 —
       # the reconciliation rules — does not exist: its catalogue is absent upstream

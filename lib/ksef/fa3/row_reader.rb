@@ -5,7 +5,7 @@ module Ksef
     # Reads the `FaWiersz` rows of an invoice into {Line} objects.
     #
     # Split out of {Parser} because a row is where FA(3)'s optionality is at its most
-    # aggressive: every child of `TFaWiersz` except `NrWierszaFa` is `minOccurs="0"`, so most
+    # aggressive: every child of `FaWiersz` except `NrWierszaFa` is `minOccurs="0"`, so most
     # of what this does is decide which absences the model can absorb and which it cannot.
     module RowReader
       class << self

@@ -19,6 +19,19 @@ module Ksef
       # rounding difference.
       QUANTITY_SCALE = 6
 
+      # **Not every monetary element is `TKwotowy`.** A *unit price* is `TKwotowy2`, which is
+      # `totalDigits="22"` and `fractionDigits="8"` — *"Wartość numeryczna 22 znaki max, w tym
+      # 8 znaków po przecinku"*. Four elements use it: `P_9A` and `P_9B` (net and gross unit
+      # price), `P_10` (discount) and `P_9AZ` (an order position's unit price). This model
+      # carries two of them, {Line#net_unit_price} and {OrderLine#net_unit_price}.
+      #
+      # Rounding those to two places was a **silent alteration of a stated amount**: a row
+      # priced at `1626.0125` is schema-valid, and the model re-emitted it as `1626.01` with
+      # `#unmapped_elements` empty and `#errors` empty, because the element path is identical
+      # either way. That is the bug class §8.4b names — a path-difference diagnostic cannot see
+      # a changed *value* — applied to a number rather than to a flag.
+      UNIT_PRICE_SCALE = 8
+
       # Significant digits used when converting a Rational. The widest FA(3) numeric type is
       # `TIlosci` at `totalDigits="22"`, so 30 clears every value the schema permits with room
       # to spare — unlike `AMOUNT_SCALE + 10`, which read as "12 decimal places" but means
@@ -38,6 +51,17 @@ module Ksef
           # which would route the value through Float and defeat the point of BigDecimal.
           integer, fraction = decimal(value).round(AMOUNT_SCALE).to_s("F").split(".")
           "#{integer}.#{fraction.to_s.ljust(AMOUNT_SCALE, "0")[0, AMOUNT_SCALE]}"
+        end
+
+        # A `TKwotowy2` unit price. Padded to {AMOUNT_SCALE} like any other money figure, so
+        # `150` still reads `150.00`, but **keeping up to {UNIT_PRICE_SCALE} places** when the
+        # value has them — `TKwotowy2`'s pattern is `(\.\d{1,8})?`, so one to eight places
+        # are all legal and every existing document is byte-identical under this.
+        #
+        # @return [String] a fixed-point decimal string, two to eight places
+        def unit_price(value)
+          integer, fraction = decimal(value).round(UNIT_PRICE_SCALE).to_s("F").split(".")
+          "#{integer}.#{fraction.to_s.sub(/0+\z/, "").ljust(AMOUNT_SCALE, "0")}"
         end
 
         # Quantities allow more precision than amounts, so they keep their own scale rather

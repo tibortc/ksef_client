@@ -329,6 +329,22 @@ RSpec.describe Ksef::FA3::Parser do
       parsed = described_class.parse(document(subjects, fa(one_row("P_11" => nil, "P_8B" => nil))))
 
       expect(parsed.lines.first.net).to be_nil
+      # This example used to assert a refusal. When the refusal moved to tier 1 the assertion
+      # was dropped rather than moved, leaving the sibling above as the only guard on
+      # `NO_AMOUNT` — so this one would not have noticed the rule disappearing.
+      expect(parsed.errors.map(&:to_s)).to include(/lines\[0\]: states no amount/)
+    end
+
+    # **`P_9B` alone.** Both of the Ministry's gross-priced samples carry `P_11A` as well, so
+    # nothing in the corpus makes the second half of the refusal the deciding operand — and an
+    # `||` operand is not a branch, so neither coverage criterion could see the gap. Dropping
+    # `P_9B` from the check left the whole suite green while a stated gross unit price was
+    # silently discarded, which is precisely what the refusal exists to prevent.
+    it "refuses a row priced gross by P_9B alone, with no P_11A to give it away" do
+      xml = document(subjects, fa(one_row("P_11" => nil, "P_9A" => nil, "P_9B" => "123.00")))
+
+      expect { described_class.parse(xml) }
+        .to raise_error(Ksef::ValidationError, %r{is priced gross, stating P_11A/P_9B})
     end
 
     it "accepts a row with no P_11 when quantity and unit price are both present" do
@@ -465,7 +481,7 @@ RSpec.describe Ksef::FA3::Parser do
       parsed = described_class.parse(document(subjects, fa(one_row("P_12" => nil))))
 
       expect(parsed.lines.first.vat_rate).to be_nil
-      expect(parsed.errors.map(&:to_s)).to include(/lines\[0\]: states an amount but no P_12/)
+      expect(parsed.errors.map(&:to_s)).to include(/lines\[0\].vat_rate: states an amount but no P_12/)
     end
   end
 

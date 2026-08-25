@@ -361,10 +361,15 @@ One field is inherently exempt: **`rounding` is not recorded in an FA(3) documen
 is inferred by asking which strategy reproduces the tax summaries, so a `:per_summary` invoice
 whose summaries happen to match `:per_line`'s — the common case — comes back as `:per_line`.
 
-Parsing also refuses what it cannot represent faithfully, rather than guessing: an invoice
-a row priced gross (`P_9B`/`P_11A`), a buyer identified by anything other than a NIP, and any
+Parsing also refuses what it cannot represent faithfully, rather than guessing: a row priced
+gross (`P_9B`/`P_11A`), a buyer identified by anything other than a NIP, and any
 `RodzajFaktury` the schema does not define. The message says that the document is fine and the
 model is the limit, and names the construct.
+
+A row that simply states *no* amount is **not** in that list — it is legal FA(3), it is what a
+simplified `UPR` invoice carries, and `Line#net` answers nil for it. What such a row costs is a
+summary bucket, so `Invoice#errors` objects to one only on an invoice that derives its summary
+from its rows.
 
 ### Querying the schema
 

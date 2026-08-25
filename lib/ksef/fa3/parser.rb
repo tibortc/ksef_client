@@ -145,8 +145,8 @@ module Ksef
         end
 
         # {Invoice} models the types in {SUPPORTED_TYPES} (DESIGN.md §7.4). Accepting an
-        # unmodelled type
-        # produces something far worse than a refusal, and `KOR` is the case that showed it:
+        # unmodelled type produces something far worse than a refusal, and `KOR` is the case
+        # that showed it:
         # before 2026-08-24 one parsed and re-serialised kept its `RodzajFaktury` and `P_2` —
         # and therefore KSeF's whole duplicate key (docs/REFERENCE.md §15.2) — while dropping
         # `DaneFaKorygowanej` and recomputing the summaries from rows whose `StanPrzed` marker

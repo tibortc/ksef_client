@@ -349,7 +349,7 @@ Hand-written models/DSL sit **on top of** generated metadata; they consume it (f
 
 - English-friendly attribute names; the full English↔Polish mapping (e.g. `issue_date ↔ P_1`, `number ↔ P_2`, `gross_total ↔ P_15`, seller `↔ Podmiot1`, buyer `↔ Podmiot2`, line `↔ FaWiersz`) generated into `docs/field_mapping.md` — accountants and auditors will demand it. Field-name truth comes from the XSD, not from this document.
 
-  **Deferred as of 2026-08-22.** `docs/field_mapping.md` is not written yet. Generating it from the current model set would produce a table covering one invoice type out of seven, which for an audience checking whether *their* field is supported is worse than no table — an absent row would read as "not supported" rather than "not documented yet". It lands once the models cover all seven types (§7.4). At that point it must be generated from a declared mapping rather than hand-written, or it will drift.
+  **Deferred as of 2026-08-22.** `docs/field_mapping.md` is not written yet. Generating it from the current model set would produce a table covering one invoice type out of seven, which for an audience checking whether *their* field is supported is worse than no table — an absent row would read as "not supported" rather than "not documented yet". It lands once the models cover all seven types (§7.4). At that point it must be generated from a declared mapping rather than hand-written, or it will drift. **That condition was met on 2026-08-26**, so this is a due deliverable rather than a deferred one.
 - Builder DSL as in §8; additionally plain keyword-arg constructors on every model (DSL is sugar, not the only door).
 - `Subject` covers NIP + name + address (+ VAT-UE and other identifier variants per schema); include NIP checksum validation (weights 6,5,7,2,3,4,5,6,7; weighted sum mod 11 must equal digit 10 and must not be 10).
 
@@ -404,8 +404,9 @@ well-formedness, which the XSD does not: libxml2 recovers from broken XML by def
 field path, so a caller learns *which* value to fix. Two properties worth keeping:
 
 - **The model tier short-circuits.** Serialisation raises on a bad NIP, a nameless seller or a
-  line with no derivable net, so attempting it after a model failure would replace a list of
-  addressed errors with one exception about whichever came first. Its aim is therefore the
+  rate code with no summary bucket, so attempting it after a model failure would replace a list
+  of addressed errors with one exception about whichever came first. (It also raised on a line
+  with no derivable net until 2026-08-26, when that row became legal — see §7.4.) Its aim is therefore the
   stronger statement — *what the model tier passes, `#to_xml` can serialise* — and it is an
   **aim, not a proof**. A review on 2026-08-24 falsified the absolute twice, through
   `annotations` and the buyer's yes/no flags, both public constructor fields the tier did not
@@ -460,7 +461,7 @@ The README quickstart is this snippet plus install instructions — a developer 
 
 Originally this said "90% lines". That turned out to be a weak gate: the suite sat at 99% line coverage while branch coverage was 83%, i.e. seventeen conditional paths were untested behind fully-covered lines. Branch coverage is the one that finds real gaps; line coverage mostly confirms files are loaded.
 
-Floors sit just under the achieved numbers so they ratchet. Raise them as the real figures move up; do not lower one to make a change pass. Branch is 97 rather than 100 because ten guards — seven `&.` and three plain `if`/`return` — defend against states that cannot occur, and contorting tests to reach them proves nothing. Deliberate margin, not a knife edge at the actuals: a floor pinned to the exact current figure fails on refactors that change nothing about test quality. Because these are percentages, the absolute number of untested branches they permit grows with the codebase — **re-ratchet at each phase boundary**, not once. Requires SimpleCov >= 1.0, where the supported criteria are `[:line, :branch, :method, :oneshot_line]`; 0.x supports only line and branch.
+Floors sit just under the achieved numbers so they ratchet. Raise them as the real figures move up; do not lower one to make a change pass. Branch is 97 rather than 100 because ten guards — seven `&.` and three plain `if`/`return` — defend against states that cannot occur, and contorting tests to reach them proves nothing. **That justification covers exactly those ten**: an eleventh appeared with the last three invoice types, defending a state that *can* occur, and it was a missing test rather than an unreachable guard. The distinction is the whole point of the margin, so a rise in the count is worth investigating rather than absorbing. Deliberate margin, not a knife edge at the actuals: a floor pinned to the exact current figure fails on refactors that change nothing about test quality. Because these are percentages, the absolute number of untested branches they permit grows with the codebase — **re-ratchet at each phase boundary**, not once. Requires SimpleCov >= 1.0, where the supported criteria are `[:line, :branch, :method, :oneshot_line]`; 0.x supports only line and branch.
 
 A filtered run — one file, one example, or a tag selector — legitimately exercises less of the library, so the gate applies to full runs only. Otherwise the nightly `--tag integration` job would fail on coverage rather than on tests.
 

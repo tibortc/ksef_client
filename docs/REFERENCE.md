@@ -181,8 +181,9 @@ All twenty-six validate against the pinned FA(3) XSD with **zero errors** (measu
 which is a second independent confirmation that §8.3's in-memory import rewriting is sound.
 
 **They earned their keep the same day, and kept doing so.** `KOR` was built against the five
-corrections here and nothing else — no upstream code models an FA(3) correction — and four of the five parse,
-re-serialise and validate. Every structural decision in §8.4 was taken by reading them, and two
+corrections here and nothing else — no upstream code models an FA(3) correction — and **all
+five** parse, re-serialise and validate (four did until 2026-08-26; Przykład 7 was the fifth,
+and §8.6 is what unblocked it). Every structural decision in §8.4 was taken by reading them, and two
 were taken *against* what the schema documentation alone would have suggested: Przykład 2 gives
 a before/after pair the same `NrWierszaFa` where the annotation says *"z odrębną numeracją"*,
 and three of the five make it plain that a correction's summary cannot be derived from its rows.
@@ -1402,7 +1403,7 @@ The correction elements are an **anonymous `<xsd:sequence minOccurs="0">`** sitt
 | `Podmiot1K` | 0–1 | `Correction#previous_seller` |
 | `Podmiot2K` | 0–101 | `Correction#previous_buyers` |
 | `P_15ZK` | 0–1, `TKwotowy` | `Correction#paid_before` — scoped to `KOR_ZAL`/`KOR_ROZ`, and it means a different thing on each; see §8.6 |
-| `KursWalutyZK` | 0–1, `TIlosci` | `Correction#exchange_rate_before`; sits in the nested sequence `P_15ZK` opens, so the schema takes neither without the other |
+| `KursWalutyZK` | 0–1, `TIlosci` | `Correction#exchange_rate_before`; shares an anonymous `<xsd:sequence minOccurs="0">` with `P_15ZK` and is itself `minOccurs="0"` **inside** it, so `P_15ZK` alone is valid — which is what all four samples do — and `KursWalutyZK` alone is not |
 
 Four consequences that are easy to get wrong:
 
@@ -1649,23 +1650,47 @@ korekt faktur, o których mowa w art. 106f ust. 3 ustawy - kwota pozostała do z
 korektą"* — the amount **paid** before the correction on a `KOR_ZAL`, the amount **left to
 pay** before it on a `KOR_ROZ`. One element, two readings. `Correction#paid_before` carries the
 figure and does not try to name it more precisely than the schema does. All four `KOR_ZAL` and
-`KOR_ROZ` samples carry it; `KursWalutyZK`, which sits in the nested sequence it opens, appears
-in none of the twenty-six.
+`KOR_ROZ` samples carry it; `KursWalutyZK`, which shares its anonymous sequence, appears in
+none of the twenty-six — and since that sequence makes `KursWalutyZK` optional *within* it,
+those four are documents with `P_15ZK` and no rate, which is valid.
+
+`KursWalutyZK` is `TIlosci`, so **six decimal places, as a ceiling rather than a preference**.
+Held unrounded, the model carried a rate FA(3) cannot express and `#to_fa3` rounded it away at
+emit, so the invoice stopped equalling itself through a round-trip — with tier 2 silent,
+because what reached the document was valid. Found by audit 2026-08-26; it is §8.2b's rule, and
+the only field in the model that was not following it.
 
 #### `UPR` needed a row that states no amount at all
 
-A simplified invoice under art. 106e ust. 5 pkt 3 names the goods and stops. Both Ministry
-samples are exactly that:
+A simplified invoice under art. 106e ust. 5 pkt 3 — the XSD's own gloss on the `UPR`
+enumeration — may omit a great deal. **Both Ministry samples name the goods and stop**, which
+is a measurement over n=2 and not a rule about the class:
 
 | Sample | The whole row | Summary |
 |---|---|---|
 | Przykład 15 | `NrWierszaFa`, `P_7` | `P_13_1`, `P_14_1`, `P_15` |
 | Przykład 16 | `NrWierszaFa`, `P_7`, `P_12` | `P_15` alone |
 
-Every child of `TFaWiersz` but `NrWierszaFa` is `minOccurs="0"`, so this is not a special case
-in the schema — it is the schema's default, and the model was the thing being strict. `Line`
-now carries every field optionally, and **`Line#net` answers `nil` rather than raising**: "the
-row states no amount" is a state the model has to hold, and it is not the same as zero.
+Every child of `FaWiersz` but `NrWierszaFa` is `minOccurs="0"`, so this is not a special case
+in the schema — it is the schema's default, and the model was the thing being strict. (`FaWiersz`
+is declared with an **anonymous** `<xsd:complexType>`; there is no `TFaWiersz` to name, and
+several documents said there was until an audit checked. FA(3) names only seven complexTypes.)
+`Line` now carries every field optionally except `name:`, which stays a required *keyword* —
+pass `name: nil` deliberately, as the parser does — and **`Line#net` answers `nil` rather than
+raising**: "the row states no amount" is a state the model has to hold, and it is not the same
+as zero.
+
+`#gross` answers nil for the same row, and so does **`#vat`, as of the 2026-08-26 audit**. It
+returned `BigDecimal(0)`, which conflated two different absences: a rate code that carries no
+tax (`zw`, `oo`, `np I`) really is zero, while a row with no amount has tax that is *unknown*.
+A caller's `lines.sum(&:vat)` under-reported in silence while `sum(&:net)` raised.
+
+Three predicates and one scope decision go with this. `Line#priced?` is "states an amount";
+`Line#summarised?` is "states an amount *and* a rate", which is what it takes to reach a
+bucket. And `Invoice::STATED_TOTALS_TYPES` gained all three new types, so the parser **reads**
+their summaries rather than deriving them — which the samples above force rather than merely
+suggest: Przykład 15's summary cannot be derived from a row carrying only `P_7`, and Przykład
+16 states a `P_15` with no buckets at all. Same measurement as §8.5's for `ZAL`/`ROZ`.
 
 **The same shape unblocked Przykład 7**, the one Ministry correction this model could not read
 — its single row names goods, a `CN` code and a quantity, with no amount anywhere. So all five
@@ -1687,12 +1712,40 @@ So tier 1 took it over, addressed to the line and scoped to where it costs somet
 | amount, no rate | **reported** — no bucket to put it in | fine |
 | no amount | **reported** — absent from the tax base | fine, this is `UPR` |
 
-`Invoice#net_by_rate` skips what it cannot place, which is exactly why the rule is needed:
-without it the document would quietly understate.
+`Invoice#net_by_rate` skips what it cannot place, and so does `#vat_rounded_per_line` — which
+is exactly why the rule is needed: without it the document would quietly understate.
+
+**The guard class changed, and that is worth stating plainly.** These two shapes used to be
+*impossible* — `parse` refused them — and are now *reported if you ask*. `Ksef::Client`'s send
+path asks (`validate: true` by default), so the shipped route is unchanged; a caller who reaches
+for `#to_xml` directly is not covered, and a caller who parses a document, re-serialises it and
+archives the result will get a document whose tax base differs from the original's with nothing
+raised. Demonstrated on Przykład 1 with one `P_12` deleted — still XSD-valid — where the
+re-serialised `P_15` came back 50.01 lower, `#unmapped_elements` was silent (the element paths
+are identical), and even the round-trip law held, because a parsed invoice is already a fixed
+point. Only `#errors` catches it.
 
 The one shape still refused at parse time is **gross pricing** (`P_9B`/`P_11A`), and the
 distinction is worth keeping: a gross-priced row carries a number this model has nowhere to
-put, so reading it would drop a real amount. An unpriced row carries no number to drop.
+put, so reading it would drop a real amount. An unpriced row carries no number to drop. Those
+two elements are the *only* ones in the row whose annotation cites art. 106e ust. 7-8, so the
+refusal is complete; `P_9B` alone went untested until 2026-08-26, because both Ministry samples
+carry `P_11A` as well and an `||` operand is not a branch either criterion can see.
+
+#### A unit price is not a `TKwotowy`
+
+Found by the same audit, and pre-dating this work. `P_9A` — and `P_9AZ` on an order position —
+is **`TKwotowy2`**: *"Wartość numeryczna 22 znaki max, w tym 8 znaków po przecinku"*, four
+times the precision of the `TKwotowy` amount it produces. The model rounded both to two places,
+so a row priced at `1626.0125` (schema-valid) was re-emitted as `1626.01` with `#errors` empty
+and `#unmapped_elements` empty — the §8.4b bug class applied to a number rather than a flag,
+and a **silent alteration of a stated amount**, which is the most serious kind of defect this
+model can have. `Formatting::UNIT_PRICE_SCALE` is 8; `Formatting.unit_price` pads to two places
+so `150` still reads `150.00`, and `TKwotowy2`'s pattern permits one to eight, so every
+existing document is byte-identical under the fix.
+
+`P_10` (discount) and `P_9B` are `TKwotowy2` too; the model carries neither, and both are
+reported by `#unmapped_elements` as whole elements, so nothing is silently lost there.
 
 
 ---

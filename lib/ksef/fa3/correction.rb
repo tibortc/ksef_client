@@ -21,7 +21,7 @@ module Ksef
     # and does not try to name it more precisely than the schema does.
     #
     # All four of the Ministry's `KOR_ZAL`/`KOR_ROZ` samples carry it; `KursWalutyZK`, which
-    # sits in the nested sequence `P_15ZK` opens, appears in none of the twenty-six.
+    # shares its anonymous sequence, appears in none of the twenty-six.
     Correction = Data.define(
       :reason, :effect, :corrected, :period, :corrected_number, :previous_seller,
       :previous_buyers, :paid_before, :exchange_rate_before
@@ -91,14 +91,22 @@ module Ksef
         }
       end
 
-      # `P_15ZK` is `TKwotowy`, so two places; `KursWalutyZK` is `TIlosci`, which allows six
-      # and is a rate rather than an amount, so it keeps its own precision.
+      # `P_15ZK` is `TKwotowy`, so two places; `KursWalutyZK` is `TIlosci`, so six. Six is a
+      # **ceiling, not a preference** — a seven-place rate is not a value FA(3) can express,
+      # and `#to_fa3` rounds it away at emit. Storing it unrounded made the model hold a figure
+      # the document cannot carry, which is §8.2b's rule broken in the one place the rest of
+      # the model keeps it: a `Correction` built with `4.12345678` emitted `4.123457` and then
+      # failed DESIGN.md §7.6's round-trip law against itself.
       def self.canonical_amounts(paid_before, exchange_rate_before)
         {
           paid_before: paid_before && Formatting.decimal(paid_before).round(Formatting::AMOUNT_SCALE),
-          exchange_rate_before: exchange_rate_before && Formatting.decimal(exchange_rate_before)
+          exchange_rate_before: exchange_rate_before && scaled_rate(exchange_rate_before)
         }
       end
+
+      # `TIlosci` again, so {Formatting::QUANTITY_SCALE} — a rate is not an amount, but it is
+      # not unbounded either.
+      def self.scaled_rate(value) = Formatting.decimal(value).round(Formatting::QUANTITY_SCALE)
 
       # `Array()` is not usable here: it splats a Hash into an array of pairs, so
       # `Correction.new(corrected: { number: ..., issue_date: ... })` — a natural mistake —
@@ -128,8 +136,10 @@ module Ksef
         }
       end
 
-      # `KursWalutyZK` sits in the nested sequence `P_15ZK` opens, so the schema will not take
-      # one without the other; nothing enforces that here, and tier 2 reports it if it happens.
+      # Both sit in one anonymous `<xsd:sequence minOccurs="0">`, with `KursWalutyZK`
+      # `minOccurs="0"` *inside* it — so `P_15ZK` alone is valid, which is what all four of the
+      # Ministry's samples do, and only `KursWalutyZK` alone is not. Nothing enforces the
+      # invalid direction here; tier 2 reports it if it happens.
       def amounts
         {
           "P_15ZK" => paid_before && Formatting.amount(paid_before),

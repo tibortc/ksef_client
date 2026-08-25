@@ -462,6 +462,20 @@ RSpec.describe "FA(3) corrections" do
       expect(Ksef::FA3.parse(combined.to_xml)).to eq(combined)
     end
 
+    # `TIlosci`'s six places are a ceiling, not a preference. Held unrounded, the model carried
+    # a rate the document cannot express, `#to_fa3` rounded it away at emit, and the invoice
+    # stopped equalling itself through a round-trip — with tier 2 seeing nothing wrong, because
+    # what reached the document was perfectly valid. The specs above all used four places.
+    it "rounds an exchange rate to the six places TIlosci allows" do
+      combined = invoice(invoice_type: "KOR_ZAL",
+                         correction: correction(paid_before: "20000",
+                                                exchange_rate_before: "4.12345678"))
+
+      expect(combined.correction.exchange_rate_before).to eq(BigDecimal("4.123457"))
+      expect(rendered(combined).at_xpath("//Fa/KursWalutyZK").text).to eq("4.123457")
+      expect(Ksef::FA3.parse(combined.to_xml)).to eq(combined)
+    end
+
     it "refuses a Float, as everywhere money flows" do
       expect { correction(paid_before: 1.5) }
         .to raise_error(Ksef::ValidationError, /Float is not allowed/)

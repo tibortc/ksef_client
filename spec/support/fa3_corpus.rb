@@ -69,10 +69,14 @@ module FA3Corpus
     "mf-samples/przyklad-23.xml" => /identified by KodKraju, NrID/
   }.freeze
 
-  # **Empty, and asserted to be.** Every `RodzajFaktury` the schema defines is modelled, so
+  # **Empty, and measured to be.** Every `RodzajFaktury` the schema defines is modelled, so
   # nothing is refused by type any more. Kept as a constant rather than deleted: the round-trip
-  # spec asserts it matches what is actually refused, so re-introducing a type-level refusal
-  # without saying so here fails.
+  # spec parses all twenty-six and collects the ones refused *for their type*, then asserts the
+  # result equals this — so re-introducing a type-level refusal without saying so here fails.
+  #
+  # It previously asserted `be_empty` against this literal, which is a statement about the
+  # constant and not about the parser: removing `UPR` from `Parser::SUPPORTED_TYPES` left that
+  # example passing.
   MINISTRY_UNSUPPORTED_TYPES = [].freeze
 
   # This gem's own *serializer output*, which is fully within the model and so round-trips byte

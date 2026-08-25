@@ -25,6 +25,32 @@ gem version for which API state".
 
 ### Fixed
 
+- **A unit price was silently rounded from eight decimal places to two.** `P_9A` — and `P_9AZ`
+  on an order position — is `TKwotowy2`, *"22 znaki max, w tym 8 znaków po przecinku"*, not the
+  two-place `TKwotowy` of the amounts it produces. A row priced at `1626.0125` is schema-valid;
+  this model read it, stored `1626.01` and re-emitted `1626.01`, with `#errors` empty and
+  `#unmapped_elements` empty because the element path never changed. A **stated amount altered
+  in silence**, which is the most serious defect this model can carry. `Formatting.unit_price`
+  keeps up to eight places and still pads `150` to `150.00`, and `TKwotowy2`'s pattern allows
+  one to eight, so every existing document is byte-identical under the fix.
+  (`docs/REFERENCE.md` §8.6.)
+
+- **`Correction#exchange_rate_before` held a rate the document cannot carry.** `KursWalutyZK`
+  is `TIlosci`, whose six decimal places are a ceiling and not a preference. Stored unrounded,
+  a correction built with `4.12345678` emitted `4.123457` and then failed the round-trip law
+  against itself — with tier 2 silent, because what reached the document was valid. It was the
+  only field in the model not rounded to its element's scale (§8.2b).
+
+- **`Line#vat` answered `0` for a row whose tax is unknown.** `#net` and `#gross` already
+  answered `nil` for a row that states no amount; `#vat` claimed the tax was nothing, so
+  `lines.sum(&:vat)` under-reported in silence while `sum(&:net)` raised. It now answers `nil`
+  for that row and keeps `0` for the case that really is zero — a rate code such as `zw`, `oo`
+  or `np I`, where the amount is stated and carries no tax.
+
+- **Tier 1 addresses a rateless row to the field that fixes it**, `lines[0].vat_rate` rather
+  than `lines[0]`. Supplying `P_12` is the whole remedy, so the issue points at it. A row that
+  states no amount stays addressed to the row, because its remedies are several.
+
 - **VAT rate code `np II` reported into the wrong summary bucket** — the third bug of this
   exact class, after the shared-bucket accumulation bug and rate code `3`. `np II` is
   *"świadczenie usług o których mowa w art. 100 ust. 1 pkt 4 ustawy"*, and `P_13_9` is *"suma
@@ -135,7 +161,7 @@ gem version for which API state".
   f.totals gross: "450", net: { "23" => "365.85" }, vat: { "23" => "84.15" }
   ```
 
-  Every child of `TFaWiersz` but `NrWierszaFa` is `minOccurs="0"`, so an amount-less row is
+  Every child of `FaWiersz` but `NrWierszaFa` is `minOccurs="0"`, so an amount-less row is
   the schema's own default and this model was the strict one. `Ksef::FA3::Line#net` now
   answers **nil rather than raising**, and nil is not zero: the row states nothing, rather
   than stating that it is worth nothing. The same change unblocked **Przykład 7**, the one

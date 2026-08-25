@@ -91,6 +91,14 @@ SimpleCov.start do
   # that commit). Seven are `&.` guards; the other three are plain `if`/`return` guards —
   # `serializer.rb`'s `return if values.nil?` and two in `tasks/ksef_bootstrap.rb` — so the
   # earlier wording "the same ten `&.` guards, outside the FA(3) model" was wrong twice over.
+  #
+  # Re-measured 2026-08-26 after all seven invoice types: line 100%, branch 98.51% (665/675),
+  # method 100%. **The ten are still those ten.** They briefly became eleven: the type work
+  # added `#vat_rounded_per_line`'s `next unless line.summarised?` guard, whose twin in
+  # `#net_by_rate` was tested while it was not — a guard defending a state that genuinely
+  # *can* occur, unlike the other ten, and dropping it left the suite green. An audit found it
+  # and it now has a test. Worth the note because the count is easy to read as noise: a new
+  # uncovered branch in new code is a missing test, and only the ten are the deliberate kind.
   minimum_coverage line: 99, branch: 97, method: 100
 end
 

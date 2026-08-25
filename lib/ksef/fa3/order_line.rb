@@ -24,13 +24,16 @@ module Ksef
 
       # Every element of `ZamowienieWiersz` except `NrWierszaZam` is `minOccurs="0"`, so every
       # field here is optional and an absent one is omitted rather than written empty.
+      #
+      # `P_9AZ` is `TKwotowy2`, not `TKwotowy` — the same eight-place unit price as {Line}'s
+      # `P_9A`, and rounded to the same scale for the same reason.
       def initialize(name: nil, quantity: nil, unit: nil, net_unit_price: nil, net_amount: nil,
                      vat_amount: nil, vat_rate: nil, row_number: nil, state_before: false)
         super(
           name: Formatting.text(name), unit: Formatting.text(unit),
           vat_rate: Formatting.text(vat_rate),
           quantity: Line.scaled(quantity, Formatting::QUANTITY_SCALE),
-          net_unit_price: Line.scaled(net_unit_price, Formatting::AMOUNT_SCALE),
+          net_unit_price: Line.scaled(net_unit_price, Formatting::UNIT_PRICE_SCALE),
           net_amount: Line.scaled(net_amount, Formatting::AMOUNT_SCALE),
           vat_amount: Line.scaled(vat_amount, Formatting::AMOUNT_SCALE),
           row_number: row_number.nil? ? nil : Formatting.integer(row_number),
@@ -57,7 +60,7 @@ module Ksef
       def amounts
         {
           "P_8BZ" => quantity && Formatting.quantity(quantity),
-          "P_9AZ" => net_unit_price && Formatting.amount(net_unit_price),
+          "P_9AZ" => net_unit_price && Formatting.unit_price(net_unit_price),
           "P_11NettoZ" => net_amount && Formatting.amount(net_amount),
           "P_11VatZ" => vat_amount && Formatting.amount(vat_amount)
         }

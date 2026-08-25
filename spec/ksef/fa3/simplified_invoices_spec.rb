@@ -41,9 +41,17 @@ RSpec.describe "FA(3) rows that state no amount" do
     end
 
     # nil is not zero: the row states nothing, rather than stating that it is worth nothing.
-    it "reports no amount rather than a zero one" do
-      expect(named_only).to have_attributes(net: nil, gross: nil, priced?: false, summarised?: false)
-      expect(named_only.vat).to eq(0)
+    # `#vat` used to be the one exception, answering a definite zero where the tax is simply
+    # unknown — so `lines.sum(&:vat)` under-reported in silence while `sum(&:net)` raised.
+    it "reports no amount rather than a zero one, tax included" do
+      expect(named_only)
+        .to have_attributes(net: nil, vat: nil, gross: nil, priced?: false, summarised?: false)
+    end
+
+    # The other absence is a different one: an exempt or reverse-charge row states a real
+    # amount that carries no tax, and zero is the true answer there.
+    it "still reports zero tax for a rate code that genuinely carries none" do
+      expect(priced(vat_rate: "zw")).to have_attributes(net: BigDecimal("100"), vat: BigDecimal(0))
     end
 
     it "is still unsummarised with a rate but no amount, as Przykład 16's row is" do
@@ -97,7 +105,7 @@ RSpec.describe "FA(3) rows that state no amount" do
 
     it "refuses a row that states an amount with no rate to bucket it under" do
       expect(vat_invoice([priced(vat_rate: nil)]).errors.map(&:to_s))
-        .to include(/lines\[0\]: states an amount but no P_12 rate code/)
+        .to include(/lines\[0\].vat_rate: states an amount but no P_12 rate code/)
     end
 
     it "says nothing about either on an invoice that states its summary" do
@@ -118,7 +126,20 @@ RSpec.describe "FA(3) rows that state no amount" do
                       lines: [priced, priced(vat_rate: nil), named_only])
 
       expect(mixed.net_total).to eq(BigDecimal("100"))
-      expect(mixed.errors.map(&:field)).to include("lines[1]", "lines[2]")
+      expect(mixed.errors.map(&:field)).to include("lines[1].vat_rate", "lines[2]")
+    end
+
+    # `#net_by_rate` and `#vat_rounded_per_line` both skip an unsummarised row, and only the
+    # first was tested — the second's guard was the one branch this round left uncovered, and
+    # dropping it left the suite green. It matters because a rateless row would otherwise key
+    # the VAT summary under nil while the net summary skipped it, so the two would disagree
+    # about which buckets exist.
+    it "skips the same rows in the VAT summary as in the net one" do
+      mixed = invoice(totals: nil, invoice_type: "VAT",
+                      lines: [priced, priced(vat_rate: nil), named_only])
+
+      expect(mixed.vat_by_rate.keys).to eq(mixed.net_by_rate.keys)
+      expect(mixed.vat_by_rate.keys).to eq(["23"])
     end
   end
 

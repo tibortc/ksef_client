@@ -13,9 +13,12 @@ module Ksef
     # ## It also has a contract tier 2 cannot give
     #
     # **If this passes, `#to_xml` will not raise.** Serialisation refuses several things
-    # outright — a NIP that fails its checksum, a seller with no name or address, a line whose
-    # net can be neither read nor derived, a rate code with no summary bucket — and each
-    # arrives as an exception rather than a message. Checking them here turns every one into a
+    # outright — a NIP that fails its checksum, a seller with no name or address, a rate code
+    # with no summary bucket — and each arrives as an exception rather than a message. A line
+    # whose net can be neither read nor derived was on that list until 2026-08-26; it is now a
+    # legal row that serialises without a `P_11`, and the objection to it is {NO_AMOUNT}, which
+    # this tier raises on its own account rather than on the
+    # serializer's behalf. Checking them here turns every one into a
     # collected, addressed error, which is why {Invoice#errors} runs this first and stops if
     # anything comes back.
     #
@@ -56,9 +59,9 @@ module Ksef
                 "This invoice derives its summary from its rows, so the amount would simply be " \
                 "missing from the tax base (docs/REFERENCE.md §8.6)."
 
-      NO_AMOUNT = "states no amount, and this invoice derives its summary from its rows. A row " \
-                  "that names goods and no amount belongs to a type that states its summary " \
-                  "instead — UPR, or a collective correction (docs/REFERENCE.md §8.6)."
+      NO_AMOUNT = "states no amount, and this invoice derives its summary from its rows, so it " \
+                  "would contribute nothing to the tax base. Either give the row an amount, or " \
+                  "state the invoice's summary directly (docs/REFERENCE.md §8.6)."
 
       class << self
         # Value-level checks: encoding, xsd:token collapse, lengths, enum membership.
@@ -183,10 +186,16 @@ module Ksef
         # by adding the rows up. Either way the row's amount is absent from the tax base, and
         # neither the XSD nor `#unmapped_elements` can see that — the second is blind to values
         # and the first to arithmetic.
+        # The two halves are addressed differently on purpose. `NO_RATE` has one remedy and
+        # one field — supply `P_12` — so it points at it. `NO_AMOUNT` does not: the row could
+        # gain `P_11`, or a quantity and a unit price, or the invoice could state its summary
+        # instead, so the honest address is the row.
         def unsummarised_issue(line, field)
           return nil if line.summarised?
 
-          Issue.new(field: field, message: line.priced? ? NO_RATE : NO_AMOUNT)
+          return Issue.new(field: "#{field}.vat_rate", message: NO_RATE) if line.priced?
+
+          Issue.new(field: field, message: NO_AMOUNT)
         end
 
         def future_date_issue(issue_date)
