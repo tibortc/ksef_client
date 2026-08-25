@@ -24,7 +24,18 @@ module Ksef
       # Found by comparing against `ksef-pdf-generator`, whose summary labels bucket 4
       # "4% lub 3%" and bucket 5 "OSS" (docs/REFERENCE.md §8.1a).
       #
-      # **No `P_12` code maps to bucket 5**, and that is correct rather than an omission.
+      # **`np I` and `np II` are different buckets, and the schema says so twice.** Until
+      # 2026-08-26 both mapped to `P_13_8`. But `np II` is *"świadczenie usług o których mowa w
+      # art. 100 ust. 1 pkt 4 ustawy"* and `P_13_9` is *"suma wartości świadczenia usług, o
+      # których mowa w art. 100 ust. 1 pkt 4 ustawy"* — the same scope word for word — while
+      # `P_13_8` reads *"z wyłączeniem kwot wykazanych w polach P_13_5 i **P_13_9**"* and `np I`
+      # excludes those same transactions. So `P_13_8` is the one bucket `np II` may not go in.
+      # `P_13_9` feeds intra-EU services reporting, so the mistake misstated a category on an
+      # XSD-valid document — the third instance of this class after the shared-bucket bug and
+      # rate code `3` (docs/REFERENCE.md §8.1a).
+      #
+      # **No `P_12` code maps to bucket 5 or to bucket 11**, and that is correct rather than an
+      # omission.
       BUCKETS = {
         "23" => %w[P_13_1 P_14_1],
         "22" => %w[P_13_1 P_14_1],
@@ -38,7 +49,7 @@ module Ksef
         "0 EX" => ["P_13_6_3", nil],
         "zw" => ["P_13_7", nil],
         "np I" => ["P_13_8", nil],
-        "np II" => ["P_13_8", nil],
+        "np II" => ["P_13_9", nil],
         "oo" => ["P_13_10", nil]
       }.freeze
 
@@ -59,12 +70,16 @@ module Ksef
           end
         end
 
-        # The summary elements no rate code reports into: bucket 5, whose lines carry
-        # `P_12_XII` instead. Exposed so the omission is assertable rather than merely
-        # commented.
+        # The summary elements no rate code reports into. Exposed so the omission is
+        # assertable rather than merely commented — an incomplete list here reads as a
+        # deliberate gap, which is how `P_13_9` stayed miscategorised.
+        #
+        # Bucket 5 is the OSS special procedure, whose lines carry `P_12_XII` — a percentage —
+        # instead of a `P_12` code. `P_13_11` is the margin scheme of art. 119/120, which a
+        # document declares through `Adnotacje/PMarzy` rather than through a rate.
         # @return [Array<String>]
         def unreachable_elements
-          %w[P_13_5 P_14_5]
+          %w[P_13_5 P_14_5 P_13_11]
         end
 
         # Cross-check against the generated enum, so a schema revision that adds or

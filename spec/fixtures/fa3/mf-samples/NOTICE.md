@@ -18,7 +18,9 @@ as test fixtures. **They are not packaged in the gem** — `ksef_client.gemspec`
 
 Linked from https://ksef.podatki.gov.pl/pliki-do-pobrania-ksef-20/. The archive also contains
 *Opisy przykładów dla struktury logicznej FA(3)* (a five-page descriptions PDF), which is **not**
-redistributed here — it is referenced by checksum in `docs/REFERENCE.md` §1.5 instead.
+redistributed here — it is referenced by URL in `docs/REFERENCE.md` §1.5 instead. The
+checksum recorded there is the **ZIP archive's**, which covers the PDF transitively; there is
+no separate digest for the PDF itself.
 
 ## Attribution and terms
 

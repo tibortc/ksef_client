@@ -38,8 +38,16 @@ module Ksef
 
       # Outside XML 1.0's `Char` production: the C0 controls except tab, newline and carriage
       # return, plus the two plane-0 noncharacters. Not the *discouraged* characters of §15.1 —
-      # {DocumentValidator} handles those — but characters no XML document may contain at all,
-      # which libxml2 reports as a bare `ArgumentError` from inside the serializer.
+      # {DocumentValidator} handles those — but characters no XML document may contain at all.
+      #
+      # What happens without this check varies by character, which is worth knowing before
+      # anyone tests the guard with the wrong one. Measured through `#to_xml`: **U+0000 alone**
+      # raises a bare `ArgumentError: string contains null byte` from inside the serializer.
+      # The rest — U+0001, U+0008, U+001F, U+FFFE, U+FFFF — are written out raw, producing a
+      # document only tier 2 rejects (`PCDATA invalid Char value 1`). U+000B and U+000C never
+      # arrive: Ruby's `\s` covers them, so {Formatting.text}'s collapse has already eaten
+      # them. The check earns its place either way — it is what stops non-well-formed output —
+      # but only NUL escapes this gem's error hierarchy.
       FORBIDDEN_IN_XML = /[\x00-\x08\x0B\x0C\x0E-\x1F￾￿]/
 
       private

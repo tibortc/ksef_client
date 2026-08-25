@@ -260,6 +260,35 @@ RSpec.describe Ksef::FA3::ModelValidator do
     end
   end
 
+  # The contract is "what this passes, `#to_xml` can serialise". Both of these falsified it,
+  # found by audit 2026-08-26.
+  describe "the tier 1a contract, twice falsified" do
+    let(:defaults) { Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS }
+
+    # `Generated::Types` keys only complex types, so a leaf like `P_16` has no entry and its
+    # element list is empty — which the recursion read as "the codegen changed" and waved
+    # through, while the serializer refuses any key there.
+    it "names a Hash nested under a leaf annotation, which the serializer refuses" do
+      nested = invoice(annotations: defaults.merge("P_16" => { "X" => 1 }))
+
+      expect(nested.errors.map(&:to_s))
+        .to eq(["annotations.P_16: takes a text value, not nested elements"])
+      expect { nested.to_xml }.to raise_error(Ksef::ValidationError, /Unknown element\(s\) "X"/)
+    end
+
+    it "still accepts a Hash under an annotation that really is a wrapper" do
+      expect(invoice(annotations: defaults.merge("Zwolnienie" => { "P_19N" => "1" })).errors).to be_empty
+    end
+
+    # `address_errors` checked `respond_to?(:line1)` and then read `line2` and `country`.
+    it "reports an address of the wrong class rather than raising NoMethodError" do
+      partial = Ksef::FA3::Subject.new(nip: "9999999999", name: "S", address: Struct.new(:line1).new("L"))
+
+      expect { invoice(seller: partial).errors }.not_to raise_error
+      expect(invoice(seller: partial).errors.map(&:to_s)).to eq(["seller.address: is not a Ksef::FA3::Address"])
+    end
+  end
+
   # A mistyped member used to surface as NoMethodError from inside the validator.
   describe "members of the wrong type" do
     it "reports a subject that is not a Subject" do

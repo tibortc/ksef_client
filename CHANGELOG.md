@@ -17,10 +17,35 @@ gem version for which API state".
 > **What "works" means in this section.** As of 2026-08-24 the certificate/XAdES flow **and**
 > the full send path have run against the live KSeF TEST service: a session opened, an invoice
 > built by this gem encrypted, submitted and accepted, a KSeF number assigned, and the signed
-> UPO retrieved and hash-verified. What is still **WebMock stubs** only: token refresh, the
-> KSeF-token auth call, invoice download, and anything batch.
+> UPO retrieved and hash-verified. The **KSeF-token auth call and the crypto module went live
+> the same day** — a stale `timestampMs` refused by TEST, and `certificateId`/`publicKeyId`
+> recomputed against real certificates (run `32704511675`, `docs/REFERENCE.md` §9). What is
+> still **WebMock stubs** only: token refresh and invoice download. Batch has no code at all
+> yet, so it is absent rather than stubbed.
 
 ### Fixed
+
+- **VAT rate code `np II` reported into the wrong summary bucket** — the third bug of this
+  exact class, after the shared-bucket accumulation bug and rate code `3`. `np II` is
+  *"świadczenie usług o których mowa w art. 100 ust. 1 pkt 4 ustawy"*, and `P_13_9` is *"suma
+  wartości świadczenia usług, o których mowa w art. 100 ust. 1 pkt 4 ustawy"* — the same
+  statutory scope, word for word. `P_13_8`, where both `np` codes went, reads *"z wyłączeniem
+  kwot wykazanych w polach P_13_5 i **P_13_9**"*: the one bucket `np II` may not use. The
+  effect was an intra-EU services figure declared in the wrong category on an XSD-valid
+  document that tier 1 passed. `VatRate.unreachable_elements` now also names `P_13_11` (the
+  margin scheme, declared through `Adnotacje/PMarzy` rather than a rate), and a spec asserts
+  every *other* net bucket is reachable — an incomplete list there is what made `P_13_9` look
+  like a deliberate gap (`docs/REFERENCE.md` §8.1a).
+
+- **Two more falsifications of the tier 1a contract** ("what this passes, `#to_xml` can
+  serialise"):
+  - A Hash nested under a **leaf** annotation — `annotations: {"P_16" => {"X" => 1}}` — passed
+    the model tier and then made `#to_xml` raise. The recursion added in the previous release
+    resolved each child's type the way the serializer does, but read a leaf's empty element
+    list as "the codegen changed" rather than "this element takes text".
+  - `address_errors` still checked `respond_to?(:line1)` and then read `line2` and `country`,
+    so an object answering only the first made `#errors` raise `NoMethodError` — the symptom
+    the surrounding guards had already been changed to `is_a?` to prevent.
 
 - **A correction built without stated totals derived its summary from the rows, counting
   `StanPrzed` rows as sales.** `docs/REFERENCE.md` §8.4 says a correction's summaries are read
@@ -72,7 +97,10 @@ gem version for which API state".
   `totals:` or `correction:` of the wrong class (the duck-typed guards accepted this gem's
   *other* value objects, then called methods they do not have). `Formatting.date_time` raised
   `NoMethodError` for a non-time, `Builder#totals` for `net: nil`, and `Correction.new` mangled
-  a Hash into pairs. All now `Ksef::ValidationError`.
+  a Hash into pairs. All now `Ksef::ValidationError` — except the Hash, which no longer
+  becomes pairs at all: it is carried as a single entry and reported by `#errors` as
+  `correction.corrected[0]: is not a Ksef::FA3::CorrectedInvoice`, the addressed error the
+  rest of this bullet is about.
 
 - **`Formatting.to_date` guessed.** `Date.parse("junk")` answers the first of June, and
   `"12"` answers the twelfth of the current month — a value that changes with the clock.
@@ -182,7 +210,8 @@ gem version for which API state".
   actually written; FA(3) is much larger than this model, so re-serialising a document you did
   not write is lossy. And it **refuses what it cannot represent faithfully** rather than
   guessing: an invoice type the model does not carry, a row with no `P_12` rate code, a row
-  priced gross, and a buyer identified by anything but a NIP. Those messages say the document is
+  priced gross, a row that states no price at all, and a buyer identified by anything but a
+  NIP. Those messages say the document is
   fine and the model is the limit, and name the construct.
 
 - **Validator tier 1, in two halves** (DESIGN.md §7.7, amended). `Ksef::FA3::ModelValidator`
@@ -356,7 +385,7 @@ gem version for which API state".
   be thread-safe; an opened-but-unused session is cancelled with status `440`; and the API
   returning the *original's* KSeF number on a duplicate suggests resends are an expected
   hazard rather than one to make likelier by hiding session state.
-- **`Ksef::KsefNumber`** — parses and validates the 35-character identifier KSeF assigns to
+- **`Ksef::KsefNumber`** — parses and validates the identifier KSeF assigns to
   an accepted invoice. CRC-8 with polynomial `0x07`, verified against the Ministry's own
   documented example, which doubles as the golden vector. Checking the checksum locally is
   the point: these numbers get copied between systems and read down telephones, and a CRC-8
@@ -433,9 +462,12 @@ gem version for which API state".
   `token|timestampMs`. Unlike the XAdES suite this needs no PESEL, so it reuses the stored
   `KSEF_TEST_NIP`/`KSEF_TEST_TOKEN` rather than provisioning a test person.
 
-  **These specs have only ever run against stubs.** They are written, not yet exercised; the
-  nightly is their first real run. Nothing in the crypto module is live-verified, and the
-  two claims above are what the specs will *test*, not what they have shown.
+  **Superseded 2026-08-24 — the nightly ran and all three specs went green.** `crypto_spec`
+  resolved both of its open questions against live TEST (run `32704511675`,
+  `docs/REFERENCE.md` §9), so the crypto module and the KSeF-token auth call *are*
+  live-verified. As written at the time: *"These specs have only ever run against stubs. They
+  are written, not yet exercised; the nightly is their first real run. Nothing in the crypto
+  module is live-verified."*
 - `rake fa3:generate` — codegen producing committed `lib/ksef/fa3/generated/`: 59 content
   models and 21 enumerations read from the pinned FA(3) XSD. Hand-written models consume
   this for element ordering, occurrence rules and enum membership.
@@ -484,7 +516,7 @@ gem version for which API state".
   the operation legitimately stays "in progress" while the certificate's status is checked
   with its issuer over OCSP/CRL, so a fixed deadline would report failure for
   authentications that were about to succeed.
-- **`Ksef::Auth::Status`** — the eleven authentication status codes. These are not HTTP
+- **`Ksef::Auth::Status`** — the twelve authentication status codes. These are not HTTP
   statuses; they arrive inside a 200 response. An unrecognised code is treated as
   **terminal**, because assuming otherwise polls a dead operation for ever, and elapsed
   time cannot distinguish "still legitimately 100" from "stuck".
@@ -567,7 +599,7 @@ gem version for which API state".
   method 100**. Branch coverage was 83% behind 99% line coverage, so seventeen conditional
   paths were untested; closing the real gaps brought it to 97%, and line coverage to 100%. Fixes uncovered on the way:
   proxy configuration was entirely unexercised, and the `Retry-After` parser's past-date
-  and unparseable-value fallbacks had no tests.
+  and unparseable-value fallbacks had no tests. (Branch was ratcheted to 96 and then 97 on 2026-08-24; `spec/spec_helper.rb` is the gate that decides.)
 
 ### Changed
 
@@ -696,8 +728,8 @@ gem version for which API state".
 
   Also corrected: several documents claimed the certificate flow's live verification covered
   more endpoints than it did. Only four have ever reached KSeF — challenge,
-  `xades-signature`, `GET /auth/{ref}` and `redeem`. **`refresh` and `ksef-token` are
-  implemented but have never run live**, and the ledger now says so where it previously
+  `xades-signature`, `GET /auth/{ref}` and `redeem`. **`refresh` is implemented but has never run
+  live** (`ksef-token` has, as of 2026-08-24), and the ledger now says so where it previously
   claimed "the whole §4.2 flow works as ledgered".
 - **`spec/cassette_hygiene_spec.rb`** — scans every committed VCR cassette for `Bearer `
   headers and for any value held in `KSEF_TEST_TOKEN` / `KSEF_TEST_NIP`, finding them by
@@ -734,7 +766,7 @@ expressions are implicitly anchored, and `^` / `$` are literal characters, not a
   §6a.3 also states the NIP check digit precisely, because it is easy to get backwards —
   it *is* the weighted sum `mod 11`, not `11 - (sum mod 11)`.
 - **The authentication status codes are now recorded** at `docs/REFERENCE.md` §4.8, from
-  the reference implementation — the Ministry's prose names only two of the eleven and says
+  the reference implementation — the Ministry's prose names only two of the twelve and says
   the rest "will be available in the endpoint's technical documentation". This narrows, but
   does not close, the open error-code catalogue in §9.
 - **A signed `AuthTokenRequest` can never be schema-valid.** The API requires an enveloped

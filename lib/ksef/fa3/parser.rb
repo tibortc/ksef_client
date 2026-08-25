@@ -11,8 +11,8 @@ module Ksef
     # {Serializer} is total: every model it is given becomes a document. The parser cannot
     # be, because FA(3) is far larger than this model. A real invoice carries `Podmiot3`,
     # `PodmiotUpowazniony`, `DaneKontaktowe`, `OkresFa`, `Zalacznik`, `Platnosc`,
-    # currency-conversion twins of every tax bucket — and this models the plain `VAT` invoice
-    # and the correction, `KOR`.
+    # currency-conversion twins of every tax bucket — and this models `VAT`, the correction
+    # `KOR`, and the advance-payment pair `ZAL` and `ROZ`.
     #
     # So parsing takes what it understands and **keeps the whole document** on
     # {Invoice#raw_document}. Nothing is lost, but nothing is silently invented either:
@@ -29,18 +29,19 @@ module Ksef
     # row of `20 × 1000` whose net is `18000`, because a line may carry a discount — and the
     # document's own figure is the authority. Deriving it would quietly rewrite an invoice.
     #
-    # **It does not validate.** A caller who wants that has `Invoice#validate!` (tier 2) and
-    # can run it on the result. Parsing a document in order to inspect *why* KSeF rejected
-    # it is a normal thing to want, and a parser that refuses invalid input cannot do it.
+    # **It does not validate.** A caller who wants that has `Invoice#validate!` — which runs
+    # every tier that exists, 1a, 1b and 2 — and can run it on the result. Parsing a document
+    # in order to inspect *why* KSeF rejected it is a normal thing to want, and a parser that
+    # refuses invalid input cannot do it.
     #
     # **It does not verify the checksum of a NIP it reads.** {Subject#to_fa3} does that on
     # the way out. Reading is not the moment to reject: an invoice already in KSeF is a fact
     # whatever its NIP, and PROD is the only environment that checks the digits anyway
     # (docs/REFERENCE.md §15.3).
     module Parser
-      # The invoice kinds {Invoice} can represent faithfully. The other five of
-      # `TRodzajFaktury` are DESIGN.md §7.4's remaining work; see {#supported_type!} for why
-      # accepting one would be worse than refusing it.
+      # The invoice kinds {Invoice} can represent faithfully. The other three of
+      # `TRodzajFaktury` — `UPR`, `KOR_ZAL`, `KOR_ROZ` — are DESIGN.md §7.4's remaining work;
+      # see {#supported_type!} for why accepting one would be worse than refusing it.
       SUPPORTED_TYPES = %w[VAT KOR ZAL ROZ].freeze
 
       class << self
@@ -66,9 +67,10 @@ module Ksef
           # same case, its rows being `minOccurs="0"` and explicitly "opcjonalny dla faktury
           # zaliczkowej". `totals` is now the field that decides whether rows are required at
           # all, so it has to be read here too.
-          # Collapsed before comparing: `RodzajFaktury` is a token, so `<RodzajFaktury> VAT
-          # </RodzajFaktury>` is schema-valid and means `VAT`. Compared raw it was refused,
-          # with a message that read "This is a  VAT  invoice, and only VAT, KOR are modelled".
+          #
+          # The type is **collapsed before comparing**: `RodzajFaktury` is a token, so
+          # `<RodzajFaktury> VAT </RodzajFaktury>` is schema-valid and means `VAT`. Compared
+          # raw it was refused, with a message reading "This is a  VAT  invoice".
           type = supported_type!(Formatting.text(text(fa_node, "RodzajFaktury")) || "VAT")
           totals = Invoice::STATED_TOTALS_TYPES.include?(type) ? CorrectionReader.totals_from(fa_node) : nil
 
@@ -142,7 +144,8 @@ module Ksef
           SubjectReader.subject_from(require_element(root, name, context: Serializer::ROOT), role: role)
         end
 
-        # {Invoice} models `VAT` and `KOR` (DESIGN.md §7.4). Accepting an unmodelled type
+        # {Invoice} models the types in {SUPPORTED_TYPES} (DESIGN.md §7.4). Accepting an
+        # unmodelled type
         # produces something far worse than a refusal, and `KOR` is the case that showed it:
         # before 2026-08-24 one parsed and re-serialised kept its `RodzajFaktury` and `P_2` —
         # and therefore KSeF's whole duplicate key (docs/REFERENCE.md §15.2) — while dropping

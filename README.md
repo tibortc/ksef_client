@@ -49,9 +49,10 @@ submitted.
 > KSeF number whose checksum our own code agrees with, and retrieved the signed UPO with its
 > bytes matching the hash the server published.
 >
-> **The honest caveat, narrowed:** what remains stub-only is token refresh, the KSeF-token
-> auth call, invoice download and anything batch. Those are still "believed correct" rather
-> than proven.
+> **The honest caveat, narrowed:** what remains stub-only is token refresh and invoice
+> download — still "believed correct" rather than proven. Batch has no code at all yet, so it
+> is absent rather than stubbed. The KSeF-token auth call and the crypto module went live on
+> 2026-08-24, so they are no longer on this list.
 >
 > **Reading invoices back works** — `Ksef::FA3.parse` turns FA(3) XML into the same model the
 > builder produces, tested against the Ministry's own published sample invoices. It refuses
@@ -156,7 +157,8 @@ producing an invoice with a field missing:
 ```ruby
 Ksef::FA3.build { |f| f.line name: "X", price: 1 }
 # => Ksef::ValidationError: Unknown line option(s) :price. Permitted: name, quantity,
-#    unit, net_unit_price, vat_rate, net_amount. Shorthand: qty for quantity, vat for vat_rate
+#    unit, net_unit_price, vat_rate, net_amount, row_number, state_before.
+#    Shorthand: qty for quantity, vat for vat_rate
 ```
 
 `address:` takes an `Address`, a Hash of its fields, or an already-formatted string —
@@ -356,7 +358,8 @@ is inferred by asking which strategy reproduces the tax summaries, so a `:per_su
 whose summaries happen to match `:per_line`'s — the common case — comes back as `:per_line`.
 
 Parsing also refuses what it cannot represent faithfully, rather than guessing: an invoice
-type the model does not carry, a row with no `P_12` rate code, a row priced gross, and a buyer
+type the model does not carry, a row with no `P_12` rate code, a row priced gross, a row that
+states no price at all — the descriptive row of a collective correction — and a buyer
 identified by anything other than a NIP. The message says that the document is fine and the
 model is the limit, and names the construct.
 
@@ -398,8 +401,9 @@ integrators.
 
 - **MRI >= 3.2**, with **no upper bound, ever.** `required_ruby_version` resolves at
   install time, so an upper bound strands users on each new Ruby release.
-- CI covers 3.2, 3.3, 3.4, 4.0 and `head`, and the full suite is run on 3.2 at every
-  milestone — the floor is verified, not just declared.
+- CI covers 3.2, 3.3, 3.4, 4.0 and `head`, and the full suite is run locally on 3.2 at every
+  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1282
+  examples green.
 - **The 3.2 floor is a commitment, not a default.** Ruby 3.2 is EOL upstream, and this gem
   still supports it deliberately: Polish tax-compliance software upgrades slowly, and 3.2
   is the Rails 8.0 floor. There is no plan to raise it.
@@ -444,7 +448,7 @@ client cannot get you started from nothing.
 
 ```bash
 bin/setup            # or: bundle install
-bundle exec rake     # verify pinned artifacts, specs, RuboCop
+bundle exec rake     # verify pinned artifacts, reproduce the codegen, specs, RuboCop
 ```
 
 Every externally sourced fact — endpoint paths, XML element names, namespace URIs,

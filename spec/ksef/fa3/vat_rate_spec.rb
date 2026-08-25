@@ -60,9 +60,20 @@ RSpec.describe Ksef::FA3::VatRate do
 
     # OSS lines carry their rate in `P_12_XII`, a percentage, not as a `P_12` code — so no
     # rate code reaching this table should ever select bucket five.
-    it "leaves bucket five unreachable, because OSS has no P_12 code" do
-      expect(described_class::BUCKETS.values.flatten).not_to include("P_13_5", "P_14_5")
-      expect(described_class.unreachable_elements).to eq(%w[P_13_5 P_14_5])
+    # Bucket 5 is the OSS special procedure (per-line rate in `P_12_XII`) and `P_13_11` the
+    # margin scheme (declared through `Adnotacje/PMarzy`). Neither is reachable from a `P_12`
+    # code — but `P_13_9` was on this list too, by accident, because `np II` was pointed at
+    # `P_13_8`. An incomplete list here reads as a deliberate gap, which is how that survived.
+    it "names every summary element no rate code can reach, and no more" do
+      expect(described_class::BUCKETS.values.flatten).not_to include(*described_class.unreachable_elements)
+      expect(described_class.unreachable_elements).to eq(%w[P_13_5 P_14_5 P_13_11])
+    end
+
+    it "reaches every other net bucket the schema defines" do
+      reachable = described_class::BUCKETS.values.map(&:first).uniq
+      all_net = Ksef::FA3::Totals::NET_ELEMENTS
+
+      expect(all_net - reachable - described_class.unreachable_elements).to be_empty
     end
 
     it "still maps every code the schema defines" do

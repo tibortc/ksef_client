@@ -13,9 +13,11 @@ module Ksef
     # a model tier structurally cannot see any of them.
     #
     # **And tier 2 cannot see them either**, which is the whole justification. Upstream ships
-    # `invoice-template-fa-3-with-disallowed-unicode-characters.xml`, and it is XSD-valid
-    # against the pinned schema while carrying U+0087 and U+009B. A schema-only client sends
-    # that invoice and KSeF rejects it.
+    # `invoice-template-fa-3-with-disallowed-unicode-characters.xml`, which carries U+0087 and
+    # U+009B and is XSD-valid against the pinned schema **once its `#nip#` placeholders are
+    # substituted** — which `spec/support/fa3_corpus.rb` does on read, the pinned bytes staying
+    # verbatim so their digests keep verifying. A schema-only client sends that invoice and
+    # KSeF rejects it.
     #
     # Runs on `#to_xml`'s output, and must run before those bytes are hashed and encrypted —
     # after that point a rejection costs a round trip and a session.

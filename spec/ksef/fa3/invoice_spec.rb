@@ -290,10 +290,15 @@ RSpec.describe Ksef::FA3::Invoice do
     end
 
     # Two non-taxable categories sharing a net bucket with no tax element at all.
-    it "sums np I and np II into P_13_8" do
+    # `np II` is *"świadczenie usług o których mowa w art. 100 ust. 1 pkt 4"* and `P_13_9` is
+    # the sum of exactly those services, while `P_13_8` reads "z wyłączeniem kwot wykazanych w
+    # polach P_13_5 i **P_13_9**". Until 2026-08-26 both codes went to `P_13_8` — the one
+    # bucket `np II` may not use.
+    it "keeps np I and np II apart, since P_13_8 excludes what P_13_9 reports" do
       doc = rendered(["np I", "100"], ["np II", "200"])
 
-      expect(doc.at_xpath("//Fa/P_13_8").text).to eq("300.00")
+      expect(doc.at_xpath("//Fa/P_13_8").text).to eq("100.00")
+      expect(doc.at_xpath("//Fa/P_13_9").text).to eq("200.00")
       expect(doc.at_xpath("//Fa/P_14_8")).to be_nil
     end
 

@@ -110,7 +110,10 @@ module Ksef
 
           return [Issue.new(field: field, message: "is required for a #{role}")]
         end
-        return [Issue.new(field: field, message: "is not a Ksef::FA3::Address")] unless address.respond_to?(:line1)
+        # `is_a?`, for the reason {#subject_errors} gives: checking `respond_to?(:line1)` and
+        # then reading `line2` and `country` made `#errors` raise `NoMethodError` on an object
+        # that answered only the first — the symptom the guard exists to prevent.
+        return [Issue.new(field: field, message: "is not a Ksef::FA3::Address")] unless address.is_a?(Address)
 
         [
           *text_errors(address.line1, "#{field}.line1", LONG_TEXT, required: true),

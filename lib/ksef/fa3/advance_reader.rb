@@ -38,7 +38,7 @@ module Ksef
           )
         end
 
-        # The schema's choice, read the way {CorrectionReader#reference_from} reads its own:
+        # The schema's choice, read the way {CorrectionReader.reference_from} reads its own:
         # a document stating neither branch is refused rather than being repaired into one,
         # since choosing for it would assert something nobody wrote.
         def advance_from(node)
