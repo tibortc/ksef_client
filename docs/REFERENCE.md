@@ -206,7 +206,9 @@ fixtures, with attribution.** `spec/fixtures/fa3/mf-samples/NOTICE.md` carries t
 retrieval date, the archive checksum, the licence statement in Polish and English, and the caveat
 above stated plainly. The descriptions PDF is *not* redistributed — it is referenced by URL and
 checksum only, which needs no licence at all. Nothing here is packaged: the gemspec ships
-`lib/**` and `docs/*.md`, and a built gem contains 91 files and zero fixtures.
+`lib/**` and `docs/*.md`, and a built gem contains **zero fixtures** — the property that
+matters here. (An earlier revision also gave a file count; it has moved since and is not worth
+pinning.)
 
 Filenames were normalised to `przyklad-01.xml` … `przyklad-26.xml`. Upstream's carry Polish
 diacritics and an inconsistent `FA_3_`/`Fa_3_` prefix, which travel badly across case-insensitive
@@ -217,7 +219,11 @@ filesystems and Windows checkouts; the **bytes are untouched**, and the bytes ar
 
 - **`Σ P_13_* + Σ P_14_* == P_15` holds exactly in 24 of the 26** — including every correction.
   The two exceptions are the useful part, and they constrain any future tier 3: **Przykład 1 is
-  off by 0.01** (a gross-priced invoice, where bucket-level tax rounding loses a grosz) and
+  off by 0.01** — bucket-level tax rounding loses a grosz (1666.66 + 383.33 + 0.95 + 0.05 =
+  2050.99 against a stated `P_15` of 2051). An earlier revision called it "a gross-priced
+  invoice"; it is not, and could not be, since it states `P_9A`/`P_11` throughout and the
+  parser refuses gross rows while Przykład 1 is in `MINISTRY_MODELLED` (corrected 2026-08-26).
+  And
   **Przykład 16 (`UPR`) omits the buckets entirely**, the descriptions PDF stating that a
   simplified invoice may carry `P_15` alone. **A zero-tolerance equality check would reject the
   Ministry's own first example**, so that rule needs a one-grosz tolerance and a
@@ -1173,44 +1179,71 @@ so rate codes are carried as strings throughout and only the *amounts* are `BigD
 
 ### 8.1a Rate buckets — resolves DESIGN.md §7.3 [VERIFY]
 
-Read from the `xsd:documentation` on each element in the pinned schema, which is the only
-authoritative statement of the mapping. Getting this wrong misreports VAT.
+Read from the pinned schema — but from **two** places in it, and one column is weaker than
+the others, which is worth stating because it is how two bugs survived here.
+
+The `P_13_*`/`P_14_*` annotations give the **Covers** column, and they name percentages only
+for buckets 1–3; they name **no rate code anywhere**. The **Rate codes** column is therefore
+matched from the other side, against `TStawkaPodatku`'s own enumeration annotations — a
+different part of the schema, and the part that was not re-read when this table was first
+written. Where both sides name the same statutory article the match is exact and first-tier
+(that is how `np I`/`np II` are settled below). Where neither does — `4` and `3` sharing
+bucket 4 — the only evidence is `ksef-pdf-generator`'s UI labels *"4% lub 3%"* and *"OSS"*,
+and **that file is not pinned in this repository** (§1.4 pins only that repo's
+`assets/invoice.xml`). Treat that one row as second-tier. Getting this wrong misreports VAT.
 
 | Net | Tax | Covers | Rate codes |
 |---|---|---|---|
 | `P_13_1` | `P_14_1` | Standard rate ("stawka podstawowa") | `23`, `22` |
 | `P_13_2` | `P_14_2` | First reduced rate | `8`, `7` |
 | `P_13_3` | `P_14_3` | Second reduced rate | `5` |
-| `P_13_4` | `P_14_4` | Flat rate for passenger taxis | `4` |
-| `P_13_5` | `P_14_5` | Special procedure, Act ch. XII s. 6a | `3` |
+| `P_13_4` | `P_14_4` | Flat rate for passenger taxis | `4`, `3` |
+| `P_13_5` | `P_14_5` | Special procedure, Act ch. XII s. 6a | — (see below) |
 | `P_13_6_1` | — | 0% excluding intra-EU supply and export | `0 KR` |
 | `P_13_6_2` | — | 0% intra-EU supply of goods (WDT) | `0 WDT` |
 | `P_13_6_3` | — | 0% export | `0 EX` |
 | `P_13_7` | — | Exempt from tax | `zw` |
-| `P_13_8` | — | Supply outside the country | `np I` / `np II` |
-| `P_13_9` | — | Services under Act art. 100(1)(4) | — |
+| `P_13_8` | — | Supply outside the country, **excluding** what `P_13_5` and `P_13_9` take | `np I` |
+| `P_13_9` | — | Services under Act art. 100(1)(4) | `np II` |
 | `P_13_10` | — | Reverse charge, buyer is the taxpayer (art. 17) | `oo` |
-| `P_13_11` | — | Margin scheme (art. 119, 120) | — |
+| `P_13_11` | — | Margin scheme (art. 119, 120) | — (see below) |
 | `P_15` | | **Total amount due** (gross) | |
 
-Three things that fall out of this and matter for the builder:
+Four things that fall out of this and matter for the builder:
 
 - **The zero-rated and exempt buckets have no `P_14_*` counterpart.** There is no tax
   amount to report, so a summary builder must not emit a paired tax field for them —
   the schema has no element to put it in.
-- **Bucket 4 takes rate codes `4` *and* `3`; bucket 5 takes none.** Each bucket pairs a current
-  rate with the one it replaced — 23/22, 8/7, 4/3 — and bucket 5 is not a rate bucket at all:
-  `P_13_5` is the special procedure of *"dział XII rozdział 6a"* and `P_14_5` is **"kwota podatku
-  od wartości dodanej"**, foreign VAT under OSS, whose per-line rate lives in `P_12_XII` (a
-  percentage) rather than in `P_12`. **Until 2026-08-24 this table mapped code `3` to bucket 5**,
-  so a domestic 3% sale was declared as OSS foreign VAT on an XSD-valid document. Found by
-  comparing against `ksef-pdf-generator`, whose summary labels read *"4% lub 3%"* for bucket 4 and
-  *"OSS"* for bucket 5 — the only official code that renders these buckets, and an independent
-  witness to a mapping this ledger had wrong. `VatRate.unreachable_elements` now names bucket 5
-  so the gap is assertable rather than merely commented.
+- **`np I` and `np II` are different buckets, and the schema says so twice.** `np II` is
+  *"niepodlegajace opodatkowaniu na terytorium kraju, świadczenie usług o których mowa w art.
+  100 ust. 1 pkt 4 ustawy"*, and `P_13_9` is *"Suma wartości świadczenia usług, o których mowa
+  w art. 100 ust. 1 pkt 4 ustawy"* — the same statutory scope, word for word. Meanwhile
+  `P_13_8` reads *"z wyłączeniem kwot wykazanych w polach P_13_5 i **P_13_9**"*, and `np I`
+  excludes those same transactions, so `P_13_8` is the one bucket `np II` may not go in.
+  **Until 2026-08-26 both codes mapped to `P_13_8`**, misstating intra-EU services on an
+  XSD-valid document that tier 1 passed. Found by audit. No corpus witness exists — no `np`
+  code appears in any pinned sample — so the schema's own annotations are the whole evidence,
+  and they are decisive. **Third instance of this class**, after the shared-bucket
+  accumulation bug and rate code `3`.
+
+- **Bucket 4 takes rate codes `4` *and* `3`; buckets 5 and 11 take none.** Each rate bucket
+  pairs a current rate with the one it replaced — 23/22, 8/7, 4/3 — and bucket 5 is not a rate
+  bucket at all: `P_13_5` is the special procedure of *"dziale XII w rozdziale 6a"* and
+  `P_14_5` is **"kwota podatku od wartości dodanej"**, foreign VAT under OSS, whose per-line
+  rate lives in `P_12_XII` (a percentage) rather than in `P_12`. `P_13_11` is unreachable for
+  its own reason: the margin scheme is declared through `Adnotacje/PMarzy`, not a rate.
+  **Until 2026-08-24 this table mapped code `3` to bucket 5**, so a domestic 3% sale was
+  declared as OSS foreign VAT on an XSD-valid document. Found by comparing against
+  `ksef-pdf-generator`, whose summary labels read *"4% lub 3%"* for bucket 4 and *"OSS"* for
+  bucket 5 — the only official code that renders these buckets. **That table row was itself
+  left uncorrected until 2026-08-26**, two commits after the code was fixed, so a reader
+  trusting the table over this bullet would have reintroduced the bug.
+  `VatRate.unreachable_elements` names buckets 5 and 11, and a spec now asserts every *other*
+  net bucket is reachable — an incomplete list there is what let `P_13_9` look like a
+  deliberate gap.
 - **The mapping is many-to-one, so summaries must *accumulate*.** `"23"` and `"22"` both
-  report into `P_13_1`/`P_14_1`, `"8"` and `"7"` into bucket 2, `"np I"` and `"np II"` into
-  `P_13_8`. Assigning per rate code rather than summing lets the last code win — which is
+  report into `P_13_1`/`P_14_1`, `"8"` and `"7"` into bucket 2, `"4"` and `"3"` into
+  `P_13_4`/`P_14_4`. Assigning per rate code rather than summing lets the last code win — which is
   exactly the bug found on 2026-08-24: an invoice with a 23% line of 100 and a 22% line of 200
   emitted `P_13_1=200.00` and `P_14_1=44.00` while `P_15` still carried the correct `367.00`.
   The tax base was understated by a third, `P_13_1 + P_14_1 ≠ P_15`, and **the document was
@@ -1227,11 +1260,16 @@ Three things that fall out of this and matter for the builder:
 
 ### 8.2 Non-obvious mandatory elements
 
-Discovered by validating against the schema rather than by reading it, and asserted in
-`spec/ksef/fa3/validator_spec.rb`.
+Discovered by validating against the schema rather than by reading it. `JST`/`GV` are asserted
+in `spec/ksef/fa3/validator_spec.rb`; the `Adnotacje` list is enforced by
+`Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS` and by tier 1's key check rather than by an assertion
+of its own.
 
-**`Podmiot2` (the buyer) requires both `JST` and `GV`** — `minOccurs="1"` on each, typed
-`etd:TWybor1_2` so the only permitted values are `"1"` and `"2"`:
+**`Podmiot2` (the buyer) requires both `JST` and `GV`** — `minOccurs="1"` on each, and typed
+by an **anonymous inline restriction of `xsd:integer`** enumerating `1` and `2`, so those are
+the only permitted values. (Not `etd:TWybor1_2`, as an earlier revision of this line said: the
+schema does use that type for `P_16`–`P_23`, but not here, and the generated metadata records
+`base: "xsd:integer"` for both. Corrected by audit 2026-08-26.)
 
 | Element | Meaning | `"1"` |
 |---|---|---|
@@ -1360,7 +1398,7 @@ The correction elements are an **anonymous `<xsd:sequence minOccurs="0">`** sitt
 | `Podmiot1K` | 0–1 | `Correction#previous_seller` |
 | `Podmiot2K` | 0–101 | `Correction#previous_buyers` |
 | `P_15ZK` | 0–1 | **not modelled** — its documentation scopes it to *"korekt faktur zaliczkowych"* and art. 106f ust. 3, i.e. `KOR_ZAL`/`KOR_ROZ` |
-| `KursWalutyZK` | 0–1 | **not modelled** — no documentation of its own; it sits in a nested sequence that `P_15ZK` opens, so it is gated structurally |
+| `KursWalutyZK` | 0–1 | **not modelled** — its own documentation (*"kurs waluty … przed korektą"*) names no type, but it sits in the nested sequence `P_15ZK` opens, so it is gated structurally to the same two |
 
 Four consequences that are easy to get wrong:
 
@@ -1436,8 +1474,10 @@ complaining would be inventing a rule.
 Measured 2026-08-24: **all six distinct `NrKSeFFaKorygowanej` values in the five `KOR` samples
 fail the CRC-8 of §13**. The commonest, `9999999999-20230908-8BEF280C8D35-4D`, appears in
 **eleven of the twenty-six samples** — every `KOR`, every `KOR_ZAL`, the `KOR_ROZ` and both
-`ROZ` — as the sole reference in three of them. (An earlier revision of this section said
-"three samples", counting only the ones where it stands alone; corrected by audit.) All six
+`ROZ`. It is the **only** KSeF-number reference in eight of those eleven; przyklad-06, -07 and
+-18 carry others alongside it. (Two earlier revisions were wrong here — first "three samples",
+then "the sole reference in three of them", which counted only the `KOR` samples where it
+stands alone. Corrected by audit 2026-08-26.) All six
 match `TNumerKSeF`'s pattern — every sample is XSD-valid — so they are well-formed
 placeholders rather than numbers KSeF ever issued.
 
@@ -1482,7 +1522,8 @@ contract's `KsefNumber` pattern admits the NIP issuer form alone:
 ^([1-9](\d[1-9]|[1-9]\d)\d{7})-…
 ```
 
-The FA(3) XSD's `TNumerKSeF` admits two more:
+The FA(3) XSD's `TNumerKSeF` admits two more (XSD patterns are implicitly anchored, so it
+carries no leading `^`):
 
 ```
 ^([1-9]((\d[1-9])|([1-9]\d))\d{7}|M\d{9}|[A-Z]{3}\d{7})-…
@@ -1501,6 +1542,92 @@ A fourth, smaller finding of the same shape: {Serializer} compared `values.keys.
 against the schema when rejecting unknown element names, but wrote with `values.key?(name)`
 against a String. A symbol key therefore passed the check and was then **silently dropped**.
 Keys are normalised once, at the top of `write_children`.
+
+### 8.5 The advance-payment pair, `ZAL` and `ROZ`
+
+Source: the pinned FA(3) XSD for the structure, and the Ministry's `ZAL`, `ROZ`, `KOR_ZAL` and
+`KOR_ROZ` samples of §1.5 for what they contain. Recorded 2026-08-25.
+
+A `ZAL` documents money received **before** the goods are delivered; a `ROZ` — art. 106f ust. 3
+— is the invoice issued once they are, settling what the advance invoices already covered. Two
+elements carry that, and both sit in `Fa` outside the correction group:
+
+| Element | Occurs | Carried as |
+|---|---|---|
+| `Zamowienie` | 0–1 | `Invoice#order` |
+| `Zamowienie/WartoscZamowienia` | 1, `TKwotowy` | `Order#total` |
+| `Zamowienie/ZamowienieWiersz` | **1–10 000** | `Order#lines` |
+| `FakturaZaliczkowa` | 0–**100** | `Invoice#advances` |
+| `ZaliczkaCzesciowa` | 0–31 | **not modelled** — see below |
+
+**A `ZAL` need not carry `FaWiersz`, and the Ministry's does not.** `Zamowienie` is
+*"zamówienie lub umowa, o których mowa w art. 106f ust. 1 pkt 4"* — the order or contract — and
+its positions stand in for invoice rows, in the currency the advance invoice was issued in.
+Przykład 10 carries two `ZamowienieWiersz` and no rows. **The schema permits rows even so**:
+`FaWiersz` is `minOccurs="0"`, described as *"węzeł opcjonalny dla faktury zaliczkowej"* —
+optional, not forbidden. Nothing here refuses a `ZAL` with rows, and this paragraph reports one
+witness rather than a rule. (An earlier revision stated it as a general fact; §8.4 declines to
+build rules on single witnesses and the same discipline applies here.)
+
+**`WartoscZamowienia` is not `P_15`, and confusing them would be a large error.** It is
+*"wartość zamówienia lub umowy z uwzględnieniem kwoty podatku"* — the whole order **including
+tax**. In Przykład 10 it is `375 150` against a `P_15` of `20 000`: the order is the contract,
+`P_15` is the money received so far.
+
+**An order position states its own tax.** `ZamowienieWiersz` carries both `P_11NettoZ`
+(*"wartość zamówionego towaru lub usługi bez kwoty podatku"*) and `P_11VatZ` (*"kwota podatku
+od zamówionego towaru lub usługi"*). `FaWiersz` has no per-row tax element and the tax is
+computed from `P_12`; here the document carries both, so `OrderLine` reads both and derives
+nothing. `StanPrzedZ` is `StanPrzed`'s twin, for a `KOR_ZAL` correcting an order position.
+
+**`FakturaZaliczkowa`'s choice is inverted from `DaneFaKorygowanej`'s.** There, the marker
+pairs with the KSeF number. Here it pairs with the plain one:
+
+- in KSeF → `NrKSeFFaZaliczkowej` **alone**;
+- outside KSeF → `NrKSeFZN` (*"znacznik faktury zaliczkowej wystawionej poza KSeF"*) followed
+  by `NrFaZaliczkowej`.
+
+So the two branches name *different fields*, and {AdvanceInvoice} carries both with exactly one
+required — unlike {CorrectedInvoice}, where one nil-able field was enough. Getting this
+backwards is easy and produces a schema-valid document asserting the wrong provenance.
+
+#### Both types state their summary, measured rather than assumed
+
+`Invoice::STATED_TOTALS_TYPES` gains `ZAL` and `ROZ`. Over every sample of each, the stated
+buckets **never** equal the row totals:
+
+| Sample | Type | Σ row `P_11` | Σ stated `P_13_*` | `P_15` |
+|---|---|---|---|---|
+| Przykład 10 | `ZAL` | — (no rows) | 16 260.16 | 20 000 |
+| Przykład 14 | `ROZ` | 312 000.00 | 284 277.75 | 307 635 |
+| Przykład 17 | `ROZ` | 312 000.00 | 277 222.45 | 300 000 |
+| Przykład 11 | `KOR_ZAL` | — (no rows) | 2 221.34 | 0 |
+| Przykład 18 | `KOR_ROZ` | 624 000.00 | 7 055.30 | 7 635 |
+
+A `ZAL` has nothing to derive from. A `ROZ` describes the goods in its rows and states the
+amount **remaining after the advance** in its buckets — and the advance is not in this
+document, so the model could not compute it even in principle. `ZaliczkaCzesciowa`'s own
+documentation confirms the shape: *"różnica kwoty w polu P_15 i sumy poszczególnych pól P_15Z
+stanowi kwotę pozostałą ponad płatności otrzymane przed wykonaniem"*.
+
+Tier 1 therefore requires a stated summary whenever an order is present or an advance invoice
+is settled — the same rule, and the same module, as the `state_before` case of §8.4b. All three
+triggers are **structural**: an element the document either carries or does not. Whether the
+figures then reconcile is tier 3's, and tier 3 is not built.
+
+#### What is deliberately not modelled
+
+- **`ZaliczkaCzesciowa`** — instalments of a partial advance. It appears in **none of the
+  twenty-six samples**, so there is nothing to build against; it is a whole element and is
+  therefore visible through `#unmapped_elements`.
+- **`P_15ZK` / `KursWalutyZK`** — the amount paid before correction. Still scoped to `KOR_ZAL`
+  and `KOR_ROZ`, which are the remaining work; three `KOR_ZAL` samples and the `KOR_ROZ` one
+  carry `P_15ZK`, so it lands with them rather than here. `KursWalutyZK` appears in none of the
+twenty-six.
+- **`Platnosc`** and **`DodatkowyOpis`** — payment details and free-form key/value notes. Both
+  appear across `VAT`, `ZAL` and `ROZ` alike and have never been modelled; both are
+  path-visible. `Platnosc` on a `ZAL` carries *when* the advance was paid, which is worth
+  having eventually, but it is not what makes a `ZAL` a `ZAL`.
 
 ---
 
@@ -1521,7 +1648,8 @@ Carried forward; must be resolved before the code that depends on them is writte
   operation* status codes are recorded at §4.8 **from the pinned contract** — not, as this
   bullet used to say, from the reference implementation; see §4.8 for why that distinction
   cost us code 480 — and the
-  per-endpoint `ExceptionResponse` codes now known are `21405` (input validation),
+  per-endpoint `ExceptionResponse` codes now known — and `docs/errors.md` lists all four —
+  are `21405` (input validation),
   `21470` (unknown or withdrawn key, §10.2), `21111` (invalid authorisation challenge,
   §4.5) and `21157` (invalid package part size). The rest must be collected from the spec
   per operation, or observed — **and the collection is mechanical**: each operation's `400`
@@ -2478,7 +2606,8 @@ code — **`450` "Błąd weryfikacji semantyki dokumentu faktury"** — with fre
 no code for "totals do not reconcile" and none for a malformed correction reference.
 
 **What the Ministry's samples add.** §1.5 records the measurement: `Σ P_13_* + Σ P_14_* == P_15`
-holds in 24 of 26 official examples, failing on Przykład 1 by one grosz (gross-priced rounding)
+holds in 24 of 26 official examples, failing on Przykład 1 by one grosz (bucket-level tax
+rounding — *not* gross pricing, see §1.5)
 and on Przykład 16 by omission (a `UPR` may carry `P_15` alone). That is *empirical* grounding —
 grounding 3 — for a rule the text does not state, and it fixes the rule's shape: a tolerance of a
 grosz and a guard for absent buckets, or it rejects the Ministry's own first example.

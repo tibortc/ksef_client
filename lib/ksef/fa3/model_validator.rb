@@ -34,9 +34,10 @@ module Ksef
     #
     # This module decides *what an invoice has* — a seller, a buyer, a header, annotations,
     # lines — and the checks for each subject live with that subject: {SubjectChecks} for the
-    # four `Podmiot` roles, {CorrectionChecks} for the correction group, {FieldChecks} for
-    # anything measured against an `xsd:token` facet. All three are mixed in here, so they
-    # share one `self` and can call each other.
+    # four `Podmiot` roles, {CorrectionChecks} for the correction group, {SummaryChecks} for
+    # the stated tax summary, {AdvanceChecks} for `Zamowienie` and `FakturaZaliczkowa`, and
+    # {FieldChecks} for anything measured against an `xsd:token` facet. All five are mixed in
+    # here, so they share one `self` and can call each other.
     module ModelValidator
       # `Adnotacje` is an anonymous complex type, so the generated metadata keys it by path
       # rather than by name — the same key {Serializer} resolves when it rejects an unknown
@@ -59,6 +60,10 @@ module Ksef
         # The correction group and its value objects. It includes {SubjectChecks} itself,
         # `Podmiot1K` and `Podmiot2K` being parties like any other.
         include CorrectionChecks
+        # The stated tax summary, which spans corrections and the advance-payment types alike.
+        include SummaryChecks
+        # `Zamowienie` and `FakturaZaliczkowa`, for `ZAL` and `ROZ`.
+        include AdvanceChecks
 
         # @param invoice [Invoice]
         # @return [Array<Issue>] empty when the model is sound
@@ -68,15 +73,26 @@ module Ksef
             *subject_errors(invoice.buyer, "buyer", role: :buyer),
             *header_errors(invoice),
             *annotation_errors(invoice.annotations),
-            *totals_errors(invoice),
-            *before_state_errors(invoice),
-            *correction_errors(invoice.correction),
-            *correcting_type_errors(invoice),
+            *summary_errors(invoice),
+            *type_specific_errors(invoice),
             *invoice.lines.each_with_index.flat_map { |line, index| line_errors(line, index) }
           ]
         end
 
         private
+
+        # The stated tax summary, from both directions: set where it does not belong, and
+        # absent where the rows cannot stand in for it ({SummaryChecks}).
+        def summary_errors(invoice)
+          [*totals_errors(invoice), *derived_summary_errors(invoice)]
+        end
+
+        # What each family of invoice types adds to the common core: the correction group
+        # ({CorrectionChecks}) and the advance-payment structures ({AdvanceChecks}).
+        def type_specific_errors(invoice)
+          [*advance_errors(invoice), *correction_errors(invoice.correction),
+           *correcting_type_errors(invoice)]
+        end
 
         def header_errors(invoice)
           issues = []
@@ -94,14 +110,25 @@ module Ksef
         # **It recurses**, because the serializer does. Checking one level deep left
         # `Zwolnienie => { "P_19X" => "1" }` passing the model and raising on the way out; the
         # nested type is resolved through {Serializer.child_type_key}, the same call the
-        # serializer makes, so the two cannot disagree about what belongs where.
+        # serializer makes, so the two agree about what belongs where — including that a leaf
+        # takes no children at all, which is the case the first recursion missed.
         def annotation_errors(annotations, type_key = ANNOTATIONS_TYPE, field = "annotations")
           return [Issue.new(field: field, message: "must be a Hash")] unless annotations.is_a?(Hash)
 
+          # **A leaf first.** `Generated::Types` keys only complex types, so a nil entry means
+          # this element takes text — `P_16` and its siblings — and a Hash under one is
+          # something the serializer refuses outright. Falling through to the guard below
+          # treated a leaf's empty element list as "the codegen changed" and returned no
+          # issues, so `annotations: {"P_16" => {"X" => 1}}` passed tier 1a and then made
+          # `#to_xml` raise: the contract above, broken by the recursion that was added to
+          # uphold it (found by audit 2026-08-26).
+          if Generated::Types[type_key].nil?
+            return [Issue.new(field: field, message: "takes a text value, not nested elements")]
+          end
+
           known = Generated::Types.ordered_elements(type_key)
-          # An empty list means the generated metadata no longer keys this type by the path
-          # above — a codegen change, not a caller's mistake, and no reason to reject their
-          # annotations.
+          # A *known* type with no elements means the generated metadata no longer describes it
+          # as this code expects — a codegen change, not a caller's mistake.
           return [] if known.empty?
 
           named = annotations.transform_keys(&:to_s)

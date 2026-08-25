@@ -45,7 +45,7 @@ module Ksef
       #   Ksef::FA3.parse(invoice.to_xml) == invoice   # => true
       #
       # @example reading one KSeF sent back
-      #   parsed = Ksef::FA3.parse(client.invoice("5265877635-20260824-010000000123-45"))
+      #   parsed = Ksef::FA3.parse(client.download_invoice("5265877635-20250826-0100001AF629-AF"))
       #   parsed.number                                # => "FA/2026/08/001"
       #   parsed.unmapped_elements                     # => ["Faktura/Podmiot3", …]
       #

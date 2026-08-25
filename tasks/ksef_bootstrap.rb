@@ -8,7 +8,9 @@ require "securerandom"
 #
 # Invents a checksum-valid NIP and PESEL, registers them through the unauthenticated
 # `/testdata/person` endpoint, authenticates with a self-signed certificate, and mints a
-# KSeF token. The output is the pair `nightly.yml` reads from repository secrets.
+# KSeF token. The output is the pair `nightly.yml` reads from the **environment** secrets on
+# `ksef-test` — not repository secrets, which every workflow in the repo can read
+# (docs/REFERENCE.md §6a.3).
 #
 # Lives in `tasks/` so it is never packaged, but it is **not** an untested script: every
 # method here is exercised against WebMock stubs in `spec/tasks/ksef_bootstrap_spec.rb`. A

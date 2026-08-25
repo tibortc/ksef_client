@@ -2,8 +2,7 @@
 
 module Ksef
   module FA3
-    # Tier 1a's checks on {Correction}, {CorrectedInvoice} and {Totals} (docs/REFERENCE.md
-    # §8.4).
+    # Tier 1a's checks on {Correction} and {CorrectedInvoice} (docs/REFERENCE.md §8.4).
     #
     # Split out of {ModelValidator} for length, and because a correction is a self-contained
     # subject: it has its own value objects, its own optionality — `TypKorekty` is
@@ -21,59 +20,12 @@ module Ksef
 
       private
 
-      # {Totals} validates its own bucket names and coerces its own amounts, so there is
-      # nothing left to check about a real one — only that it *is* one, and that the invoice
-      # is a kind that states its summary at all.
-      #
-      # **`is_a?`, not `respond_to?(:to_fa3)`.** Duck-typing here re-opened the hole this
-      # check was added to close: a `Line` or a `Subject` also answers `to_fa3`, so one passed
-      # the model tier and then made `#to_xml` raise `ArgumentError: missing keyword` — outside
-      # this gem's hierarchy and so outside {Invoice#errors}' rescue. The message already
-      # promises a class; now it checks one.
-      def totals_errors(invoice)
-        totals = invoice.totals
-        return [] if totals.nil?
-        return [Issue.new(field: "totals", message: "is not a Ksef::FA3::Totals")] unless totals.is_a?(Totals)
-        return [] if Invoice::STATED_TOTALS_TYPES.include?(invoice.invoice_type)
-
-        [Issue.new(field: "totals",
-                   message: "is set on a #{invoice.invoice_type} invoice, whose summary this " \
-                            "model computes from its lines. A stated summary is emitted " \
-                            "verbatim and never read back, so the document would disagree " \
-                            "with its own rows (docs/REFERENCE.md §8.4)")]
-      end
-
-      # **The other half of "a correction's summaries are read, never computed"** — the half
-      # that was missing until an audit on 2026-08-24 found it, three lenses independently.
-      #
-      # docs/REFERENCE.md §8.4 states the rule, and {Parser} kept it: every `KOR` it reads gets
-      # a {Totals}. But {DocumentMapping#summary} falls back to the line-derived buckets
-      # whenever `totals` is nil, and nothing required a *built* correction to state any. A
-      # `StanPrzed` row is the position **as it was before the correction** — it was already
-      # invoiced on the original document — so summing it into the delta buckets counts it
-      # twice, with the wrong sign. The Ministry's own Przykład 2, built without `f.totals`,
-      # declared `P_15 = 3799.98` where the correction it describes is `-200.00`: a refund
-      # turned into a charge, XSD-valid, tier 1 silent and `unmapped_elements` empty.
-      #
-      # Scoped to `state_before` rather than to the type: a correction whose rows already
-      # *are* the deltas computes correctly, and the Ministry's Przykład 3 is exactly that
-      # shape. Refusing every derived correction would reject it.
-      def before_state_errors(invoice)
-        return [] unless invoice.totals.nil?
-        return [] unless invoice.lines.any? { |line| line.is_a?(Line) && line.state_before }
-
-        [Issue.new(field: "totals",
-                   message: "is required when a line is marked state_before. Such a row shows " \
-                            "the position as it was before the correction, so deriving the " \
-                            "summary from the rows counts it as a sale — state the delta " \
-                            "instead (docs/REFERENCE.md §8.4)")]
-      end
-
       # The one cross-field rule here, and it is a field *definition* rather than a business
-      # rule: `PrzyczynaKorekty` is documented as *"przyczyna korekty dla faktur
-      # korygujących"*, so the correction group belongs to a correcting type. The XSD cannot
-      # express that — the group sits in the same sequence whatever `RodzajFaktury` says —
-      # which is exactly why tier 1 is the place for it.
+      # rule: the XSD's own annotation on the sequence that holds these elements reads *"Dane
+      # dla przypadków, gdy pole RodzajFaktury przyjmuje wartości KOR, KOR_ZAL lub KOR_ROZ"*.
+      # What the schema cannot do is enforce it — the group sits in the same sequence whatever
+      # the type, so a `VAT` invoice carrying `DaneFaKorygowanej` validates clean. That gap is
+      # exactly why tier 1 is the place for it.
       #
       # The converse is deliberately **not** checked: the group is `minOccurs="0"`, so a
       # `KOR` without one is schema-valid, and refusing it would be inventing a rule

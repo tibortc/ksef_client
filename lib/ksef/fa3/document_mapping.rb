@@ -43,8 +43,12 @@ module Ksef
           "Adnotacje" => annotations,
           "RodzajFaktury" => invoice_type,
           **(correction ? correction.to_fa3 : {}),
-          "FaWiersz" => rows
-        }
+          "FakturaZaliczkowa" => advances.map(&:to_fa3),
+          "FaWiersz" => rows,
+          "Zamowienie" => order&.to_fa3
+          # `compact`, because a nil value is not "absent" to {Serializer}: it writes an empty
+          # element for one. An empty Array *is* absent — it repeats zero times.
+        }.compact
       end
 
       # A stated summary wins over a computed one, and for a correction it is the only one
@@ -66,11 +70,11 @@ module Ksef
       #
       # **Accumulates per bucket, and that is the whole point.** Several rate codes share one
       # bucket — `"23"` and `"22"` both report into `P_13_1`/`P_14_1`, `"8"` and `"7"` into
-      # bucket 2, `"np I"` and `"np II"` into `P_13_8` (§8.1a). Assigning per rate code
+      # bucket 2, `"4"` and `"3"` into bucket 4 (§8.1a). Assigning per rate code
       # instead of summing let the last code win, which understated the tax base by the whole
       # share of every earlier code while `P_15` still carried the correct total: an
       # internally inconsistent invoice that passes the XSD. Found by a review on 2026-08-24,
-      # after {RoundingInference#computed} — which had always summed per bucket — disagreed
+      # after {RoundingInference.computed} — which had always summed per bucket — disagreed
       # with this method.
       def rate_summaries
         bucket_totals.transform_values { |amount| Formatting.amount(amount) }

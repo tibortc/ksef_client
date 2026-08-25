@@ -8,7 +8,7 @@ module Ksef
     # Array — which is exactly the shape {Serializer} writes back, so a subtree read this way
     # round-trips without the model having to understand any of it.
     #
-    # {Parser} uses it for `Adnotacje`, a group of nine annotations with real tax
+    # {Parser} uses it for `Adnotacje`, a group of eight annotations with real tax
     # consequences and far too much structure to model field by field in 0.1. Reading it
     # structurally is what stops re-serialisation from silently resetting a declaration the
     # document made (see {Invoice::DEFAULT_ANNOTATIONS}).

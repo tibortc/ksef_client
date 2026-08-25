@@ -4,17 +4,19 @@ module Ksef
   module FA3
     # A complete FA(3) invoice.
     #
-    # Covers the plain `VAT` type and the correction, `KOR`. The remaining five types
-    # (DESIGN.md §7.4) reuse this core and add their own required and forbidden fields.
+    # Covers `VAT`, the correction `KOR`, and the advance-payment pair `ZAL` and `ROZ`. The
+    # remaining three types (DESIGN.md §7.4) reuse this core and add their own required and
+    # forbidden fields.
     #
-    # A correction differs in three ways, all of them optional fields here: it carries a
-    # {Correction} saying what it corrects, it may state its {Totals} rather than have them
-    # derived, and — because it may state them — it may have no lines at all
-    # (docs/REFERENCE.md §8.4).
+    # What the four have beyond the common core is four optional fields. A correction carries a
+    # {Correction} saying what it corrects (§8.4); an advance invoice carries an {Order}, and a
+    # settlement invoice the {AdvanceInvoice}s it settles (§8.5). All three may state their
+    # {Totals} rather than have them derived — and because they may, they may have no lines at
+    # all.
     Invoice = Data.define(
       :seller, :buyer, :number, :issue_date, :lines,
       :currency, :issued_at, :rounding, :invoice_type, :annotations,
-      :correction, :totals, :raw_document
+      :correction, :totals, :order, :advances, :raw_document
     )
 
     # Computation, defaults and serialisation for {Ksef::FA3::Invoice}.
@@ -47,12 +49,19 @@ module Ksef
         "PMarzy" => { "P_PMarzyN" => "1" }
       }.freeze
 
-      # The invoice kinds whose tax summary is **stated** rather than derived from the rows.
-      # Lives here rather than on {Parser} because both halves need it: the parser reads a
-      # stated summary for these types, and {ModelValidator} reports one set on any other —
+      # The invoice kinds whose tax summary **may** be stated rather than derived from the
+      # rows. Lives here rather than on {Parser} because both halves need it: the parser reads
+      # a stated summary for these types, and {ModelValidator} reports one set on any other —
       # where it would be emitted verbatim, never read back, and disagree with the lines with
       # nothing to notice (docs/REFERENCE.md §8.4).
-      STATED_TOTALS_TYPES = %w[KOR].freeze
+      #
+      # **"May", not "always".** Across the `ZAL`/`ROZ` family the stated buckets never equal
+      # the row totals (§8.5's table): a `ZAL` has no rows, and a `ROZ` states what remains
+      # *after* the advance, which this document does not contain enough to compute. A `KOR` is
+      # more varied — Przykład 3's single delta row reproduces its buckets exactly. That is why
+      # {SummaryChecks} keys the *requirement* to what a document carries rather than to its
+      # type; making it type-based would reject that worked example.
+      STATED_TOTALS_TYPES = %w[KOR ZAL ROZ].freeze
 
       NEEDS_LINES = "An invoice needs at least one line, unless it states its own totals. " \
                     "A collective correction may have no FaWiersz at all — see " \
@@ -88,7 +97,8 @@ module Ksef
       # some.
       def initialize(seller:, buyer:, number:, issue_date:, lines: [],
                      currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT",
-                     annotations: nil, correction: nil, totals: nil, raw_document: nil)
+                     annotations: nil, correction: nil, totals: nil, order: nil, advances: [],
+                     raw_document: nil)
         rows = self.class.rows_for(lines, rounding: rounding, totals: totals)
 
         super(
@@ -96,7 +106,8 @@ module Ksef
           number: Formatting.text(number),
           currency: Formatting.text(currency),
           invoice_type: Formatting.text(invoice_type),
-          correction: correction, totals: totals, raw_document: raw_document,
+          correction: correction, totals: totals, order: order,
+          advances: Correction.wrap(advances).dup.freeze, raw_document: raw_document,
           # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
           # Date it denotes must not produce two unequal invoices (§8.2b).
           issue_date: Formatting.to_date(issue_date),
@@ -127,8 +138,9 @@ module Ksef
       # the document a caller who states nothing does, and leaving the two unequal broke
       # DESIGN.md §7.6's round-trip law for an ERP that always supplies row numbers.
       #
-      # `dup` first, so a caller's own array is never modified — and the copy is what gets
-      # frozen, since `lines` is an invariant of the object rather than a view onto theirs.
+      # `each_with_index.map` returns a new array, so a caller's own is never modified — and
+      # that copy is what {.rows_for} freezes, `lines` being an invariant of the object rather
+      # than a view onto theirs.
       def self.positioned(lines)
         lines.each_with_index.map do |line, index|
           next line unless line.is_a?(Line) && line.row_number == index + 1

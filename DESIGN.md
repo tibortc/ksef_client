@@ -221,7 +221,8 @@ lib/
     │                         # subsystem keeps its own, following the auth precedent
     └── fa3/
         ├── invoice.rb, subject.rb, line.rb, address.rb   # models — Phase 1
-        ├── annotations.rb, payment.rb, correction.rb     # models — Phase 2
+        ├── correction.rb, corrected_invoice.rb, totals.rb    # KOR (§7.4)
+        ├── order.rb, order_line.rb, advance_invoice.rb       # ZAL/ROZ (§7.4)
         ├── formatting.rb     # BigDecimal/date/flag rules, centralised (§7.5)
         ├── nip.rb            # NIP checksum (§7.2)
         ├── vat_rate.rb       # rate code → percentage + summary bucket (§7.3)
@@ -229,7 +230,8 @@ lib/
         ├── builder.rb        # the DSL (§7.2) — done, see §11
         ├── serializer.rb     # Nokogiri; ordering read from generated/, never hand-listed
         ├── parser.rb         # XML → models; retains raw Nokogiri doc — Phase 2
-        ├── validator.rb      # three tiers (§7.7); tier 2 (XSD) done, tiers 1 and 3 Phase 2
+        ├── model_validator.rb, document_validator.rb  # tiers 1a and 1b (§7.7)
+        ├── validator.rb      # tier 2 (XSD). Tier 3 is not built (docs/REFERENCE.md §15.6)
         └── schema/           # pinned FA(3) XSD + upstream MIT licence
 ```
 
@@ -326,7 +328,7 @@ Ksef::Error
 └── Ksef::TimeoutError / Ksef::ConnectionError (wrapping Faraday)
 ```
 
-Map the official error-code catalog into `#code` + human message — **[VERIFY] partially resolved:** the authentication status codes are at `docs/REFERENCE.md` §4.8 and the session/invoice ones at §12.1, both from the pinned contract; the per-endpoint `ExceptionResponse` codes remain open (§9), collectable from each operation's own `400` description; keep the full catalog table in `docs/errors.md`. **Retry policy:** idempotent GETs and rate-limit/5xx responses retryable with backoff; **invoice submission (POST) is never auto-retried** — surface the error and let the caller decide (duplicate submission is a real-world tax problem).
+Map the official error-code catalog into `#code` + human message — **[VERIFY] partially resolved:** the authentication status codes are at `docs/REFERENCE.md` §4.8 and the session/invoice ones at §12.1, both from the pinned contract; the per-endpoint `ExceptionResponse` codes remain open (`docs/REFERENCE.md` §9), collectable from each operation's own `400` description; keep the full catalog table in `docs/errors.md`. **Retry policy:** idempotent GETs and rate-limit/5xx responses retryable with backoff; **invoice submission (POST) is never auto-retried** — surface the error and let the caller decide (duplicate submission is a real-world tax problem).
 
 ---
 
@@ -452,13 +454,13 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Unit | RSpec + WebMock | request shaping, crypto primitives, models, serializer, validator | every push, full matrix |
 | Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **planned, not yet built** — no cassette exists as of 2026-08-23; WebMock stubs cover this ground for now |
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors — NIST/FIPS, not C#, see §6.4 | every push |
-| Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning. Three specs exist — auth, crypto, session — and **none has run green against TEST yet** | **nightly** CI + pre-release, never per-PR |
+| Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning. Three specs exist — auth, crypto, session — and **all three have run green against TEST** (auth 2026-08-23, the other two 2026-08-24) | **nightly** CI + pre-release, never per-PR |
 
-**Coverage gate (ratcheted 2026-08-22):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 99, branch 95, method 100**.
+**Coverage gate (ratcheted 2026-08-22, then 95 → 96 → 97 on 2026-08-24):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 99, branch 97, method 100**. The `minimum_coverage` call in `spec/spec_helper.rb` is the gate that fails the build and is therefore the authority; every restatement, here included, is a copy that has gone stale before.
 
 Originally this said "90% lines". That turned out to be a weak gate: the suite sat at 99% line coverage while branch coverage was 83%, i.e. seventeen conditional paths were untested behind fully-covered lines. Branch coverage is the one that finds real gaps; line coverage mostly confirms files are loaded.
 
-Floors sit just under the achieved numbers so they ratchet. Raise them as the real figures move up; do not lower one to make a change pass. Branch is 95 rather than 100 because a handful of `&.` guards defend against states that cannot occur, and contorting tests to reach them proves nothing. Deliberate margin, not a knife edge at the actuals: a floor pinned to the exact current figure fails on refactors that change nothing about test quality. Because these are percentages, the absolute number of untested branches they permit grows with the codebase — **re-ratchet at each phase boundary**, not once. Requires SimpleCov >= 1.0, where the supported criteria are `[:line, :branch, :method, :oneshot_line]`; 0.x supports only line and branch.
+Floors sit just under the achieved numbers so they ratchet. Raise them as the real figures move up; do not lower one to make a change pass. Branch is 97 rather than 100 because ten guards — seven `&.` and three plain `if`/`return` — defend against states that cannot occur, and contorting tests to reach them proves nothing. Deliberate margin, not a knife edge at the actuals: a floor pinned to the exact current figure fails on refactors that change nothing about test quality. Because these are percentages, the absolute number of untested branches they permit grows with the codebase — **re-ratchet at each phase boundary**, not once. Requires SimpleCov >= 1.0, where the supported criteria are `[:line, :branch, :method, :oneshot_line]`; 0.x supports only line and branch.
 
 A filtered run — one file, one example, or a tag selector — legitimately exercises less of the library, so the gate applies to full runs only. Otherwise the nightly `--tag integration` job would fail on coverage rather than on tests.
 
@@ -468,7 +470,7 @@ A threaded smoke spec for §5.2. A spec asserting no committed cassette contains
 
 ## 10. Repository, CI, and release engineering
 
-- **CI (GitHub Actions):** `test.yml` — matrix `["3.2","3.3","3.4","4.0","head"]` (head: `continue-on-error`), RuboCop job, coverage artifact. `nightly.yml` — live TEST-env integration on schedule, creds from repo secrets. `release.yml` — tag-triggered, **RubyGems Trusted Publishing (OIDC)** — no long-lived API keys anywhere.
+- **CI (GitHub Actions):** `test.yml` — matrix `["3.2","3.3","3.4","4.0","head"]` (head: `continue-on-error`), RuboCop job, coverage artifact. `nightly.yml` — live TEST-env integration on schedule, creds from **environment** secrets on `ksef-test` (`docs/REFERENCE.md` §6a.3 — a repository secret is readable by every workflow in the repo). `release.yml` — tag-triggered, **RubyGems Trusted Publishing (OIDC)** — no long-lived API keys anywhere.
 - **Docs:** README (quickstart = §8, support policy, gem-vs-namespace note, JRuby/MRI statement), `docs/field_mapping.md` (generated), `docs/errors.md`, `docs/REFERENCE.md` (verification ledger), CHANGELOG (keep-a-changelog), CONTRIBUTING, SECURITY.md.
 - **Changelog compatibility header:** every release entry states the KSeF API version and FA schema revision it targets — the Ministry ships changes continuously; users must be able to answer "which gem version for which API state".
 - **Versioning:** SemVer. EOL-ruby drops in minors (documented) — but see the §3 note: the 3.2 floor is a standing exception and is not dropped on EOL. FA(4), when it comes: additive `Ksef::FA4` namespace, `Ksef::FA3` maintained per deprecation policy — never a breaking in-place rewrite.
@@ -499,7 +501,7 @@ Build the **certificate flow first**: it is the only one that can bootstrap a cr
 
 **The session layer, UPO handling and the `Ksef::Client` facade have landed too**, so §8's snippet runs end to end — `spec/ksef/client_spec.rb` drives it verbatim against stubs, and `spec/integration/session_flow_spec.rb` drives it against the real service.
 
-**The first gate is met, as of 2026-08-24.** **Verified against live TEST on 2026-08-24** (nightly run `32692339217`): a session was opened, an invoice this gem built was encrypted, submitted and **accepted**, a KSeF number was assigned and its CRC-8 agreed with ours, the session reported processed after close, and the UPO came back in the `upo-v4-3` namespace with its bytes matching `x-ms-meta-hash`. Twenty-two of that run's twenty-four examples passed. It also answered §9's last session-layer question — the collective `downloadUrl` arrives **absolute** — and turned §14.6's `X-KSeF-Feature` header from believed into verified.
+**The first gate is met, as of 2026-08-24.** **Verified against live TEST on 2026-08-24** (nightly run `32692339217`): a session was opened, an invoice this gem built was encrypted, submitted and **accepted**, a KSeF number was assigned and its CRC-8 agreed with ours, the session reported processed after close, and the UPO came back in the `upo-v4-3` namespace with its bytes matching `x-ms-meta-hash`. Twenty-two of that run's twenty-four examples passed. It also answered `docs/REFERENCE.md` §9's last session-layer question — the collective `downloadUrl` arrives **absolute** — and turned §14.6's `X-KSeF-Feature` header from believed into verified.
 
 The two failures were **ours, not the service's**, and both are now fixed. One spec asserted `be_success` on a deliberately duplicated invoice, which is a contradiction: KSeF did exactly what §12.1 describes, returning `440` with the original's `originalKsefNumber`. The other found a real defect — a genuine UPO is XAdES-signed and therefore fails upstream's own UPO schema, which declares no `ds:Signature`; none of the six published examples is signed, so nothing offline could have shown it (§14.7).
 
@@ -509,18 +511,18 @@ Gate status, precisely:
 |---|---|
 | §8 contract runs against TEST | **met**, verified live 2026-08-24 (nightly run `32692339217`) |
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
-| All seven types build, validate, round-trip | **not met** — `VAT` and `KOR` do, as of 2026-08-24, round-trip and **validator tier 1** included. Tier 3 and the five other types remain |
+| All seven types build, validate, round-trip | **not met** — `VAT`, `KOR`, `ZAL` and `ROZ` do, as of 2026-08-25, round-trip and **validator tier 1** included. Tier 3, `UPR` and the two `KOR_` combinations remain |
 
-Remaining for Phase 2: validator tier 3, then the five other invoice types (§7.4). **Tier 1 landed 2026-08-24**, split into the model and document halves §7.7 now describes; **`KOR` landed the same day**, built against the Ministry's five worked corrections (`docs/REFERENCE.md` §8.4) — the only examples of a non-`VAT` type in existence.
+Remaining for Phase 2: validator tier 3, then `UPR` and the two `KOR_` combinations (§7.4). **Tier 1 landed 2026-08-24**, split into the model and document halves §7.7 now describes; **`KOR` landed the same day**, built against the Ministry's five worked corrections (`docs/REFERENCE.md` §8.4) — the only examples of a non-`VAT` type in existence.
 
 **The parser landed 2026-08-24**, with the sample corpus §7.6 assumed and did not have
 (`docs/REFERENCE.md` §1.4). Two findings changed the plan around it, both ledgered:
 
 - **Tier 3's rule catalogue does not exist upstream.** `faktury/weryfikacja-faktury.md` — the
-  document §9 named as the place to look — is a list of *technical admission* checks, and
+  document `docs/REFERENCE.md` §9 named as the place to look — is a list of *technical admission* checks, and
   turned out to be the missing first-tier source for tier **1** instead. No file in
   `ksef-api` states a reconciliation rule (`docs/REFERENCE.md` §15.6). So tier 1 is now the
-  better-specified of the two and should be built first — which reverses **§9's** framing of
+  better-specified of the two and should be built first — which reverses **`docs/REFERENCE.md` §9's** framing of
   tier 3 as "the only genuinely open blocker", i.e. the thing to resolve first. (An earlier
   version of this note said it reversed §7.7's order; §7.7 states the order the tiers *run*
   in, which is unchanged. See §7.7's amendment for what did change there.)
@@ -550,6 +552,8 @@ After sustained production use; API stability promise begins.
 
 1. ~~Repo/org placement and gem author metadata (name, email, homepage).~~ **Resolved:** Tibor Molnár, `tibor@timcraft.pl`, `github.com/tibortc/ksef_client`; asserted by `spec/release_readiness_spec.rb`.
 2. ~~XSD redistribution outcome (§7.7 tier 2) — bundle vs fetch-and-cache.~~ **Resolved:** the schemas are MIT-licensed, so they are bundled and no fetch-and-cache fallback is needed (`docs/REFERENCE.md` §1.2, which also gives the test for where a *third-party* schema may live).
-3. Default rounding strategy confirmation (`:per_line` proposed) once real accounting examples are in fixtures.
+3. Default rounding strategy confirmation (`:per_line` proposed) once real accounting examples are in fixtures — **which has now happened**: the Ministry's 26
+worked examples are pinned at `spec/fixtures/fa3/mf-samples/` (docs/REFERENCE.md §1.5), so this
+decision is ready to be taken.
 4. ~~Whether TEST-env credentials for nightly CI come from a dedicated test NIP (recommended) — needs human to provision via the TEST self-service tools.~~ **Resolved 2026-08-23.** A dedicated invented NIP, provisioned by `rake auth:bootstrap` (docs/REFERENCE.md §6a.3) rather than by hand. `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN` are stored in the `ksef-test` environment and the nightly schedule is enabled. The run also confirmed that KSeF accepts this gem's XAdES signature (`docs/REFERENCE.md` §6a.4).
 5. ~~Any trademark/naming sensitivities around "KSeF" in the gem description (likely none — official SDKs use it — but confirm before publishing).~~ **Resolved 2026-08-23 — confirmed by the human**, on the basis the question anticipated. Two KSeF-named gems are already published unchallenged — [`ksef`](https://rubygems.org/gems/ksef) and [`ksef-rb`](https://rubygems.org/gems/ksef-rb), both catalogued in §1 — and the Ministry's own C# and Java SDKs use the name. Settled practice, not a trademark search, which is enough to publish on: `0.1.0.rc1` did so on 2026-08-22.

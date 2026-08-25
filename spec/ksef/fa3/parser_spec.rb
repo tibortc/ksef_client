@@ -529,7 +529,7 @@ RSpec.describe Ksef::FA3::Parser do
   # Accepting an unmodelled type produced something worse than a refusal: a valid-looking
   # invoice under the original's number with recomputed, sign-flipped totals.
   describe "invoice types this model does not carry" do
-    %w[ZAL ROZ UPR KOR_ZAL KOR_ROZ].each do |type|
+    %w[UPR KOR_ZAL KOR_ROZ].each do |type|
       it "refuses a #{type} document, explaining that the document is fine" do
         xml = document(subjects, fa("#{one_row}<RodzajFaktury>#{type}</RodzajFaktury>"))
 

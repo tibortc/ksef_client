@@ -290,10 +290,15 @@ RSpec.describe Ksef::FA3::Invoice do
     end
 
     # Two non-taxable categories sharing a net bucket with no tax element at all.
-    it "sums np I and np II into P_13_8" do
+    # `np II` is *"świadczenie usług o których mowa w art. 100 ust. 1 pkt 4"* and `P_13_9` is
+    # the sum of exactly those services, while `P_13_8` reads "z wyłączeniem kwot wykazanych w
+    # polach P_13_5 i **P_13_9**". Until 2026-08-26 both codes went to `P_13_8` — the one
+    # bucket `np II` may not use.
+    it "keeps np I and np II apart, since P_13_8 excludes what P_13_9 reports" do
       doc = rendered(["np I", "100"], ["np II", "200"])
 
-      expect(doc.at_xpath("//Fa/P_13_8").text).to eq("300.00")
+      expect(doc.at_xpath("//Fa/P_13_8").text).to eq("100.00")
+      expect(doc.at_xpath("//Fa/P_13_9").text).to eq("200.00")
       expect(doc.at_xpath("//Fa/P_14_8")).to be_nil
     end
 
@@ -384,6 +389,25 @@ RSpec.describe Ksef::FA3::Invoice do
     # document — a real difference, pinned by its own example in the parser spec.
     def determined = invoice(lines: [line(net_amount: BigDecimal("1500"))])
 
+    # Every member of IDENTITY, one at a time. Pinning inequality on `number` alone let a
+    # mutation that dropped `issued_at` from IDENTITY survive the whole suite — equality was
+    # thoroughly tested, inequality barely at all.
+    let(:differences) do
+      {
+        number: "FV/OTHER", issue_date: Date.new(2026, 1, 1), currency: "EUR",
+        issued_at: "2020-01-01T00:00:00Z", rounding: :per_summary, invoice_type: "KOR",
+        annotations: Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS.merge("P_16" => "1"),
+        lines: [line(price: "999")], seller: buyer, buyer: seller,
+        correction: Ksef::FA3::Correction.new(
+          corrected: Ksef::FA3::CorrectedInvoice.new(number: "FV/2026/01", issue_date: "2026-01-15")
+        ),
+        totals: Ksef::FA3::Totals.new(gross: "1500.00", buckets: { "P_13_1" => "1500.00" }),
+        order: Ksef::FA3::Order.new(total: "1845.00",
+                                    lines: Ksef::FA3::OrderLine.new(name: "Consulting")),
+        advances: [Ksef::FA3::AdvanceInvoice.new(number: "FZ/2026/01/001")]
+      }
+    end
+
     it "ignores the retained document when comparing" do
       built = determined
       parsed = Ksef::FA3.parse(built.to_xml)
@@ -394,21 +418,7 @@ RSpec.describe Ksef::FA3::Invoice do
       expect(parsed.hash).to eq(built.hash)
     end
 
-    # Every member of IDENTITY, one at a time. Pinning inequality on `number` alone let a
-    # mutation that dropped `issued_at` from IDENTITY survive the whole suite — equality was
-    # thoroughly tested, inequality barely at all.
     it "distinguishes invoices differing in any single identity field" do
-      differences = {
-        number: "FV/OTHER", issue_date: Date.new(2026, 1, 1), currency: "EUR",
-        issued_at: "2020-01-01T00:00:00Z", rounding: :per_summary, invoice_type: "KOR",
-        annotations: Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS.merge("P_16" => "1"),
-        lines: [line(price: "999")], seller: buyer, buyer: seller,
-        correction: Ksef::FA3::Correction.new(
-          corrected: Ksef::FA3::CorrectedInvoice.new(number: "FV/2026/01", issue_date: "2026-01-15")
-        ),
-        totals: Ksef::FA3::Totals.new(gross: "1500.00", buckets: { "P_13_1" => "1500.00" })
-      }
-
       expect(Ksef::FA3::Invoice::IDENTITY).to match_array(differences.keys)
       differences.each do |field, value|
         expect(invoice).not_to eq(invoice(**{ field => value })), "#{field} is not part of identity"

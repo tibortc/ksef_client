@@ -32,9 +32,9 @@ module FA3Corpus
   # would mean a missing pin rather than a deliberate omission.
   MINISTRY_COUNT = 26
 
-  # The twelve this model can represent today: eight of the twelve `VAT` samples and four of
-  # the five `KOR` ones. What is left out is a useful map of what the model cannot do,
-  # measured against real Ministry documents rather than guessed:
+  # The fifteen this model can represent today: eight of the twelve `VAT` samples, four of the
+  # five `KOR` ones, the `ZAL` and both `ROZ`. What is left out is a useful map of what the
+  # model cannot do, measured against real Ministry documents rather than guessed:
   #
   # - `08`, `19` — **gross-priced rows** (`P_9B`/`P_11A` under art. 106e ust. 7-8) where this
   #   model carries net pricing only.
@@ -43,18 +43,21 @@ module FA3Corpus
   # - `07` — a collective correction whose single row states **no price at all**, naming what
   #   the discount relates to while the amounts sit in the summary buckets (§8.4).
   #
-  # The remaining nine samples are the five types {Parser} still refuses outright rather than
+  # The remaining six samples are the three types {Parser} still refuses outright rather than
   # emitting a plausible impostor. They are the corpus for DESIGN.md §7.4's remaining work.
-  MINISTRY_MODELLED = %w[01 02 03 04 05 06 09 20 21 24 25 26]
+  MINISTRY_MODELLED = %w[01 02 03 04 05 06 09 10 14 17 20 21 24 25 26]
                       .map { |n| "mf-samples/przyklad-#{n}.xml" }.freeze
 
   # Samples with no `FaWiersz` at all, which is legal — `minOccurs="0"` — and is how the
   # Ministry writes a correction of buyer data or a collective discount. Listed so the
   # "modelled samples have lines" assertion can exempt exactly these rather than being
   # weakened for all twelve (§8.4).
+  # A `ZAL` joins them for a different reason: its `Zamowienie` positions take the place of
+  # `FaWiersz` entirely (§8.5).
   MINISTRY_WITHOUT_LINES = %w[
     mf-samples/przyklad-05.xml
     mf-samples/przyklad-06.xml
+    mf-samples/przyklad-10.xml
   ].freeze
 
   # Valid FA(3), beyond this model, and refused with a message that says so.
@@ -68,14 +71,19 @@ module FA3Corpus
 
   # The types {Parser} refuses by `RodzajFaktury` alone. Named rather than derived, so
   # supporting one is a deliberate edit here as well as in {Ksef::FA3::Parser::SUPPORTED_TYPES}.
-  MINISTRY_UNSUPPORTED_TYPES = %w[ZAL ROZ UPR KOR_ZAL KOR_ROZ].freeze
+  MINISTRY_UNSUPPORTED_TYPES = %w[UPR KOR_ZAL KOR_ROZ].freeze
 
   # This gem's own *serializer output*, which is fully within the model and so round-trips byte
   # for byte. `minimal_vat_invoice.xml` is deliberately absent: it is hand-written for
   # `validator_spec`, and writes `<P_8B>10.00</P_8B>` where {Ksef::FA3::Formatting.quantity}
   # emits `10` — both legal `TIlosci`, numerically identical, so it belongs to the
   # XSD-validity set and not to the byte-exact one.
-  OURS = %w[golden/vat_single_line.xml golden/kor_before_after.xml].freeze
+  OURS = %w[
+    golden/vat_single_line.xml
+    golden/kor_before_after.xml
+    golden/zal_order.xml
+    golden/roz_settlement.xml
+  ].freeze
 
   # The C# samples are *templates*, not documents: they carry placeholders, and `#nip#` is not
   # a legal `TNrNIP`, so they are not even XSD-valid as they stand. The pinned bytes stay

@@ -23,8 +23,10 @@ module Ksef
       NAMESPACE = "http://crd.gov.pl/wzor/2025/06/25/13775/"
       ROOT = "Faktura"
 
-      # An element that carries attributes as well as text — KodFormularza is the only one
-      # in FA(3), and both of its attributes are fixed by the schema.
+      # An element that carries attributes as well as text. `KodFormularza` is the only one
+      # this serializer writes, and both of its attributes are fixed by the schema. (FA(3) has
+      # one other — `Zalacznik/BlokDanych/Tabela/…/Kol`, with a required, non-fixed `Typ` — but
+      # this model does not carry `Zalacznik`, so it never comes up.)
       Element = Data.define(:text, :attributes) do
         def initialize(text: nil, attributes: {})
           super

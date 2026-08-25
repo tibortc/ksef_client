@@ -68,7 +68,7 @@ module Ksef
           alternatives = identity.element_children.map(&:name).reject { |name| name == "Nazwa" }
           raise ValidationError,
                 "#{identity.parent.name} is identified by #{alternatives.join(", ")} rather than NIP. " \
-                "This model carries a NIP only (DESIGN.md §7.4); the document itself is fine."
+                "This model carries a NIP only (DESIGN.md §7.2); the document itself is fine."
         end
       end
     end

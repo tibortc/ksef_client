@@ -37,7 +37,7 @@ module Ksef
         end
 
         # The summary the document states, read verbatim. Reached only for the types in
-        # {Parser::STATED_TOTALS_TYPES}; everything else has its summaries recomputed from its
+        # {Invoice::STATED_TOTALS_TYPES}; everything else has its summaries recomputed from its
         # lines, which is what lets {RoundingInference} recover *how* they were computed.
         #
         # @return [Totals]

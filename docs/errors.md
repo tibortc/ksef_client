@@ -134,6 +134,8 @@ is the earliest signal that something upstream is about to change.
 | Code | Meaning |
 |---|---|
 | 21405 | Input validation failure (e.g. unsupported form code) |
+| 21470 | Symmetric-key certificate unknown or withdrawn. **The one code this library remediates by itself**: `Crypto::PublicKeys#with_key_rotation` re-fetches the published keys and retries once with the new one (`docs/REFERENCE.md` §10.2) |
+| 21111 | Invalid authorisation challenge (`docs/REFERENCE.md` §4.5) |
 | 21157 | Invalid package part size |
 
 This catalogue grows as codes are encountered against the live API; the full published
