@@ -23,6 +23,23 @@ gem version for which API state".
 > still **WebMock stubs** only: token refresh and invoice download. Batch has no code at all
 > yet, so it is absent rather than stubbed.
 
+### Added
+
+- **Every markdown file in `CIRFMF/ksef-api` is now pinned** — thirteen more, taking the
+  mirror under `docs/upstream/` from 19 of 32 to 32 of 32, all verified byte-for-byte against
+  their upstream blob SHAs at the same commit `1c34fe27`. They had been left out deliberately,
+  on the rule that only documents a milestone derives facts from belong in the manifest; the
+  rule was right and its application was wrong, because two of them define `offlineMode` and
+  `hashOfCorrectedInvoice` — parameters `Sessions::Online#send_invoice` has accepted since
+  Phase 2. New ledger section `docs/REFERENCE.md` §16.
+
+  The fact that reaches callers: **declaring `offlineMode: false` does not mean KSeF treats
+  the invoice as online.** It compares `P_1`'s calendar day against the moment it accepts the
+  document, and marks the invoice offline if `P_1` is earlier — an invoice dated yesterday and
+  sent one second after midnight is offline (§16.1). Nothing is enforced for this, because it
+  is the service's classification and `P_1` is the caller's choice; `#send_invoice` now
+  documents it, along with what a *technical correction* actually is (§16.2).
+
 ### Fixed
 
 - **A unit price was silently rounded from eight decimal places to two.** `P_9A` — and `P_9AZ`

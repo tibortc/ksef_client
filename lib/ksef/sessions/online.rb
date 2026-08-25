@@ -87,11 +87,30 @@ module Ksef
       # call, so the plaintext hash cannot be computed over different bytes than the
       # ciphertext hash.
       #
+      # ## The two offline parameters (docs/REFERENCE.md §16)
+      #
+      # `offline_mode` declares the taxpayer's offline invoicing mode — one boolean covering
+      # all three legal regimes, `offline24`, `offline` and `awaryjny`. Declaring `false` does
+      # **not** guarantee the invoice is treated as online: KSeF compares `P_1` against the
+      # moment it accepts the document and marks it offline if `P_1`'s calendar day is
+      # earlier, whatever was declared (§16.1). An invoice dated yesterday and sent today is
+      # therefore offline by the service's reckoning, one second past midnight included.
+      #
+      # `corrected_invoice_hash` is the base64 SHA-256 of the **original, rejected** offline
+      # invoice, and it makes this submission a *technical correction* (§16.2): a resend of an
+      # invoice KSeF refused for a technical reason — schema mismatch, size, duplicate — with
+      # different bytes and therefore a different hash. It is **not** a way to correct
+      # content; that is a `KOR`, which is an ordinary invoice of a different type. Upstream
+      # sends `offlineMode: true` alongside it, and only in an interactive session, though the
+      # invoice being corrected may have been rejected in a batch one. This method does not
+      # enforce that pairing: the contract makes both fields independently optional, and
+      # imposing a rule it states only in prose would be inventing one.
+      #
       # @param session [Session] from {#open}
       # @param invoice [String, #to_xml] the FA(3) document
       # @param offline_mode [Boolean] declares the taxpayer's "offline" invoicing mode
-      # @param corrected_invoice_hash [String, nil] base64 SHA-256 of the invoice being
-      #   corrected; required for a *technical* correction
+      # @param corrected_invoice_hash [String, nil] base64 SHA-256 of the rejected offline
+      #   invoice this one technically corrects
       # @return [Submission]
       def send_invoice(session, invoice, offline_mode: false, corrected_invoice_hash: nil)
         # Serialised once. What gets hashed has to be exactly what gets encrypted, so the

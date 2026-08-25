@@ -99,12 +99,46 @@ Two entries share a digest — `auth/context-identifier-nip.md` and
 `auth/subject-identifier-type-certificate-subject.md` are byte-identical upstream, both
 illustrating the same NIP-plus-`certificateSubject` request. That is not a download error.
 
-**Deliberately not pinned yet:** `uprawnienia.md` (68 KB, permissions API → 0.2),
-`api-changelog.md` (76 KB), `certyfikaty-KSeF.md` (KSeF certificate lifecycle → 0.3),
-`kody-qr.md` and `qr/` (→ 0.3), `offline/`, `pobieranie-faktur/`, `sesja-wsadowa.md`
-(batch → 0.2), and the PEF / RR / FA(2) schemas. Prose churns on editorial fixes, and a
-`verify:artifacts` failure should mean *a fact changed*, not that someone corrected a
-typo — so only documents this milestone actually derives facts from are in the manifest.
+**Completed 2026-08-26: every markdown file in the repository is now pinned**, 32 of 32.
+
+The earlier position was that `uprawnienia.md`, `api-changelog.md`, `certyfikaty-KSeF.md`,
+`kody-qr.md`, `offline/`, `pobieranie-faktur/`, `sesja-wsadowa.md` and
+`przeglad-kluczowych-zmian-ksef-api-2-0.md` were **deliberately** out, on the reasoning that
+prose churns on editorial fixes and a `verify:artifacts` failure should mean *a fact changed*
+rather than that someone corrected a typo — so only documents a milestone actually derives
+facts from belong in the manifest.
+
+**The rule was right and its application was wrong**, for at least two files. `offlineMode`
+and `hashOfCorrectedInvoice` are parameters of `Sessions::Online#send_invoice`, which shipped
+in Phase 2; `tryby-offline.md` and `offline/korekta-techniczna.md` are the documents that
+define them, and by the paragraph's own test they were always documents this milestone
+derives facts from. Nobody noticed because the *OpenAPI* described both fields, and a
+one-line field description reads like the whole story until you find the page that is not.
+See §16, which is what reading them produced — including a rule that changes how KSeF
+classifies an ordinary invoice this gem sends today.
+
+| Local path (under `docs/upstream/`) | Feeds |
+|---|---|
+| `tryby-offline.md` | §16, §16.1 — the three offline regimes, and `offlineMode` |
+| `offline/automatyczne-okreslanie-trybu-offline.md` | §16.1 — KSeF reclassifying an online invoice as offline |
+| `offline/korekta-techniczna.md` | §16.2 — technical correction, and `hashOfCorrectedInvoice` |
+| `sesja-wsadowa.md` | §16.3, §14.1 — batch packaging; a second witness to the IV error |
+| `pobieranie-faktur/*.md` | §16.4 — invoice download, export packages, High Water Mark |
+| `api-changelog.md` | §16.5 — API version history |
+| `przeglad-kluczowych-zmian-ksef-api-2-0.md` | §16.5 — the 1.0 → 2.0 overview |
+| `certyfikaty-KSeF.md`, `kody-qr.md`, `uprawnienia.md` | pinned, **not yet read** — 0.2/0.3 scope |
+| `README.md` | the repository's own index of the above |
+
+Three of those are pinned without being digested, and the table says so rather than implying
+a reading that did not happen. The eight PNGs stay unpinned: two are session state diagrams
+and would be worth reading, but a binary cannot be diffed into a fact.
+
+Still unpinned, and genuinely out of scope: the **PEF** (`PEF(3)`, `PEF_KOR(3)` and fourteen
+more UBL `bazowe` schemas — three of the seventeen are already pinned to `spec/fixtures/xades/`
+for signature validation), **`FA_RR(1)`**, and **`FA(2)`**. Worth knowing what those are:
+`FA_RR` is the flat-rate farmer invoice and `PEF` is the Peppol/UBL structure, both accepted
+by KSeF and neither an eighth `RodzajFaktury`. So "all seven invoice types are modelled" is
+true, and "this gem covers every invoice KSeF accepts" would not be.
 
 ### 1.4 The FA(3) sample corpus comes from two *other* repositories
 
@@ -2276,6 +2310,14 @@ per DESIGN.md §2: the pinned artifacts win.
 szyfrogramu" — appended as a prefix to the ciphertext. **This is wrong for the online
 session invoice path**, and following the prose produces a payload KSeF cannot decrypt.
 
+**`sesja-wsadowa.md` says it too, word for word** (pinned 2026-08-26, §16.3). So this is not
+one document's slip but a sentence copied across the session documentation, which makes the
+resolution below more valuable rather than less: it now covers both session types. Batch and
+online share a single `EncryptionInfo` schema whose `initializationVector` is a **required
+discrete field**, so the contract argument applies to batch unchanged — but the byte-count
+measurement in witness four is an interactive example, and batch has no measured equivalent
+until it is built.
+
 Four sources agree against it:
 
 1. **The pinned OpenAPI spec** — `EncryptionInfo` carries `initializationVector` as a
@@ -2742,3 +2784,171 @@ one.
 lesson is the same one §1.3 already carries, pointed the other way: listing the upstream
 tree found 73 unread files, and reading them resolved most of §9 — but it also means a
 remaining gap is now much more likely to be genuinely absent than merely unread.
+
+---
+
+## 16. Offline modes, technical corrections, batch and download
+
+Recorded 2026-08-26, from the thirteen documents pinned that day (§1.3). Two of them define
+parameters this gem already accepts; the rest cover work that is unbuilt, and are recorded
+here so the next milestone starts from evidence rather than from the OpenAPI's one-line
+field descriptions.
+
+### 16.1 KSeF can classify an invoice as offline **that the sender declared online**
+
+The rule, from `offline/automatyczne-okreslanie-trybu-offline.md` (dated 04.10.2025):
+
+> Dla faktur wysyłanych jako `offlineMode: false` system porównuje **datę wystawienia**
+> faktury (`issueDate`, np. `P_1` dla faktury zgodnej z FA(3)) [i] **datę przyjęcia**
+> faktury w systemie KSeF do dalszego przetwarzania (`invoicingDate`).
+>
+> - Jeśli dzień kalendarzowy z `issueDate` jest wcześniejszy niż dzień kalendarzowy z
+>   `invoicingDate` (porównanie po dacie, nie po godzinie), system automatycznie oznacza
+>   fakturę jako **offline**, nawet jeśli nie była tak zadeklarowana.
+
+`invoicingDate` differs by session type, and this is the part with a consequence:
+
+| Session | `invoicingDate` is |
+|---|---|
+| interactive | the moment the **invoice** was submitted |
+| batch | the moment the **session was opened** (the `dateCreated` of `GET /sessions/{ref}`) |
+
+**This reaches ordinary use of this gem.** `Ksef::Client#send_invoice` opens a session and
+submits immediately, so `invoicingDate` is now. An invoice whose `P_1` is *yesterday* — an
+entirely normal thing, and something the gem neither prevents nor warns about — is marked
+offline by KSeF regardless of what was declared. The comparison is by **calendar day, not by
+elapsed time**: upstream's own example is an invoice issued 2025-10-03 and sent at 00:00:01
+on 2025-10-04, which is offline after one second.
+
+Note the asymmetry this creates with batch, where the clock stops at session open: a batch
+opened at 23:59:59 keeps its invoices online no matter when the parts arrive.
+
+Nothing is implemented for this and nothing should be — it is the service's classification,
+not a client-side rule, and `P_1` is the caller's to choose. It is documented because a
+caller who reads "offlineMode: false" as "this invoice is online" is wrong, and neither the
+OpenAPI's field description nor anything else in this gem would tell them.
+
+### 16.2 A technical correction is two parameters, and only in an interactive session
+
+From `offline/korekta-techniczna.md`. It applies to an invoice **issued offline and then
+rejected by KSeF for a technical reason** — schema mismatch, oversized file, duplicate, or
+any other validation failure that prevented a KSeF number being assigned. The corrected file
+has different bytes and therefore a different SHA-256, and `hashOfCorrectedInvoice` carries
+the hash of the **original rejected** one, so KSeF can link the two and redirect the first
+invoice's QR code to the accepted document.
+
+Four constraints, none of them in the OpenAPI:
+
+1. It is **not** for content: *"nie jest dozwolona korygowanie treści faktury"*. Technical
+   problems only.
+2. It is **not** for permission failures — self-billing, JST or VAT-group relationship
+   validation.
+3. It may be sent **only in an interactive session**, though it may concern an invoice
+   rejected in either an interactive or a batch one.
+4. It is not allowed for an offline invoice that has already had a proper correction accepted.
+
+And the shape: the document sends `offlineMode: true` **together with**
+`hashOfCorrectedInvoice`, in both the C# and Java examples it links.
+
+**This gem does not enforce the pairing, deliberately.** `Sessions::Online#send_invoice`
+takes `offline_mode:` and `corrected_invoice_hash:` independently, because the contract makes
+both optional and says only *"Wymagany przy wysyłaniu korekty technicznej faktury"* — it does
+not state that one requires the other. Enforcing a constraint upstream describes in a
+procedure but does not impose in its schema would be inventing a rule, which is the same
+reasoning §8.4 uses for not requiring `PrzyczynaKorekty` on a `KOR`. The documentation on the
+method now says what a technical correction is, so a caller sending one knows to set both.
+
+One related ordering rule, from `tryby-offline.md`: *"Fakturę korygującą przesyła się dopiero
+po nadaniu numeru KSeF dokumentowi pierwotnemu"* — a correction goes only after the invoice
+it corrects has been assigned a KSeF number. That is a sequencing rule for the caller, not a
+tier-1 check: `KOR` carries `NrKSeFFaKorygowanej`, and whether that number exists yet is not
+something the document can be asked.
+
+### 16.3 Batch, for when it is built — and a second witness to the §14.1 error
+
+`sesja-wsadowa.md` (10.07.2025), plus `OpenBatchSessionRequest` and `BatchFilePartInfo` in
+the contract:
+
+- One ZIP holding every invoice, **split into parts no larger than 100 MB before
+  encryption**; each part is encrypted and uploaded separately, and described in `fileParts`.
+- `BatchFilePartInfo` is `ordinalNumber` + `fileSize` + `fileHash`, and both measurements are
+  of the **encrypted** part, not the plaintext.
+- `offlineMode` sits on the **session open** request, not per invoice — the opposite of the
+  interactive session, where it is per `SendInvoiceRequest`.
+- Upstream recommends hashing each plaintext XML before packing and keeping a local map,
+  because per-invoice status comes back keyed by `invoiceHash` and there is otherwise nothing
+  to correlate it to.
+- `TarGz` was added as an alternative to `Zip` in API 2.6.0 and is *recommended* for packages
+  of many similar XML documents; `Zip` remains the default for compatibility (§16.5).
+
+**And it repeats the IV claim §14.1 refutes**: *"wektora inicjującego o długości 128 bitów
+(IV), **dołączanego jako prefiks do szyfrogramu**"*. This is the same sentence as
+`sesja-interaktywna.md`'s, and it is wrong for the same structural reason — batch and online
+share one `EncryptionInfo` schema, whose `initializationVector` is a **required discrete
+field**. An IV that is a mandatory request field is not also a ciphertext prefix.
+
+Be precise about the strength of that, because §14.1's four witnesses are interactive ones:
+the *contract* argument covers batch exactly, since it is literally the same schema; the
+*measured* argument (6480 plaintext bytes against 6496 encrypted — one PKCS#7 block, no room
+for a 16-byte IV) was taken from an interactive example and has no batch equivalent yet.
+Treat batch as settled by the schema and confirm it on the first live run, the way the
+interactive path was confirmed on 2026-08-24.
+
+### 16.4 Invoice download, and the High Water Mark
+
+`pobieranie-faktur/`. Only the first of these is built (`Invoices::Client`).
+
+| Endpoint | What it does |
+|---|---|
+| `GET /invoices/ksef/{ksefNumber}` | one invoice by KSeF number — **built** |
+| `POST /invoices/query/metadata` | paged `InvoiceMetadata` search, by date range and subject role |
+| `POST /invoices/exports` | asynchronous export to encrypted packages; `encryption` is **required** |
+
+An export package carries a `_metadata.json` holding the same `InvoiceMetadata` array the
+metadata query returns, and invoices in the package are sorted ascending by whichever date
+type the `DateRange` named at initialisation.
+
+**High Water Mark** (`hwm.md`, 25.11.2025) is the completeness guarantee, and it is the part
+worth knowing before designing anything incremental. KSeF publishes a moment `HWM` up to
+which every invoice is durably stored:
+
+- for `PermanentStorage` ≤ `HWM`, the set is **closed and complete** — no new invoice will
+  ever appear with a date in it;
+- for `(HWM, now]`, results are **potentially incomplete**, because storage is asynchronous
+  and multi-threaded, so invoices can still appear in a window already queried.
+
+Which gives two sync strategies, and upstream states the trade-off rather than picking for
+you: query only up to `HWM` — definitive, minimal duplicates, freshest invoices invisible
+until `HWM` advances, and *recommended for automatic incremental sync*; or query to `now` —
+freshest data immediately, but the `(HWM, now]` window must be re-queried next time and the
+caller must deduplicate, by KSeF number.
+
+### 16.5 The API changelog exists, and it is version-by-version
+
+`api-changelog.md` covers 2.0 through **2.7.0** with per-environment deployment dates for
+TEST, DEMO and PRD. It is the document to consult when the service behaves unlike the pinned
+contract, since the contract is a snapshot and this is the history.
+
+Items in it that touch code already written, all of which this gem already handles — recorded
+so the next reader does not re-derive them:
+
+| Version | Change | Status here |
+|---|---|---|
+| 2.5.0 | `publicKeyId` selector for key rotation | implemented, §10.2 |
+| 2.6.0 | `X-System-Warning` advisory response header | implemented, `HTTP::SystemWarning` |
+| 2.6.0 | `TarGz` compression for batch and export | batch is unbuilt |
+| — | `X-Error-Format: problem-details` for 400/429 | implemented, `HTTP::Connection` |
+| — | `downloadUrlExpirationDate` on UPO pages | implemented, `UpoPage#expires_at` |
+| — | UPO v4-3 default from 2025-12-22; `X-KSeF-Feature: upo-v4-3` before that | implemented, §14.6 |
+| — | NIP checksum verification **on production only** | implemented, §15.3 |
+| — | `429` documented with `Retry-After` and `TooManyRequestsResponse` | implemented, §6 |
+
+That every one of these was already correct is the useful result: the 2026-08-22 pass caught
+the API-behaviour documents, and what it missed was the *procedural* ones — offline modes and
+technical corrections — which describe not how an endpoint responds but when a taxpayer is
+supposed to call it. Those have no OpenAPI counterpart to catch them.
+
+One oddity, flagged rather than resolved: the 2.7.0 row is dated `21.07.2027` for TEST, a
+year after the commit that introduces it (authored 2026-07-21). Every other row is
+chronologically consistent. Most likely an upstream typo for 2026; do not build anything on
+that date.
