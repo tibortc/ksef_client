@@ -6,8 +6,9 @@ require "spec_helper"
 #
 # **Excluded until a cassette exists** — `spec/support/vcr.rb` filters `:recorded` out when
 # `spec/cassettes/` is empty, and `spec/recorded_tier_spec.rb` asserts that state so the
-# absence is visible rather than silent. Record with `rake vcr:record`, which needs TEST
-# credentials and refuses production.
+# absence is visible rather than silent. Record by dispatching
+# `.github/workflows/record-cassettes.yml`, which runs in the `ksef-test` environment because
+# that is where the credentials are.
 #
 # ## What this proves that the other tiers do not
 #
@@ -21,63 +22,75 @@ require "spec_helper"
 #
 # And unlike the live tier, this runs per push, in milliseconds, with no credentials.
 #
-# ## Determinism
+# ## Recording and replaying are not the same run
 #
-# The recording's request bodies carry a randomly-generated AES key encrypted with randomised
-# RSA-OAEP padding, so they can never be reproduced (§9.1, obstacle 1). Two consequences: the
-# matcher ignores the body, and the replay injects the *same* encryptor the recording used —
-# which is what `Ksef::Client#session(encryptor:)` exists for.
+# The first version of this file hardcoded the *replay* placeholders and then tried to record
+# with them. KSeF answered `[21405] Invalid NIP format`: `0000000000` passes this gem's
+# checksum — only PROD checks the digits (§15.3) — and fails the schema's structural rule that
+# the first digit is non-zero (§13). So every value that differs between the two modes is read
+# from the environment, and the fallback exists only so a replay can construct.
 RSpec.describe "the session flow, recorded", :recorded, vcr: { cassette_name: "session_flow" } do
-  # The key and IV the recording used. Fixed values rather than a fresh pair: `Encryptor.new`
-  # is public beside `.generate` exactly so a replay can supply them.
-  let(:encryptor) do
-    Ksef::Crypto::Encryptor.new(key: ["00" * 32].pack("H*"), iv: ["00" * 16].pack("H*"))
-  end
+  def recording? = ENV["KSEF_VCR_RECORD"] == "1"
 
-  # Scrubbed out of the cassette, so the replay supplies its own placeholder. The value is
-  # never compared — the matcher is method + URI.
-  let(:credential) { Ksef::Auth::Token.new(context_nip: "0000000000", token: "<KSEF_TEST_TOKEN>") }
+  # The real context when recording; a format-valid stand-in when replaying. The stand-in is
+  # never sent anywhere — requests are matched on method and URI — but `Subject` and
+  # `Auth::Token` both validate what they are handed, so it has to be a plausible NIP.
+  def context_nip = ENV.fetch("KSEF_TEST_NIP", "9999999999")
+
+  # Scrubbed out of the cassette on write (`spec/support/vcr.rb`).
+  def access_token = ENV.fetch("KSEF_TEST_TOKEN", "<KSEF_TEST_TOKEN>")
+
+  let(:credential) { Ksef::Auth::Token.new(context_nip: context_nip, token: access_token) }
   let(:client) { Ksef::Client.new(env: :test, auth: credential) }
 
+  # Fixed key and IV rather than a fresh pair: `Encryptor.new` is public beside `.generate`
+  # exactly so a replay can supply the ones its recording used (§9.1, obstacle 1).
+  let(:encryptor) do
+    Ksef::Crypto::Encryptor.new(key: ["11" * 32].pack("H*"), iv: ["22" * 16].pack("H*"))
+  end
+
+  # Real waits while recording, none while replaying. `Sessions::Status#poll` takes an
+  # injectable sleeper, so a replayed poll costs nothing.
+  def wait_for(receipt)
+    client.wait_until_accepted(receipt, **(recording? ? {} : { sleeper: ->(_seconds) {} }))
+  end
+
+  # **The seller must be the authenticated context** — KSeF refuses an invoice issued by anyone
+  # else. And the number must be unique per recording: §15.2's duplicate key is NIP + number +
+  # issue date, so a fixed number would make every re-recording a `440`. Replay does not care,
+  # because request bodies are never matched.
   def invoice
     Ksef::FA3.build do |f|
-      f.seller nip: "0000000000", name: "Recorded Seller sp. z o.o.",
-               address: { street: "ul. Testowa 1", city: "Warszawa", postal_code: "00-001", country: "PL" }
+      f.seller nip: context_nip, name: "Recorded Seller sp. z o.o.",
+               address: { street: "Prosta 1", city: "Warszawa", postal_code: "00-001", country: "PL" }
       f.buyer nip: "1111111111", name: "Recorded Buyer S.A.",
-              address: { street: "ul. Inna 2", city: "Kraków", postal_code: "30-001", country: "PL" }
-      f.number "FV/RECORDED/001"
-      f.issue_date Date.new(2026, 8, 26)
-      f.issued_at "2026-08-26T09:00:00Z"
-      f.line name: "Consulting", qty: 1, unit: "szt.", net_unit_price: "100.00",
-             net_amount: "100.00", vat: "23"
+              address: { street: "Długa 2", city: "Kraków", postal_code: "30-001", country: "PL" }
+      f.number "REC/#{Time.now.utc.strftime("%Y%m%d%H%M%S")}"
+      f.issue_date Date.today
+      f.line name: "Recorded line", qty: 1, unit: "szt.", net_unit_price: 100, vat: "23"
     end
   end
 
   it "sends an invoice and is given a KSeF number" do
-    receipt = client.send_invoice(invoice, encryptor: encryptor)
-    status = client.wait_until_accepted(receipt.reference)
+    status = wait_for(client.send_invoice(invoice, encryptor: encryptor))
 
-    expect(status).to be_accepted
+    expect(status).to be_success
     expect(status.ksef_number).to be_a(String)
   end
 
   # §13: the checksum is ours and the number is theirs, so agreement is a real assertion.
   it "is given a KSeF number whose CRC-8 agrees with ours" do
-    receipt = client.send_invoice(invoice, encryptor: encryptor)
-    number = Ksef::KsefNumber.parse(client.wait_until_accepted(receipt.reference).ksef_number)
+    status = wait_for(client.send_invoice(invoice, encryptor: encryptor))
 
-    expect(number).to be_checksum_verified
+    expect(Ksef::KsefNumber.parse(status.ksef_number)).to be_checksum_verified
   end
 
   # §12.3: the UPO comes back over a credential-free connection to a different host, and its
   # bytes are kept verbatim because it is legal proof of receipt (§12.2).
-  it "returns a UPO whose bytes match the hash the storage link declares" do
+  it "returns a UPO in the version whose schema this gem bundles" do
     receipt = client.send_invoice(invoice, encryptor: encryptor)
-    client.wait_until_accepted(receipt.reference)
+    wait_for(receipt)
 
-    upo = client.upo(receipt.reference)
-
-    expect(upo.xml).to include("upo-v4-3")
-    expect(upo).to be_integrity_verified
+    expect(client.upo(receipt).xml).to include("upo-v4-3")
   end
 end

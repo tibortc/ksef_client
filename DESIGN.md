@@ -588,6 +588,21 @@ passed" is not "someone looked".
 6. Update §9's table, `SECURITY.md` ("**No cassette exists yet**"), `CONTRIBUTING.md` and
    `CLAUDE.md`, all of which currently say the tier is planned.
 
+#### Recording and replaying are not the same run
+
+The first recording attempt failed with `[21405] Invalid NIP format`, because the spec
+hardcoded the values a *replay* needs. Three things differ between the modes, and each has to
+come from the environment with a fallback that exists only so a replay can construct:
+
+- **The context NIP and token.** `0000000000` passes this gem's checksum — only PROD checks the
+  digits (§15.3) — and fails the schema's structural rule that the first digit is non-zero
+  (§13). The seller on the invoice must be that same context: KSeF refuses an invoice issued by
+  anyone else.
+- **The invoice number.** §15.2's duplicate key is NIP + number + issue date, so a fixed number
+  makes every *re*-recording a `440`. Replay does not care, because bodies are never matched.
+- **The poll interval.** `Sessions::Status#poll` takes an injectable sleeper; a replay passes a
+  no-op, or it waits out a recorded backoff for nothing.
+
 #### What not to do
 
 - **Do not hand-write a cassette.** A recorded response this gem has never actually received is
