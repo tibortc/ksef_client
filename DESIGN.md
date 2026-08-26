@@ -470,7 +470,7 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors — NIST/FIPS, not C#, see §6.4 | every push |
 | Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning. Three specs exist — auth, crypto, session — and **all three have run green against TEST** (auth 2026-08-23, the other two 2026-08-24) | **nightly** CI + pre-release, never per-PR |
 
-**Coverage gate (ratcheted 2026-08-22, then 95 → 96 → 97 on 2026-08-24):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 99, branch 97, method 100**. The `minimum_coverage` call in `spec/spec_helper.rb` is the gate that fails the build and is therefore the authority; every restatement, here included, is a copy that has gone stale before.
+**Coverage gate (ratcheted 2026-08-22, then 95 → 96 → 97 on 2026-08-24, then 97 → 98 at the Phase 2 boundary on 2026-08-26):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 99, branch 98, method 100**. The `minimum_coverage` call in `spec/spec_helper.rb` is the gate that fails the build and is therefore the authority; every restatement, here included, is a copy that has gone stale before.
 
 **There is a second gate, and it is stricter than the floors.** Coveralls posts a `coverage/coveralls` commit status that blocks the PR on any *decline* against the base branch, measured as a combined line+branch figure. It is not a floor and does not ratchet: one new uncovered branch is enough. The workflow's `fail-on-error` was `false` on the reasoning that Coveralls is reporting rather than enforcement — but that flag governs only the action erroring, never the status, so the policy was stated and not applied; it is `true` as of 2026-08-26. In practice this is the gate that catches a conditional added without a test per path, which the percentage floors are too slack to see.
 
@@ -529,7 +529,9 @@ Gate status, precisely:
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
 | All seven types build, validate, round-trip | **met**, 2026-08-26 — all seven, round-trip and **validator tier 1** included. Twenty-two of the twenty-six Ministry samples go through end to end; the other four are refused for a *construct* (gross pricing, non-NIP buyer), not a type. Tier 3 landed the same day, advisory (§7.7) |
 
-**Phase 2's scope is complete as of 2026-08-26.** Validator tier 3 landed that day (§7.7, advisory), and `docs/field_mapping.md` with it (§7.2, generated). The three "Done when" gates were already met.
+**Phase 2's three gates are met and its build scope is done, as of 2026-08-26.** Validator tier 3 landed that day (§7.7, advisory) and `docs/field_mapping.md` with it (§7.2, generated).
+
+**Two scope-list items remain, and neither is a gate.** The scope above asks for the session flow "recorded + live", and the recorded half has no cassette — §10's own table says "planned, not yet built". And `download` and `refresh` are implemented but have **never run live**, so of the transport surface only auth, crypto and the online session have been exercised against TEST. Close both before 0.1.0; an audit on 2026-08-26 caught this being described as "complete".
 
 The sentence here read "validator tier 3, and only that" until 2026-08-26, and that was an inconsistency introduced in the same commit that created the other half of it: §7.2's deferral of the field mapping carried an explicit trigger — *"it lands once the models cover all seven types"* — and Phase 1's note above records it as "required before 0.1.0 and tracked in Phase 2". The seventh type landed that day, so the trigger fired and the deferral ended.
 

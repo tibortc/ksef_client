@@ -51,7 +51,7 @@ namespace :fa3 do
   task :field_mapping do
     require "ksef"
     require_relative "tasks/field_mapping"
-    Fa3FieldMapping.generate! && puts("Wrote #{Fa3FieldMapping::OUT}.")
+    Fa3FieldMapping.generate!
   end
 
   desc "Fail if the committed generated/ or field_mapping.md differs from a fresh run (DESIGN.md §11)"
@@ -60,13 +60,11 @@ namespace :fa3 do
     require_relative "tasks/fa3_generator"
     require_relative "tasks/field_mapping"
 
-    before = Dir["#{Fa3Codegen::OUT_DIR}/*.rb"].to_h { |f| [f, File.read(f, encoding: "UTF-8")] }
-    Fa3Codegen::Generator.new.generate!
-    drifted = before.reject { |path, body| File.read(path, encoding: "UTF-8") == body }.keys
-    abort "Stale or non-reproducible: #{drifted.join(", ")}. Commit the regenerated files." if drifted.any?
-    abort "#{Fa3FieldMapping::OUT} is stale. Run `rake fa3:field_mapping`." if Fa3FieldMapping.stale?
+    drifted, generated = Fa3Codegen.drifted_files
+    drifted << Fa3FieldMapping::OUT if Fa3FieldMapping.stale?
+    abort "Stale or not reproducible: #{drifted.join(", ")}. Regenerate and commit." if drifted.any?
 
-    puts "Codegen is reproducible: #{before.size + 1} file(s) byte-identical."
+    puts "Codegen is reproducible: #{generated + 1} file(s) byte-identical."
   end
 end
 

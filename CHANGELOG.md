@@ -27,7 +27,7 @@ gem version for which API state".
 
 - **`docs/field_mapping.md`** — the English↔Polish field table, listing every attribute this
   model carries against the FA(3) element it reads and writes, with the element's XSD type,
-  cardinality and the Ministry's own description. **Generated** by `rake fa3:field_mapping`
+  **effective** cardinality and the Ministry's own description in full. **Generated** by `rake fa3:field_mapping`
   from a declared mapping plus the pinned schema, and `rake fa3:verify` fails if the committed
   file is stale — the same gate `lib/ksef/fa3/generated/` gets.
 

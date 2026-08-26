@@ -3122,3 +3122,44 @@ In order of strength:
 
 **Do not synthesise rules from Polish VAT law and record them as verified facts** (§15.6). Every
 rule added to `RULES` needs a ledger entry saying what grounds it.
+
+---
+
+## 18. Two schema shapes the field mapping measured
+
+Recorded 2026-08-26, while generating `docs/field_mapping.md` (DESIGN.md §7.2). Both are
+properties of the pinned FA(3) XSD that the generator relies on, so they belong here rather
+than only in its comments.
+
+**FA(3) declares no unbounded element.** `maxOccurs="unbounded"` appears **zero** times; every
+repeat is capped — `FaWiersz` at 10 000, `DaneFaKorygowanej` at 50 000, `FakturaZaliczkowa` at
+100, `Podmiot2K` at 101. `Generated::Types` writes `max: nil` for an unbounded element and
+never has occasion to. The generator raises rather than rendering half a bound if that ever
+changes, because a dangling `0–` reads as a formatting slip rather than as a fact nobody has
+checked.
+
+**Eleven element names carry different `xsd:documentation` in different places**, out of 273
+that carry any: `DaneIdentyfikacyjne` (5 variants), `Adres` (4), `NrEORI` (4), `AdresKoresp`
+(4), `DaneKontaktowe` (4), `Email` (3), `Telefon` (3), `KodKraju` (2), `NrKlienta` (2), `Kwota`
+(2), `Powod` (2). A description looked up by bare name is therefore ambiguous for those, and
+the first version of the field mapping dropped them — leaving `Adres` and `KodKraju` blank,
+which is where the Ministry states *when a buyer's address may be omitted*. Resolving the
+element by **path** removes the ambiguity entirely, and is what the generator does now.
+
+### 18.1 `Generated::Types` is flattened, and cardinality must not be read from it
+
+The generated metadata hoists the children of an `xsd:choice` and of a
+`<xsd:sequence minOccurs="0">` up to their parent, because the serializer needs element
+*order* and nothing else. Occurrence counts survive that hoisting unchanged, so an element
+inside an optional group reports `min: 1` and a choice branch reports `min: 1` — both
+"mandatory", both wrong.
+
+Measured consequences, each of which the first field mapping printed as fact: the buyer's
+`NIP` is one branch of a four-way choice; the buyer's `Nazwa` sits in an optional sequence;
+`P_15ZK` sits in two nested optional sequences; `NrFaZaliczkowej` and `NrKSeFFaZaliczkowej`
+are the two branches of one choice and were both rendered "occurs exactly 1", which is not a
+document any issuer can produce.
+
+**The buyer's name being optional is §8.2a's three-time bug**, and printing it as mandatory in
+a table aimed at auditors is the same error in a new medium. Anything that needs *effective*
+cardinality must walk the XSD; `Generated::Types` answers a different question.

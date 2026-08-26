@@ -30,20 +30,124 @@ module Fa3FieldMapping
   OUT = "docs/field_mapping.md"
   ROOT = "Faktura"
 
-  # Model attributes that deliberately reach no element, with the reason shown in the table.
+  # Model attributes that no single element path describes. **`element:` is not always nil** —
+  # the first version labelled every one of these "Not an element", which was false for three
+  # of the five: `buyer_id`, `stated_gross` and `buckets` all reach elements, just not through
+  # one row of a one-path-per-attribute table.
   UNMAPPED = {
-    "Invoice#rounding" => "Not in the document at all. Which rounding strategy produced the " \
-                          "summaries is inferred on parse (`RoundingInference`), never stated.",
-    "Invoice#raw_document" => "Provenance, not content — the retained source document, " \
-                              "excluded from identity (§8.2b).",
-    "Invoice#stated_gross" => "Carries `Fa/P_15` when it differs from the derived total; it " \
-                              "is the same element as `#gross_total` writes, not a second " \
-                              "one (§17.2).",
-    "Totals#buckets" => "A Hash keyed by element name — `P_13_1`, `P_14_1`, … — so each key " \
-                        "*is* its element. See the summary-bucket table below.",
-    "Subject#buyer_id" => "`Podmiot2/IDNabywcy` and `Podmiot2K/IDNabywcy` only; a seller has " \
-                          "no such element."
+    "Invoice#rounding" => {
+      element: nil,
+      why: "**Not in the document at all.** Which rounding strategy produced the summaries is " \
+           "inferred when parsing (`RoundingInference`); FA(3) never states it."
+    },
+    "Invoice#raw_document" => {
+      element: nil,
+      why: "**Not an element.** Provenance rather than content — the retained source document, " \
+           "excluded from this invoice's identity."
+    },
+    "Invoice#stated_gross" => {
+      element: "`P_15`",
+      why: "The same `P_15` that `#gross_total` writes, carried only when the document's " \
+           "figure differs from what the rows derive. Not a second element."
+    },
+    "Totals#buckets" => {
+      element: "`P_13_*`, `P_14_*`",
+      why: "A Hash **keyed by element name**, so each key is its own element. See " \
+           "*Summary buckets* below."
+    },
+    "Seller#buyer_id" => {
+      element: nil,
+      why: "**Buyer-only.** `TPodmiot1` declares no `IDNabywcy`; see the buyer section."
+    },
+    "Seller#local_government_unit" => {
+      element: nil,
+      why: "**Buyer-only.** `TPodmiot1` declares no `JST`; see the buyer section."
+    },
+    "Seller#vat_group_member" => {
+      element: nil,
+      why: "**Buyer-only.** `TPodmiot1` declares no `GV`; see the buyer section."
+    }
   }.freeze
+
+  # Readers that compute rather than store. They are not `Data` members, so the model tables
+  # cannot see them — and `gross_total` is one of the six mappings DESIGN.md §7.2 names by
+  # hand, so leaving them out left that promise unmet.
+  DERIVED = [
+    ["Invoice#gross_total", "`P_15`", "The total amount due. Read from a stated summary when " \
+                                      "there is one, otherwise net + VAT from the rows."],
+    ["Invoice#net_total", "`P_13_*` (sum)", "Total net. Stated summary if present, else the sum of the rows."],
+    ["Invoice#vat_total", "`P_14_*` (sum)", "Total VAT, by the invoice's `rounding` strategy."],
+    ["Invoice#summary_buckets", "`P_13_*`, `P_14_*`",
+     "**The way to reach one bucket**: `invoice.summary_buckets[\"P_13_4\"]`. All seven types."],
+    ["Invoice#net_by_rate", "—", "Net per `P_12` rate code, before bucketing. Several codes share a bucket."],
+    ["Invoice#vat_by_rate", "—", "VAT per rate code."],
+    ["Invoice#unmapped_elements", "—", "For a parsed invoice, the element paths `#to_xml` would drop."],
+    ["Invoice#errors", "—", "Validator tiers 1a, 1b and 2. Empty means the document is well-formed and schema-valid."],
+    ["Invoice#warnings", "—", "Tier 3, advisory: figures the document states that do not reconcile."],
+    ["Line#net", "`P_11`", "The row's net — **read from `P_11` when stated**, else quantity × unit price. " \
+                           "nil when the row states no amount, which is legal."],
+    ["Line#vat", "—", "Tax on the row, from its rate code. nil when the row states no amount."],
+    ["Line#gross", "—", "net + VAT, or nil."],
+    ["Totals#net", "`P_13_*` (sum)", "Sum of the stated net buckets."],
+    ["Totals#vat", "`P_14_*` (sum)", "Sum of the stated tax buckets."]
+  ].freeze
+
+  DERIVED_INTRO = "These are methods, not stored fields, and for several elements they are what " \
+                  "you actually read. **`P_15` is here, not in the Invoice table** — on a `VAT` " \
+                  "invoice nothing stores it."
+
+  ANNOTATIONS_INTRO = "`Invoice#annotations` is a Hash keyed by element name, and these eight " \
+                      "are the declarations it carries. Each has tax consequences, and the " \
+                      "parser **reads them rather than defaulting them** — emitting the defaults " \
+                      "regardless would silently deny every declaration an invoice made."
+
+  BUCKETS_INTRO = "`Totals#buckets` is keyed by element name, and `Invoice#summary_buckets` " \
+                  "returns the same shape for every invoice type. Which bucket a row lands in " \
+                  "is decided by its `P_12` rate code, and **the map is not invertible** — " \
+                  "several codes share one bucket. Three buckets have no rate code at all, " \
+                  "which is a limit of this model rather than of FA(3): a document may state " \
+                  "them, and this model will read and re-write them only as part of a stated " \
+                  "summary."
+
+  ABSENT_INTRO = "Listed rather than omitted, because an absent row would otherwise read as " \
+                 "\"not supported\" when it may only mean \"not modelled\". A document carrying " \
+                 "any of these still parses; `Invoice#unmapped_elements` names exactly what " \
+                 "`#to_xml` would drop for a given document, and `#raw_document` keeps the " \
+                 "original."
+
+  INDEX_INTRO = "The reverse direction: an element from a Polish invoice, and the attribute " \
+                "that carries it. An element listed twice is carried by two different models — " \
+                "`P_9A` on an invoice row and `P_9AZ` on an order position are different elements."
+
+  PREAMBLE = <<~HEADER
+    <!-- GENERATED by `rake fa3:field_mapping` from FA(3) %<version>s — DO NOT EDIT. -->
+
+    # FA(3) field mapping
+
+    Every field this gem's model carries, and the FA(3) element it reads and writes.
+
+    **Generated**, not written: attribute names come from the model classes, and element names,
+    types, cardinalities and descriptions from the pinned XSD. Edit `tasks/field_mapping.rb`
+    rather than this file — a declared element that does not exist in the schema fails the
+    build rather than appearing here, and a model field nobody has mapped fails it too.
+
+    Descriptions are the Ministry's own `xsd:documentation`, **complete and unabridged**, in
+    Polish, with runs of whitespace collapsed. Several are long, and several say different
+    things for a correction than for an ordinary invoice — that is the point of quoting them
+    whole. **Field-name truth is the XSD**, not this table.
+
+    "Required?" is **effective** cardinality: an element inside an optional group is optional
+    however it declares itself, and a branch of a choice is never required on its own.
+
+    Section references such as (§8.4) are to `docs/REFERENCE.md`, which ships with this gem.
+  HEADER
+
+  FOOTER = <<~FOOTER
+    ---
+
+    *Schema: `%<schema>s`. Regenerate with `rake fa3:field_mapping`; `rake fa3:verify` fails if
+    this file is stale.*
+  FOOTER
 
   # **The declared mapping.** Paths are from the `Faktura` root; a nil path means the entry is
   # explained in {UNMAPPED}. Order within a model follows the model, not the schema — the
@@ -77,18 +181,34 @@ module Fa3FieldMapping
       ]
     },
     {
-      model: "Ksef::FA3::Subject",
-      title: "Subject — a party",
-      intro: "One party. Written as `Podmiot1` (seller), `Podmiot2` (buyer), or their `K` " \
-             "twins `Podmiot1K`/`Podmiot2K` on a correction, which state the parties as the " \
-             "corrected invoice had them. Paths below use `Podmiot2`.",
+      model: "Ksef::FA3::Subject", key: "Seller",
+      title: "Subject as the seller — `Podmiot1`",
+      intro: "**The seller and the buyer are different XSD types**, `TPodmiot1` and " \
+             "`TPodmiot2`, and they disagree about what is required — so they get a section " \
+             "each rather than one section with a footnote. A seller must state a name and an " \
+             "address; a buyer need not. `Podmiot1K` on a correction uses this type.",
+      fields: [
+        %w[nip Faktura/Podmiot1/DaneIdentyfikacyjne/NIP],
+        %w[name Faktura/Podmiot1/DaneIdentyfikacyjne/Nazwa],
+        %w[address Faktura/Podmiot1/Adres],
+        ["local_government_unit", nil],
+        ["vat_group_member", nil],
+        ["buyer_id", nil]
+      ]
+    },
+    {
+      model: "Ksef::FA3::Subject", key: "Buyer",
+      title: "Subject as the buyer — `Podmiot2`",
+      intro: "`Podmiot2`, and `Podmiot2K` on a correction. **The buyer's name and address are " \
+             "both optional** — a fact this project got wrong three times before (§8.2a) — and " \
+             "the identity is a four-way choice of which this model carries only the NIP branch.",
       fields: [
         %w[nip Faktura/Podmiot2/DaneIdentyfikacyjne/NIP],
         %w[name Faktura/Podmiot2/DaneIdentyfikacyjne/Nazwa],
         %w[address Faktura/Podmiot2/Adres],
         %w[local_government_unit Faktura/Podmiot2/JST],
         %w[vat_group_member Faktura/Podmiot2/GV],
-        ["buyer_id", nil]
+        %w[buyer_id Faktura/Podmiot2/IDNabywcy]
       ]
     },
     {
@@ -199,35 +319,37 @@ module Fa3FieldMapping
     }
   ].freeze
 
-  # Resolves an element path against the pinned schema, and reads its Polish description.
+  # Resolves an element path against the pinned schema.
+  #
+  # **It walks the XSD itself, not `Generated::Types`**, and that is the whole point. The
+  # generated metadata is *flattened*: it hoists the children of an `xsd:choice` or of a
+  # `<xsd:sequence minOccurs="0">` up to their parent, because the serializer only needs to
+  # know what order to write things in. A table for auditors needs the opposite — whether a
+  # field is **required** — and the flattened view answers that wrong. It reported the buyer's
+  # `NIP` and `Nazwa` as mandatory when the first is one branch of a choice and the second sits
+  # in an optional sequence, which is the error `docs/REFERENCE.md` §8.2a records as having bit
+  # this project three times.
+  #
+  # Walking the schema also makes the description **path-exact**. Looked up by bare name it had
+  # to be dropped whenever a name is declared more than once with different wording — eleven
+  # names are — so `Adres` and `KodKraju` came back blank. There is no ambiguity once you know
+  # which declaration you are standing on.
   class Schema
-    def initialize(path: SCHEMA)
-      @document = Nokogiri::XML(File.read(path, encoding: "UTF-8"))
-      @docs = index_documentation
-    end
-
-    # @return [Hash] the particle — `{name:, type:, min:, max:}`
-    # @raise [RuntimeError] if any segment does not exist, which is the drift guard
-    def particle(path)
-      segments = path.split("/")
-      key = segments.first
-      found = nil
-
-      segments[1..].each do |name|
-        found = Ksef::FA3::Generated::Types.ordered_elements(key).find { |p| p[:name] == name }
-        raise "#{path}: no element #{name.inspect} under #{key.inspect}" if found.nil?
-
-        key = Ksef::FA3::Serializer.child_type_key(key, found)
-      end
-      found || raise("#{path}: nothing to resolve")
-    end
-
-    # The Ministry's own description, when every occurrence of the name agrees. Element names
-    # repeat across the schema (`NIP` a dozen times), so where occurrences carry *different*
-    # documentation this answers nil rather than guessing which one applies.
     XSD_NS = { "xsd" => "http://www.w3.org/2001/XMLSchema" }.freeze
 
-    def documentation(name) = @docs[name]
+    def initialize(path: SCHEMA)
+      @document = Nokogiri::XML(File.read(path, encoding: "UTF-8"))
+    end
+
+    # @return [Hash] `{name:, type:, occurs:, documentation:}` for the element the path names
+    # @raise [RuntimeError] if any segment does not exist, which is the drift guard
+    def field(path)
+      node = node_for(path)
+      { name: node["name"], type: node["type"], occurs: occurs(node), documentation: annotation(node) }
+    end
+
+    # @return [Array<String>] the element names declared directly under this path
+    def children_of(path) = scope_of(node_for(path)).xpath("xsd:sequence/xsd:element", XSD_NS).map { |e| e["name"] }
 
     # @return [String] e.g. "1-0E", read the same way the codegen reads it
     def version
@@ -237,38 +359,81 @@ module Fa3FieldMapping
 
     private
 
-    def index_documentation
-      documented.group_by { |name, _| name }
-                .filter_map { |name, pairs| agreed(name, pairs.map(&:last)) }
-                .to_h
+    def node_for(path)
+      segments = path.split("/")
+      node = @document.at_xpath("//xsd:element[@name='#{segments.first}']", XSD_NS)
+      raise "#{path}: no root element #{segments.first.inspect}" if node.nil?
+
+      segments[1..].inject(node) { |parent, name| child(parent, name, path) }
     end
 
-    # @return [Array<Array(String, String)>] every named element that carries documentation
-    def documented
-      @document.xpath("//xsd:element[@name]", XSD_NS).filter_map do |element|
-        text = annotation(element)
-        [element["name"], text] unless text.nil?
+    def child(parent, name, path)
+      scope = scope_of(parent)
+      found = scope&.xpath(".//xsd:element[@name='#{name}']", XSD_NS)
+                   &.find { |element| owning_type(element) == scope }
+      found || raise("#{path}: no element #{name.inspect} under #{parent["name"].inspect}")
+    end
+
+    # The complexType an element's children live in: declared inline, or referenced by name.
+    def scope_of(element)
+      inline = element.at_xpath("xsd:complexType", XSD_NS)
+      return inline if inline
+
+      named = element["type"].to_s.sub(/\A\w+:/, "")
+      @document.at_xpath("//xsd:complexType[@name='#{named}']", XSD_NS)
+    end
+
+    # Walked by hand: `Nokogiri::XML::Node#ancestors` takes a CSS selector, and a namespace
+    # prefix in one does not resolve, so `ancestors("xsd:complexType")` silently answers [].
+    def owning_type(element)
+      node = element.parent
+      node = node.parent while node && node.name != "complexType"
+      node
+    end
+
+    # **Effective** cardinality: the element's own `minOccurs`/`maxOccurs` combined with every
+    # `xsd:sequence` or `xsd:choice` between it and its complexType. An element inside an
+    # optional sequence is optional however it declares itself, and a branch of a choice is
+    # never required on its own even when the choice is.
+    def occurs(element)
+      wrappers = wrappers_of(element)
+      choice = wrappers.any? { |wrapper| wrapper.name == "choice" }
+      { min: effective_min(element, wrappers, choice), max: effective_max(element, wrappers), choice: choice }
+    end
+
+    def effective_min(element, wrappers, choice)
+      return 0 if choice || wrappers.any? { |wrapper| wrapper["minOccurs"] == "0" }
+
+      bound(element, "minOccurs", 1)
+    end
+
+    def effective_max(element, wrappers)
+      wrappers.map { |wrapper| bound(wrapper, "maxOccurs", 1) }.push(bound(element, "maxOccurs", 1)).max
+    end
+
+    # Every `xsd:sequence` / `xsd:choice` between the element and its complexType.
+    def wrappers_of(element)
+      found = []
+      node = element.parent
+      while node && node.name != "complexType"
+        found << node
+        node = node.parent
       end
+      found
     end
 
-    # Only where every occurrence agrees; see {#documentation}.
-    def agreed(name, texts) = texts.uniq.size == 1 ? [name, summarise(texts.first)] : nil
+    # `"unbounded"` would answer 0 through `to_i`, and FA(3) contains none — but a schema
+    # revision that added one would otherwise render a silently wrong bound, so it raises.
+    def bound(node, attribute, default)
+      value = node[attribute]
+      raise "#{node.path}: unbounded #{attribute} — review how this table renders it" if value == "unbounded"
+
+      value.nil? ? default : value.to_i
+    end
 
     def annotation(element)
       text = element.at_xpath("xsd:annotation/xsd:documentation", XSD_NS)&.text
       text&.strip&.gsub(/\s+/, " ")
-    end
-
-    # Some annotations run to a full paragraph of statute — `FaWiersz`'s is nine hundred
-    # characters — which is unreadable in a table cell and would push the useful columns off
-    # the page. Truncated on a sentence boundary where there is one nearby, with the schema
-    # named as the authority for the rest.
-    def summarise(text, limit: 220)
-      return text if text.length <= limit
-
-      head = text[0, limit]
-      cut = head.rindex(". ")
-      cut && cut > limit / 2 ? "#{head[0, cut + 1]} […]" : "#{head.rstrip} […]"
     end
   end
 
@@ -279,19 +444,35 @@ module Fa3FieldMapping
     end
 
     def render
-      [preamble, MODELS.map { |model| section(model) }, buckets_section, footer].join("\n")
+      sections = MODELS.map { |model| section(model) }
+      # After the sections, so a broken declaration is reported by the guard that understands
+      # it rather than by this one complaining about the reasons it left behind.
+      verify_unmapped!
+      [preamble, sections, derived_section, annotations_section,
+       buckets_section, absent_section, index_section, footer].join("\n")
+    end
+
+    # Guard 4. An {UNMAPPED} entry nothing refers to is a leftover from a field that was
+    # renamed or mapped, and it would sit here indefinitely explaining an attribute that no
+    # longer exists. The other three guards catch declarations without reasons; this catches
+    # reasons without declarations.
+    def verify_unmapped!
+      referenced = MODELS.flat_map do |model|
+        prefix = model[:key] || model[:model].split("::").last
+        model[:fields].filter_map { |attribute, path| "#{prefix}##{attribute}" if path.nil? }
+      end
+      orphans = UNMAPPED.keys - referenced
+      raise "UNMAPPED entries nothing refers to: #{orphans.inspect}" if orphans.any?
     end
 
     private
 
     def section(model)
-      klass = Object.const_get(model[:model])
-      verify_members!(klass, model)
-
-      rows = model[:fields].map { |attribute, path| row(model[:model], attribute, path) }
-      ["## #{model[:title]}", "", "`#{model[:model]}` — #{model[:intro]}", "",
-       "| Attribute | FA(3) element | Type | Occurs | Ministry's description |",
-       "|---|---|---|---|---|", *rows, ""].join("\n")
+      verify_members!(Object.const_get(model[:model]), model)
+      prefix = model[:key] || model[:model].split("::").last
+      rows = model[:fields].map { |attribute, path| row(prefix, attribute, path) }
+      table("## #{model[:title]}", "`#{model[:model]}` — #{model[:intro]}",
+            "Attribute | FA(3) element | Type | Required? | The Ministry's description", rows)
     end
 
     # Check 2 and check 3, both aborting.
@@ -301,94 +482,112 @@ module Fa3FieldMapping
       raise "#{model[:model]}: declared but not a member: #{missing.inspect}" unless missing.empty?
 
       unaccounted = klass.members - declared
-      return if unaccounted.empty?
-
-      raise "#{model[:model]}: member(s) neither mapped nor in UNMAPPED: #{unaccounted.inspect}"
+      raise "#{model[:model]}: member(s) neither mapped nor in UNMAPPED: #{unaccounted.inspect}" if unaccounted.any?
     end
 
-    def row(model, attribute, path)
-      return unmapped_row(model, attribute) if path.nil?
+    def row(key_prefix, attribute, path)
+      return unmapped_row(key_prefix, attribute) if path.nil?
 
-      particle = @schema.particle(path)
-      element = path.split("/").last
-      "| `#{attribute}` | `#{element}` | #{type_of(particle)} | " \
-        "#{occurs(particle)} | #{@schema.documentation(element) || "—"} |"
+      field = @schema.field(path)
+      "| `#{attribute}` | `#{field[:name]}` | #{type_of(field)} | #{required(field[:occurs])} | " \
+        "#{field[:documentation] || "—"} |"
     end
 
     # An element with no `type` attribute has an **anonymous** `complexType` declared inline —
     # `Podmiot1`, `Fa`, `FaWiersz` and `Adnotacje` are all of them. FA(3) names only seven
     # complexTypes, so there is genuinely no type name to print, and inventing one is how
-    # `TFaWiersz` came to be asserted in nine files before an audit caught it.
-    def type_of(particle)
-      particle[:type].nil? ? "*(inline)*" : "`#{particle[:type].sub(/\Atns:/, "")}`"
+    # `TFaWiersz` came to be asserted in nine files.
+    def type_of(field)
+      field[:type].nil? ? "*(inline)*" : "`#{field[:type].sub(/\Atns:/, "")}`"
     end
 
-    def unmapped_row(model, attribute)
-      key = "#{model.split("::").last}##{attribute}"
-      reason = UNMAPPED.fetch(key) { raise "#{key} has a nil path and no UNMAPPED entry" }
-      "| `#{attribute}` | — | — | — | **Not an element.** #{reason} |"
+    # Phrased as the question an auditor is asking, rather than as raw occurrence counts.
+    def required(occurs)
+      return "one of a choice" if occurs[:choice]
+      return "**yes**" if occurs[:min].positive? && occurs[:max] == 1
+      return "yes, #{occurs[:min]}–#{occurs[:max]}" if occurs[:min].positive?
+
+      occurs[:max] == 1 ? "optional" : "optional, up to #{occurs[:max]}"
     end
 
-    # `Generated::Types` writes `max: nil` for an unbounded element — **and FA(3) has none**:
-    # `maxOccurs="unbounded"` appears zero times in the pinned schema, every repeat being
-    # bounded (`FaWiersz` at 10 000, `FakturaZaliczkowa` at 100). So there is no nil branch
-    # here, and an earlier draft that compared against the *string* `"unbounded"` was both
-    # dead and wrong. If a schema revision introduces one, `nil` renders as an empty upper
-    # bound and looks broken, which is the right kind of failure — visible.
-    def occurs(particle)
-      particle[:min] == particle[:max] ? particle[:min].to_s : "#{particle[:min]}–#{particle[:max]}"
+    def unmapped_row(key_prefix, attribute)
+      key = "#{key_prefix}##{attribute}"
+      entry = UNMAPPED.fetch(key) { raise "#{key} has a nil path and no UNMAPPED entry" }
+      "| `#{attribute}` | #{entry[:element] || "—"} | — | — | #{entry[:why]} |"
     end
 
-    # The summary buckets get their own table: they are a Hash keyed by element name, so there
-    # is no attribute to put in the left column.
+    def table(heading, intro, header, rows)
+      ["", heading, "", intro, "", "| #{header} |",
+       "|#{"---|" * header.count("|").succ}", *rows, ""].join("\n")
+    end
+
+    # Computed readers. They are not `Data` members, so nothing else here would list them —
+    # and for several fields they are what a caller actually reads. `gross_total` is one of the
+    # six mappings DESIGN.md §7.2 names by hand, and it went missing from the first version of
+    # this document for exactly that reason.
+    def derived_section
+      rows = DERIVED.map { |reader, element, note| "| `#{reader}` | #{element} | #{note} |" }
+      table("## Computed readers", DERIVED_INTRO, "Reader | FA(3) element | What it does", rows)
+    end
+
+    # `Adnotacje` is eight legal declarations behind one element, and they are what an auditor
+    # checks. Rendered like the buckets, for the same reason: a Hash keyed by element name has
+    # no attribute to put in the left column.
+    def annotations_section
+      rows = Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS.keys.map do |name|
+        field = @schema.field("Faktura/Fa/Adnotacje/#{name}")
+        "| `#{name}` | #{required(field[:occurs])} | #{field[:documentation] || "—"} |"
+      end
+      table("## Annotations", ANNOTATIONS_INTRO, "Element | Required? | The Ministry's description", rows)
+    end
+
     def buckets_section
       rows = Ksef::FA3::Totals::ELEMENTS.map do |name|
         codes = Ksef::FA3::VatRate::BUCKETS.select { |_, pair| pair.include?(name) }.keys
-        "| `#{name}` | #{codes.empty? ? "*(no rate code reaches it)*" : codes.map { |c| "`#{c}`" }.join(", ")} " \
-          "| #{@schema.documentation(name) || "—"} |"
+        field = @schema.field("Faktura/Fa/#{name}")
+        "| `#{name}` | #{codes.empty? ? "*(none)*" : codes.map { |c| "`#{c}`" }.join(", ")} " \
+          "| #{field[:documentation] || "—"} |"
       end
-      ["## Summary buckets", "",
-       "`Totals#buckets` is keyed by element name. Which bucket a row lands in is decided by " \
-       "its `P_12` rate code, and **the map is not invertible** — several codes share one " \
-       "bucket (§8.1a). Three buckets are reachable by no rate code at all, which is a limit " \
-       "of this model rather than of FA(3).", "",
-       "| Element | Rate codes | Ministry's description |", "|---|---|---|", *rows, ""].join("\n")
+      table("## Summary buckets", BUCKETS_INTRO, "Element | Rate codes | The Ministry's description", rows)
     end
 
-    def preamble
-      version = @schema.version
-      <<~HEADER
-        <!-- GENERATED by `rake fa3:field_mapping` from FA(3) #{version} — DO NOT EDIT. -->
-
-        # FA(3) field mapping
-
-        Every field this gem's model carries, and the FA(3) element it reads and writes.
-
-        **Generated**, not written: the attribute names come from the model classes, and the
-        element names, types, cardinalities and descriptions from the pinned XSD. Editing this
-        file by hand will be overwritten — change `tasks/field_mapping.rb` instead, and note
-        that a declared element which does not exist in the schema fails the build rather than
-        appearing here (DESIGN.md §7.2).
-
-        Descriptions are the Ministry's own `xsd:documentation`, verbatim and in Polish, and
-        are shown only where every occurrence of that element name in the schema agrees.
-        **Field-name truth is the XSD**, not this table.
-
-        This model does not carry all of FA(3). `Ksef::FA3::Invoice#unmapped_elements` reports,
-        for a parsed document, exactly which element paths `#to_xml` would drop — computed by
-        difference against the serializer, so it cannot go stale.
-
-      HEADER
+    # The negative list. DESIGN.md §7.2 deferred this document precisely because a partial one
+    # would read as "not supported" rather than "not documented yet" — so it has to say what it
+    # does not carry, not merely omit it.
+    def absent_section
+      rows = %w[Faktura Faktura/Fa].map do |parent|
+        absent = @schema.children_of(parent) - mapped_names - carried_indirectly
+        "| `#{parent}` | #{absent.map { |name| "`#{name}`" }.join(", ")} |"
+      end
+      table("## What this model does not carry", ABSENT_INTRO, "Under | Elements", rows)
     end
 
-    def footer
-      <<~FOOTER
-        ---
-
-        *Schema: `#{SCHEMA}`. Regenerate with `rake fa3:field_mapping`; `rake fa3:verify`
-        fails if this file is stale.*
-      FOOTER
+    def mapped_names
+      MODELS.flat_map { |model| model[:fields].map(&:last) }.compact.map { |path| path.split("/").last }
     end
+
+    # Named elsewhere in the document rather than in a model's own row.
+    def carried_indirectly
+      Ksef::FA3::Totals::ELEMENTS + Ksef::FA3::Invoice::DEFAULT_ANNOTATIONS.keys + %w[Adnotacje]
+    end
+
+    # Polish element to English attribute, which is the direction an accountant reads in.
+    def index_section
+      rows = index_entries.sort_by(&:first).chunk_while { |a, b| a.first == b.first }.map do |group|
+        "| `#{group.first.first}` | #{group.map { |_, reader| "`#{reader}`" }.join(", ")} |"
+      end
+      table("## Element index", INDEX_INTRO, "FA(3) element | Attribute", rows)
+    end
+
+    def index_entries
+      MODELS.flat_map do |model|
+        prefix = model[:key] || model[:model].split("::").last
+        model[:fields].filter_map { |attribute, path| [path.split("/").last, "#{prefix}##{attribute}"] if path }
+      end
+    end
+
+    def preamble = format(PREAMBLE, version: @schema.version)
+    def footer = format(FOOTER, schema: SCHEMA)
   end
 
   def self.generate!
@@ -398,9 +597,14 @@ module Fa3FieldMapping
   # Regenerates and reports whether the committed file was already what a fresh run produces.
   # The same gate `rake fa3:verify` applies to `generated/`, for the same reason: a generated
   # document that nobody regenerates is a hand-written one that lies (DESIGN.md §7.2).
+  # **Asks without answering by writing.** The first version called {generate!} and compared
+  # before with after, which made a *verify* task repair the thing it was complaining about:
+  # a hand edit vanished silently, a second run went green with no human intervention, and the
+  # abort message told you to run a task that had already run. Rendering to a String costs
+  # nothing and leaves the working tree alone.
   def self.stale?
-    before = File.read(OUT, encoding: "UTF-8")
-    generate!
-    before != File.read(OUT, encoding: "UTF-8")
+    return true unless File.exist?(OUT)
+
+    Renderer.new.render != File.read(OUT, encoding: "UTF-8")
   end
 end

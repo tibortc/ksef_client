@@ -426,7 +426,7 @@ integrators.
 - **MRI >= 3.2**, with **no upper bound, ever.** `required_ruby_version` resolves at
   install time, so an upper bound strands users on each new Ruby release.
 - CI covers 3.2, 3.3, 3.4, 4.0 and `head`, and the full suite is run locally on 3.2 at every
-  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1369
+  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1423
   examples green.
 - **The 3.2 floor is a commitment, not a default.** Ruby 3.2 is EOL upstream, and this gem
   still supports it deliberately: Polish tax-compliance software upgrades slowly, and 3.2
