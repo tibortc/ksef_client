@@ -40,6 +40,40 @@ module Ksef
       end
       alias to_s inspect
 
+      # `Data#to_h` is public API and was handing out the entire source document. {#inspect}
+      # was written to redact `raw_document` so `p invoice` stays readable; `to_h` is a `Data`
+      # freebie and was not, so `JSON.dump(invoice.to_h)` embedded the whole XML — a real
+      # hazard for anyone logging, caching or serialising an invoice into a job queue.
+      #
+      # Redacting it here is consistent rather than surprising: `raw_document` is provenance
+      # and not identity, which is why {#==} already ignores it.
+      def to_h = super.except(:raw_document)
+
+      # `Data#deconstruct_keys` backs pattern matching and leaked the same way.
+      def deconstruct_keys(keys) = super.except(:raw_document)
+
+      # What libxml2 said about the bytes this invoice was **parsed from**.
+      #
+      # **Nothing read this until 2026-08-26, and that was a hole the size of the one §15.1
+      # records as closed.** libxml2 recovers from broken XML by default, so a document with a
+      # mismatched closing tag parses into a perfectly good-looking invoice — and
+      # {Invoice#errors} runs tier 2 over `#to_xml`, bytes this gem has just produced and
+      # which are well-formed by construction. Tier 2 is therefore structurally incapable of
+      # seeing the input. `valid?` answered **true** for XML that is not XML, exactly as it did
+      # before the fix `Validator` got, one level up.
+      #
+      # Recovery also silently substitutes: an invalid UTF-8 byte becomes U+FFFD, and the only
+      # record that it happened is here.
+      #
+      # @return [Array<Issue>] empty for a built invoice, which has no source to complain about
+      def source_errors
+        return [] if raw_document.nil?
+
+        raw_document.errors.map do |error|
+          Issue.new(field: "document", message: "the source document is not well-formed: #{error}")
+        end
+      end
+
       # Element paths present in {#raw_document} but absent from this model's own
       # serialisation — that is, exactly what `#to_xml` would drop.
       #

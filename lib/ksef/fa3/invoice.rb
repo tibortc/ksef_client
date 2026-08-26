@@ -210,11 +210,15 @@ module Ksef
       #   §15.5); pass the value `GET /limits/context` reports if yours differs.
       # @return [Array<Issue>] empty when the invoice is sound
       def errors(max_bytes: DocumentValidator::MAX_BYTES)
+        # **First**, and before the short-circuit: a document that is not well-formed cannot be
+        # made so by anything below, and libxml2's recovery means every later tier sees a tree
+        # that looks fine ({Provenance#source_errors}).
+        source = source_errors
         model = ModelValidator.errors_for(self)
-        return model unless model.empty?
+        return source + model unless model.empty?
 
         document = to_xml
-        DocumentValidator.errors_for(document, max_bytes: max_bytes) +
+        source + DocumentValidator.errors_for(document, max_bytes: max_bytes) +
           Validator.errors_for(document).map { |message| Issue.new(field: "schema", message: message) }
       rescue Ksef::Error => e
         # A serialisation refusal the model tier did not anticipate. Reported rather than

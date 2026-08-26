@@ -49,8 +49,8 @@ submitted.
 > KSeF number whose checksum our own code agrees with, and retrieved the signed UPO with its
 > bytes matching the hash the server published.
 >
-> **The honest caveat, narrowed:** what remains stub-only is token refresh and invoice
-> download — still "believed correct" rather than proven. Batch has no code at all yet, so it
+> **The honest caveat, narrowed:** token refresh and invoice download are implemented but
+> verified against stubs only — still "believed correct" rather than proven. Batch has no code at all yet, so it
 > is absent rather than stubbed. The KSeF-token auth call and the crypto module went live on
 > 2026-08-24, so they are no longer on this list.
 >
@@ -426,7 +426,7 @@ integrators.
 - **MRI >= 3.2**, with **no upper bound, ever.** `required_ruby_version` resolves at
   install time, so an upper bound strands users on each new Ruby release.
 - CI covers 3.2, 3.3, 3.4, 4.0 and `head`, and the full suite is run locally on 3.2 at every
-  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1428
+  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1448
   examples green.
 - **The 3.2 floor is a commitment, not a default.** Ruby 3.2 is EOL upstream, and this gem
   still supports it deliberately: Polish tax-compliance software upgrades slowly, and 3.2

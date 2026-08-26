@@ -32,11 +32,24 @@ module Ksef
         # lines under no strategy at all. That is a business-rule violation (tier 3, still
         # unbuilt — docs/REFERENCE.md §15.6), not a parse failure: the document exists and may
         # well be sitting in KSeF, so it is left as `:per_line` and not argued with.
-        def apply(invoice, stated)
-          return invoice if stated.empty? || computed(invoice) == stated
+        # **Decided from the lines alone**, so the parser can settle the strategy *before*
+        # constructing the invoice rather than constructing one and copying it.
+        #
+        # That ordering is load-bearing. {Invoice.scaled_gross} drops `stated_gross` when it
+        # equals what the rows derive — and "what the rows derive" depends on the strategy. A
+        # parser that built with a provisional `:per_line`, let the constructor drop the
+        # document's `P_15`, and *then* copied the invoice to `:per_summary` lost the figure
+        # for good: the copy re-ran the constructor with `stated_gross` already nil. Przykład 1
+        # would have shown it, except every one of the twenty-six pinned samples infers
+        # `:per_line`, so the corpus is structurally blind to it (docs/REFERENCE.md §17.2).
+        #
+        # @param lines [Array<Line>]
+        # @param stated [Hash{String => BigDecimal}] the document's own `P_14_*` values
+        # @return [Symbol] `:per_line` unless `:per_summary` is what reproduces `stated`
+        def strategy_for(lines, stated)
+          return :per_line if stated.empty? || bucketed(lines, :per_line) == stated
 
-          variant = invoice.with(rounding: :per_summary)
-          computed(variant) == stated ? variant : invoice
+          bucketed(lines, :per_summary) == stated ? :per_summary : :per_line
         end
 
         # @return [Hash{String => BigDecimal}] the `P_14_*` values a document states
@@ -58,8 +71,8 @@ module Ksef
         # never reached. Inferring a rounding strategy is not the place to validate rate codes:
         # the inconsistency is worse than the leniency, and `#to_xml` still refuses the code
         # honestly when asked to write a bucket for it.
-        def computed(invoice)
-          invoice.vat_by_rate.each_with_object({}) do |(code, amount), acc|
+        def bucketed(lines, rounding)
+          Summaries.vat_by_rate(lines, rounding).each_with_object({}) do |(code, amount), acc|
             # Zero-rated and exempt buckets have no tax element at all (§8.1a); there is
             # nothing in the document to compare against.
             element = VatRate::BUCKETS[code.to_s]&.last

@@ -76,11 +76,14 @@ module Ksef
         # @param xml [String] a serialized FA(3) document
         # @param max_bytes [Integer] the size ceiling for this context; see {MAX_BYTES}
         # @return [Array<Issue>] empty when KSeF would admit these bytes
+        # @param xml [String] the serialised document; anything else is reported rather than
+        #   raising `NoMethodError`, since this tier's whole job is to answer about bytes
         def errors_for(xml, max_bytes: MAX_BYTES)
+          xml = xml.to_s
           # Everything below reads the string as text, and every one of those reads raises on
           # invalid bytes rather than reporting them. It is also a rule in its own right: §15.1
           # requires the document to *be* UTF-8, not merely to lack a byte-order mark.
-          return [encoding_issue] unless xml.valid_encoding?
+          return [encoding_issue] unless FieldChecks.utf8?(xml)
 
           [bom_issue(xml), prolog_issue(xml), *instruction_issues(xml),
            *character_issues(xml), size_issue(xml, max_bytes)].compact

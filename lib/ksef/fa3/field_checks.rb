@@ -50,17 +50,60 @@ module Ksef
       # but only NUL escapes this gem's error hierarchy.
       FORBIDDEN_IN_XML = /[\x00-\x08\x0B\x0C\x0E-\x1F￾￿]/
 
+      # **Two different failures, and only one of them used to be caught.** A string can be
+      # *invalid* — bytes that decode as nothing — or *validly encoded in something that is
+      # not UTF-8*. `String#valid_encoding?` answers true for the second, so a
+      # `Windows-1250` or `ISO-8859-2` name — exactly what a Polish ERP emits — passed every
+      # guard in this gem and then raised `Encoding::CompatibilityError` out of `#errors`,
+      # `#to_xml` and `Ksef::Client#send_invoice`, from the tier whose contract is to report.
+      #
+      # ASCII-only text in another encoding is accepted: its bytes *are* UTF-8, and refusing
+      # a `File.binread` of an all-ASCII document would be pedantry rather than safety.
+      #
+      # **`ASCII-8BIT` is treated as unlabelled rather than as another encoding.** It is what
+      # `File.binread` and most socket reads produce, and it asserts nothing about the bytes
+      # — so if they happen to form valid UTF-8, reading them as UTF-8 is unambiguous rather
+      # than a guess. A *named* non-UTF-8 encoding is a statement, and overriding it would
+      # be exactly the guessing this gem refuses to do: `Windows-1250` "Łódź" begins `A3`,
+      # a UTF-8 continuation byte, so it fails this and is reported instead.
+      #
+      # @return [Boolean] whether this string's bytes are UTF-8 that Ruby can read
+      def self.utf8?(string)
+        return string.valid_encoding? if string.encoding == Encoding::UTF_8
+        return string.dup.force_encoding(Encoding::UTF_8).valid_encoding? if string.encoding == Encoding::BINARY
+
+        string.ascii_only?
+      end
+
       private
 
       # Trim, then squeeze internal whitespace runs to one space: the value the schema sees.
       def collapse(value) = value.to_s.gsub(COLLAPSE, " ").strip
 
+      # **Two different failures, and only one of them used to be caught.** A string can be
+      # *invalid* — bytes that decode as nothing — or *validly encoded in something that is
+      # not UTF-8*. `valid_encoding?` answers true for the second, so a `Windows-1250` or
+      # `ISO-8859-2` name — which is exactly what a Polish ERP emits — passed every guard and
+      # then made `#errors`, `#to_xml` and `Ksef::Client#send_invoice` raise
+      # `Encoding::CompatibilityError`, out of the tier whose contract is to report.
+      #
+      # ASCII-only text in another encoding is accepted: its bytes *are* UTF-8, and refusing
+      # a `File.binread` of an all-ASCII document would be pedantry rather than safety.
       def encoding_issue(value, field)
-        return nil if value.nil? || value.to_s.valid_encoding?
+        string = value.to_s
+        return nil if value.nil? || FieldChecks.utf8?(string)
 
-        Issue.new(field: field,
-                  message: "contains bytes that are not valid UTF-8; KSeF requires UTF-8 " \
-                           "(docs/REFERENCE.md §15.1)")
+        Issue.new(field: field, message: encoding_message(string))
+      end
+
+      def encoding_message(string)
+        if string.encoding == Encoding::UTF_8
+          return "contains bytes that are not valid UTF-8; KSeF requires UTF-8 " \
+                 "(docs/REFERENCE.md §15.1)"
+        end
+
+        "is #{string.encoding} text, not UTF-8; KSeF requires UTF-8 (docs/REFERENCE.md " \
+          "§15.1). Transcode it before building the invoice — this gem will not guess."
       end
 
       def text_errors(value, field, limit, required: false)

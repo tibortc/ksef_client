@@ -191,7 +191,11 @@ module Ksef
           return nil if value.nil?
 
           string = value.to_s
-          return string unless string.valid_encoding?
+          # Returned untouched when it is not UTF-8 this gem can read — the collapse below is
+          # a UTF-8 regexp and raises `Encoding::CompatibilityError` against anything else.
+          # {FieldChecks.encoding_issue} is what reports it, so the value survives to be
+          # complained about rather than exploding here (§15.1).
+          return string unless FieldChecks.utf8?(string)
 
           string.gsub(FieldChecks::COLLAPSE, " ").strip
         end
@@ -212,6 +216,10 @@ module Ksef
             # amounts (12345678901234.56 became 12345678901200.0), which is the same class of
             # silent rounding the Float ban exists to prevent.
             when Rational then BigDecimal(value, RATIONAL_PRECISION)
+            # `BigDecimal("NaN")` succeeds where `BigDecimal("abc")` raises, so a document
+            # stating `<P_11>NaN</P_11>` reached the model, serialised as `NaN.00`, and broke
+            # the `==`/`hash` contract on the way — two identical lines compared unequal while
+            # hashing the same, which is the invariant the negative-zero rule exists to hold.
             when Float
               raise ValidationError,
                     "Float is not allowed for monetary or quantity values (got #{value.inspect}). " \
@@ -227,7 +235,21 @@ module Ksef
           # twin and yet failed as a Hash key. That breaks the `==`/`hash` contract in exactly
           # the way {Issue} documents avoiding. The two are the same amount of money, so the
           # model keeps one representation of it.
+          # NaN and Infinity are not amounts, and they arrive through the *String* door:
+          # `BigDecimal("NaN")` succeeds, so a document stating `<P_11>NaN</P_11>` reached the
+          # model and serialised as `NaN.00`. It also breaks the contract the rule below
+          # exists to hold — `NaN != NaN`, so two identical lines compared unequal while
+          # hashing the same. Refused for the same reason a Float is.
+          finite!(converted, value)
           converted.zero? ? BigDecimal(0) : converted
+        end
+
+        def finite!(converted, value)
+          return if converted.finite?
+
+          raise ValidationError,
+                "#{converted.nan? ? "NaN" : "Infinity"} is not a monetary or quantity value " \
+                "(got #{value.inspect})."
         end
 
         private

@@ -476,7 +476,7 @@ The README quickstart is this snippet plus install instructions — a developer 
 
 Originally this said "90% lines". That turned out to be a weak gate: the suite sat at 99% line coverage while branch coverage was 83%, i.e. seventeen conditional paths were untested behind fully-covered lines. Branch coverage is the one that finds real gaps; line coverage mostly confirms files are loaded.
 
-Floors sit just under the achieved numbers so they ratchet. Raise them as the real figures move up; do not lower one to make a change pass. Branch is 97 rather than 100 because ten guards — seven `&.` and three plain `if`/`return` — defend against states that cannot occur, and contorting tests to reach them proves nothing. **That justification covers exactly those ten**: an eleventh appeared with the last three invoice types, defending a state that *can* occur, and it was a missing test rather than an unreachable guard. The distinction is the whole point of the margin, so a rise in the count is worth investigating rather than absorbing. Deliberate margin, not a knife edge at the actuals: a floor pinned to the exact current figure fails on refactors that change nothing about test quality. Because these are percentages, the absolute number of untested branches they permit grows with the codebase — **re-ratchet at each phase boundary**, not once. Requires SimpleCov >= 1.0, where the supported criteria are `[:line, :branch, :method, :oneshot_line]`; 0.x supports only line and branch.
+Floors sit just under the achieved numbers so they ratchet. Raise them as the real figures move up; do not lower one to make a change pass. Branch is 98 rather than 100 because ten guards — seven `&.` and three plain `if`/`return` — defend against states that cannot occur, and contorting tests to reach them proves nothing. **That justification covers exactly those ten**: an eleventh appeared with the last three invoice types, defending a state that *can* occur, and it was a missing test rather than an unreachable guard. The distinction is the whole point of the margin, so a rise in the count is worth investigating rather than absorbing. Deliberate margin, not a knife edge at the actuals: a floor pinned to the exact current figure fails on refactors that change nothing about test quality. Because these are percentages, the absolute number of untested branches they permit grows with the codebase — **re-ratchet at each phase boundary**, not once. Requires SimpleCov >= 1.0, where the supported criteria are `[:line, :branch, :method, :oneshot_line]`; 0.x supports only line and branch.
 
 A filtered run — one file, one example, or a tag selector — legitimately exercises less of the library, so the gate applies to full runs only. Otherwise the nightly `--tag integration` job would fail on coverage rather than on tests.
 
@@ -531,7 +531,27 @@ Gate status, precisely:
 
 **Phase 2's three gates are met and its build scope is done, as of 2026-08-26.** Validator tier 3 landed that day (§7.7, advisory) and `docs/field_mapping.md` with it (§7.2, generated).
 
-**Two scope-list items remain, and neither is a gate.** The scope above asks for the session flow "recorded + live", and the recorded half has no cassette — §10's own table says "planned, not yet built". And `download` and `refresh` are implemented but have **never run live**, so of the transport surface only auth, crypto and the online session have been exercised against TEST. Close both before 0.1.0; an audit on 2026-08-26 caught this being described as "complete".
+**One scope-list item remains, and it is not a gate: there is no VCR cassette.** The scope above
+asks for the session flow "recorded + live", and §9's own testing table says the recorded half is
+"planned, not yet built".
+
+**Two further gaps exist and belong to Phase 3, not here** — recorded because they were twice
+mis-assigned to Phase 2 before this was checked against the scope list word by word:
+
+- **`Zalacznik` is not carried.** §7.4 asks for the attachment node "at build/parse level" and
+  puts only *operational* submission constraints out of 0.1 scope, so build/parse support is a
+  0.1.0 requirement. Phase 2 cites §7.4 for the **implementation order of invoice types** and
+  nothing else, so this was never Phase 2's. Two Ministry samples carry one.
+- **`download` and `refresh` have never run against TEST.** Neither is a stated requirement of
+  any phase: the scope above lists `download` as a *feature* and it is implemented, `refresh`
+  is not named at all, and Phase 3's bar is "nightly integration green ≥ 3 consecutive nights",
+  which the current nightly meets without exercising either. So this is a judgement about
+  confidence, not an unmet commitment — worth closing before 0.1.0, and worth not dressing up
+  as scope.
+
+The lesson, since it has now recurred three times in one day: **read the scope list before
+saying what is left.** "Complete" was wrong, "two items" was wrong, and both were assertions
+about a sentence nobody had re-read.
 
 The sentence here read "validator tier 3, and only that" until 2026-08-26, and that was an inconsistency introduced in the same commit that created the other half of it: §7.2's deferral of the field mapping carried an explicit trigger — *"it lands once the models cover all seven types"* — and Phase 1's note above records it as "required before 0.1.0 and tracked in Phase 2". The seventh type landed that day, so the trigger fired and the deferral ended.
 

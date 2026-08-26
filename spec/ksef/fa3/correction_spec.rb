@@ -696,13 +696,17 @@ RSpec.describe "FA(3) corrections" do
           .to include(/totals: is required when a line is marked state_before/)
       end
 
-      # What the derived summary would have said, and why it had to be stopped: the
-      # before-row is counted as a sale, so a 20.00 refund is declared as a 180.00 charge on
-      # a document the XSD accepts.
-      it "would otherwise have declared the sum of both states" do
+      # What the derived summary says, and why it still has to be stopped. It used to add the
+      # two states together and declare a 20.00 refund as a 221.40 charge; since `StanPrzed`
+      # rows stopped being summed (docs/REFERENCE.md §17.4) it declares the **after** state,
+      # 98.40 — no longer absurd, and still wrong, because a correction's summary is the
+      # *delta*. Either way the XSD accepts the document, which is the whole point of the
+      # tier-1 rule above.
+      it "would otherwise declare the state after correction instead of the delta" do
         derived = paired_without_totals
 
-        expect(derived.gross_total).to eq(BigDecimal("221.40"))
+        expect(derived.net_by_rate).to eq("23" => BigDecimal("80"))
+        expect(derived.gross_total).to eq(BigDecimal("98.40"))
         expect(Ksef::FA3::Validator.errors_for(derived.to_xml)).to be_empty
       end
 
