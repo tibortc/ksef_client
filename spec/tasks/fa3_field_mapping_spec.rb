@@ -225,6 +225,22 @@ RSpec.describe Fa3FieldMapping do
       end
     end
 
+    # DESIGN.md §11 makes determinism a definition-of-done gate for codegen, and this file is
+    # generated under the same gate. It failed once: the element index sorted on the element
+    # name alone, `sort_by` is not stable, and three names appear twice — so the tie order came
+    # out one way on macOS and the other on Linux. Green locally, stale in CI.
+    it "renders identically from a shuffled declaration, so ties are not left to sort order" do
+      shuffled = described_class::MODELS.map { |model| model.merge(fields: model[:fields].reverse) }
+      stub_const("#{described_class}::MODELS", shuffled)
+
+      expect(described_class::Renderer.new(schema: schema).render.lines.grep(/^\| `NIP` \|/))
+        .to eq(rendered.lines.grep(/^\| `NIP` \|/))
+    end
+
+    it "orders an element carried by two models deterministically" do
+      expect(rendered).to include("| `NIP` | `Buyer#nip`, `Seller#nip` |")
+    end
+
     it "lists the rate codes that share a bucket, since the map is not invertible" do
       expect(rendered).to include("| `P_13_1` | `23`, `22` |")
     end

@@ -572,8 +572,14 @@ module Fa3FieldMapping
     end
 
     # Polish element to English attribute, which is the direction an accountant reads in.
+    # **Sorted on the whole pair, not on the element name.** `Enumerable#sort_by` is not stable,
+    # and several element names appear twice — `NIP`, `Nazwa` and `Adres` for both the seller
+    # and the buyer — so sorting on the name alone left their relative order unspecified. It
+    # came out one way on macOS and the other on Linux, which made the committed file stale in
+    # CI and green locally: a determinism failure of exactly the kind DESIGN.md §11 makes a
+    # definition-of-done gate for codegen.
     def index_section
-      rows = index_entries.sort_by(&:first).chunk_while { |a, b| a.first == b.first }.map do |group|
+      rows = index_entries.sort.chunk_while { |a, b| a.first == b.first }.map do |group|
         "| `#{group.first.first}` | #{group.map { |_, reader| "`#{reader}`" }.join(", ")} |"
       end
       table("## Element index", INDEX_INTRO, "FA(3) element | Attribute", rows)

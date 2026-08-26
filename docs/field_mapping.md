@@ -258,7 +258,7 @@ The reverse direction: an element from a Polish invoice, and the attribute that 
 | `Adres` | `Buyer#address`, `Seller#address` |
 | `AdresL1` | `Address#line1` |
 | `AdresL2` | `Address#line2` |
-| `DaneFaKorygowanej` | `Invoice#correction`, `Correction#corrected` |
+| `DaneFaKorygowanej` | `Correction#corrected`, `Invoice#correction` |
 | `DataWystFaKorygowanej` | `CorrectedInvoice#issue_date` |
 | `DataWytworzeniaFa` | `Invoice#issued_at` |
 | `FaWiersz` | `Invoice#lines` |
@@ -269,8 +269,8 @@ The reverse direction: an element from a Polish invoice, and the attribute that 
 | `KodKraju` | `Address#country` |
 | `KodWaluty` | `Invoice#currency` |
 | `KursWalutyZK` | `Correction#exchange_rate_before` |
-| `NIP` | `Seller#nip`, `Buyer#nip` |
-| `Nazwa` | `Seller#name`, `Buyer#name` |
+| `NIP` | `Buyer#nip`, `Seller#nip` |
+| `Nazwa` | `Buyer#name`, `Seller#name` |
 | `NrFaKorygowanej` | `CorrectedInvoice#number` |
 | `NrFaKorygowany` | `Correction#corrected_number` |
 | `NrFaZaliczkowej` | `AdvanceInvoice#number` |
