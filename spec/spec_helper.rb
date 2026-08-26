@@ -92,7 +92,11 @@ SimpleCov.start do
   # `serializer.rb`'s `return if values.nil?` and two in `tasks/ksef_bootstrap.rb` — so the
   # earlier wording "the same ten `&.` guards, outside the FA(3) model" was wrong twice over.
   #
-  # Re-measured 2026-08-26 after all seven invoice types: line 100%, branch 98.51% (665/675),
+  # Re-measured 2026-08-26 after validator tier 3: line 100%, branch 98.57% (691/701), method
+  # 100%. The denominator keeps moving — 675 -> 689 -> 701 in one day — which is the drift the
+  # paragraph above warns about; the ten remain ten.
+  #
+  # Previously, after all seven invoice types: line 100%, branch 98.51% (665/675),
   # method 100%. **The ten are still those ten.** They briefly became eleven: the type work
   # added `#vat_rounded_per_line`'s `next unless line.summarised?` guard, whose twin in
   # `#net_by_rate` was tested while it was not — a guard defending a state that genuinely

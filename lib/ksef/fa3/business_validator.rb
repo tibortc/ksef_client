@@ -2,90 +2,116 @@
 
 module Ksef
   module FA3
-    # **Tier 3 — the business tier** (DESIGN.md §7.7): reconciliation rules that a document
-    # can satisfy the XSD and still fail on. Tiers 1 and 2 ask whether the fields are present,
-    # well-typed and well-formed; this one asks whether they *agree with each other*.
+    # **Tier 3 — the business tier** (DESIGN.md §7.7): reconciliation between figures a
+    # document states independently of one another. It answers a question the other tiers
+    # cannot — do these numbers agree? — and it answers it as a **warning**.
     #
-    # ## Why this tier is nearly empty, and why that is the honest state
+    # ## Why it holds one rule, and why that rule cannot be an error
     #
     # There is no upstream catalogue to implement. `docs/REFERENCE.md` §15.6 records the
-    # search: **no file in `ksef-api` states a reconciliation rule** — not that `P_15` equals
-    # its buckets, not what a correction's references must satisfy, not an error code for an
-    # arithmetic mismatch. The one business validation KSeF ever proposed (issue #837, a
-    # currency rule) was **withdrawn back to analysis** after it turned out to reject legal
-    # invoices, and the Ministry's own remark in that thread — that no production invoice
-    # violated it — is evidence the service today enforces nothing beyond the schema.
+    # search: no file in `ksef-api` states a reconciliation rule, and the one business
+    # validation KSeF ever proposed was **withdrawn back to analysis** after the community
+    # showed it rejected legal invoices.
     #
-    # So this tier is built on the *one* grounding that needs no catalogue: arithmetic that
-    # follows from what the XSD's own annotations say a field **is**. `P_13_1` is documented
-    # as a sum; checking a sum is not policy. Everything else waits, and §15.6's warning is
-    # the standing instruction — **do not synthesise rules from Polish VAT law and record them
-    # as verified facts.** The catalogue grows as evidence arrives; the engine is here so that
-    # adding one is a line in {RULES} rather than a redesign.
+    # The rule here is grounded **empirically** — §15.6's grounding 3, measurement over the
+    # Ministry's 26 worked examples — and not definitionally. That distinction was got wrong
+    # once already and is worth stating plainly: `P_15` is annotated *"Kwota należności
+    # ogółem"* and says nothing about the buckets, and §15.6's own sentence is "Nothing says
+    # `P_15` equals the sum of the rate buckets." The definitional rule one might reach for
+    # instead — `P_13_1` is a *sum*, so check it against the rows — is **not implementable
+    # here**: ten of the fourteen modelled stated-summary samples falsify it, because a
+    # correction's buckets are deltas, an advance's are pre-payments and a settlement's are
+    # remainders (§8.4, §8.5).
     #
-    # ## It reports; it does not refuse
+    # **And a Polish invoice priced from round gross prices routinely fails this rule while
+    # being perfectly legal.** The Ministry's own Przykład 1 is one: its nets are back-computed
+    # *w stu* from gross prices of 2000/50/1 and rounded down, so the buckets sum a grosz under
+    # `P_15`. The gap grows with the number of such lines — two of them and it is two grosze —
+    # so **no tolerance sized from this corpus can be sound**, because the corpus never varies
+    # the dimension the error scales with. A tier that refused those invoices would repeat
+    # precisely the mistake that got issue #837 withdrawn.
     #
-    # Tier 3 findings are `Issue` values like any other, addressed to `summary`. A caller who
-    # wants them fatal gets that from {Invoice#validate!}; a caller reading a document to find
-    # out why KSeF rejected it still gets the document.
+    # So this reports and never refuses: {Invoice#warnings}, not `#errors`, and nothing here
+    # can block {Ksef::Client#send_invoice}. That is the §14.3 precedent — the UPO
+    # receiving-party mismatch is a warning for the same reason, so that a schema opinion
+    # cannot stand between a legal document and its being filed.
     module BusinessValidator
-      # One grosz. Not a fudge factor — a **consequence of the field definitions**: each
-      # `P_14_x` is the tax on its own bucket, rounded to `TKwotowy`'s two places, while
-      # `P_15` is the amount actually owed. Rounding several buckets and adding them need not
-      # equal the total, and the Ministry's Przykład 1 is the proof: `1666.66 + 383.33 + 0.95
-      # + 0.05` is `2050.99` against a stated `P_15` of `2051`.
-      #
-      # A tolerance of exactly one grosz is what the corpus supports and no more. It is *not*
-      # scaled by the number of buckets, which would be the theoretically tidier choice and
-      # would also be an invention: 24 of the 26 samples reconcile exactly and the twenty-fifth
-      # is out by one, so there is no evidence for a wider band (docs/REFERENCE.md §17.1).
+      # One grosz, and **honestly arbitrary beyond that**. It is what the single corpus witness
+      # shows and no more: 22 of the 26 samples reconcile to the cent, Przykład 1 misses by
+      # 0.01, and three state no buckets to reconcile at all. It is not derived from rounding
+      # arithmetic — per-bucket tax rounding moves Przykład 1's total by 0.0007, not by a
+      # grosz — so it neither is nor pretends to be a bound (docs/REFERENCE.md §17.1).
       TOLERANCE = BigDecimal("0.01")
 
-      MISMATCH = "does not reconcile: the rate buckets sum to %<sum>s but P_15 states " \
-                 "%<gross>s, a difference of %<delta>s. Per-bucket tax rounding accounts for " \
-                 "at most one grosz (docs/REFERENCE.md §17.1)."
+      MISMATCH = "the rate buckets sum to %<sum>s but P_15 states %<gross>s, a difference of " \
+                 "%<delta>s. This is often legitimate — an invoice whose nets are computed " \
+                 "back from round gross prices differs by a grosz or so per line — and KSeF " \
+                 "is not known to reject it. Worth checking against your source figures " \
+                 "(docs/REFERENCE.md §17.1)."
 
-      # Each rule is a method name taking the invoice and answering an {Issue} or nil. Adding
-      # a rule is adding a method and a name here — and, per §15.6, a ledger entry saying what
-      # grounds it.
+      # Each rule is a public singleton method taking the invoice and answering an {Issue} or
+      # nil. Adding one means adding a method, a name here, and — per §15.6 — a ledger entry
+      # saying what grounds it.
       RULES = %i[summary_reconciliation].freeze
 
       class << self
         # @param invoice [Invoice]
-        # @return [Array<Issue>] empty when nothing is out of agreement
-        def errors_for(invoice)
+        # @return [Array<Issue>] advisory; empty when nothing disagrees
+        def warnings_for(invoice)
           RULES.filter_map { |rule| public_send(rule, invoice) }
         end
 
-        # `Σ P_13_* + Σ P_14_* == P_15`, within {TOLERANCE}.
+        # `Σ P_13_* + Σ P_14_* ≈ P_15`, over **what the document states**.
         #
-        # **Measured, not read.** It holds in 24 of the Ministry's 26 worked examples, which is
-        # what fixes its shape — the two that miss are why the tolerance and the guard below
-        # both exist, and a rule without them rejects the Ministry's own first example.
+        # It compares two figures the *document* carries independently. It deliberately does
+        # not reconcile a derived summary against a derived total: those come from the same
+        # rows, so a difference measures this model's own rounding regime rather than anything
+        # about the invoice — and it did, before the 2026-08-26 audit, which is how an ordinary
+        # built invoice came to be accused of a two-grosz error.
         #
-        # The `W` twins are excluded, and that is load-bearing rather than tidy: `P_14_1W` is
-        # the **PLN equivalent** of `P_14_1` on a foreign-currency invoice, not a second tax.
-        # Przykład 20 states `P_13_1` 13560, `P_14_1` 3118.80 and `P_14_1W` 14036.16 against a
-        # `P_15` of 16678.80 — including the twin gives 30714.96 and fails a correct invoice.
-        # {Totals::ELEMENTS} already excludes them, so this reads that list rather than
-        # re-deriving one.
+        # Reading the buckets from the document rather than from the model also keeps the rule
+        # honest about what it cannot represent: a document using `P_13_5`/`P_14_5` (OSS) or
+        # `P_13_11` (margin) states buckets no rate code reaches ({VatRate.unreachable_elements}),
+        # and comparing the model's derivation against the document's total accused those of an
+        # arithmetic error that was really this model's own incompleteness.
         def summary_reconciliation(invoice)
-          # {Invoice#summary_buckets} is the figures **as the document will carry them** —
-          # rounded per bucket, exactly as `#to_xml` rounds them. Comparing unrounded
-          # BigDecimals would test something the document is not, and would pass invoices the
-          # Ministry's own corpus shows to be a grosz out.
-          buckets = invoice.summary_buckets
-          # **The guard, and what it is for.** A `UPR` may state `P_15` alone — Przykład 16
-          # does, 450 with no buckets at all. Summing nothing gives zero, so without this the
-          # rule reports every such invoice as 450 out. No buckets means no breakdown to
-          # reconcile against, which is not the same as a breakdown that disagrees.
-          return nil if buckets.empty?
+          stated = stated_summary(invoice)
+          return nil if stated.nil? || stated[:buckets].empty?
 
-          sum = buckets.values.sum(BigDecimal(0))
-          delta = sum - invoice.gross_total
-          return nil if delta.abs <= TOLERANCE
+          sum = stated[:buckets].values.sum(BigDecimal(0))
+          delta = sum - stated[:gross]
+          delta.abs <= TOLERANCE ? nil : mismatch(sum, stated[:gross], delta)
+        end
 
-          mismatch(sum, invoice.gross_total, delta)
+        # @return [Hash, nil] `{buckets:, gross:}` as stated, or nil when nothing states them
+        #   independently — a built invoice derives both from its rows and has nothing to
+        #   reconcile against itself.
+        def stated_summary(invoice)
+          return { buckets: invoice.totals.buckets, gross: invoice.totals.gross } if invoice.totals
+
+          document_summary(invoice.raw_document)
+        end
+
+        # The `W` twins are excluded, and that is load-bearing rather than tidy: `P_14_1W` is
+        # the **PLN equivalent** of `P_14_1` on a foreign-currency invoice, not a second tax —
+        # Przykład 20 states 13560 + 3118.80 against a `P_15` of 16678.80, and counting its
+        # 14036.16 twin gives 30714.96. {Totals::ELEMENTS} is the list, built from the
+        # generated schema metadata, so there is one definition of "a bucket".
+        def document_summary(document)
+          return nil if document.nil?
+
+          fa = document.dup.remove_namespaces!.at_xpath("//Fa")
+          gross = fa&.at_xpath("P_15")&.text
+          return nil if gross.nil?
+
+          { buckets: buckets_in(fa), gross: Formatting.decimal(gross) }
+        end
+
+        def buckets_in(node)
+          Totals::ELEMENTS.each_with_object({}) do |name, found|
+            text = node.at_xpath(name)&.text
+            found[name] = Formatting.decimal(text) unless text.nil?
+          end
         end
 
         def mismatch(sum, gross, delta)

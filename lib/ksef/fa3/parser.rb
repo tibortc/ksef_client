@@ -74,9 +74,7 @@ module Ksef
           type = supported_type!(Formatting.text(text(fa_node, "RodzajFaktury")) || "VAT")
           totals = Invoice::STATED_TOTALS_TYPES.include?(type) ? CorrectionReader.totals_from(fa_node) : nil
 
-          invoice = resolve_rounding(build(document, root, fa_node, type, totals), fa_node, totals)
-          # **After** the rounding inference, which decides what "derived" even means here.
-          resolve_stated_gross(invoice, fa_node, totals)
+          resolve_rounding(build(document, root, fa_node, type, totals), fa_node, totals)
         end
 
         private
@@ -118,6 +116,12 @@ module Ksef
             order: AdvanceReader.order_from(fa_node),
             advances: AdvanceReader.advances_from(fa_node),
             totals: totals,
+            # Passed as text; {Invoice.scaled_gross} rounds it and drops it when it merely
+            # repeats what the rows derive. `P_15` is mandatory in `Fa`, so this is normally
+            # present — but the parser does not validate, and a document being read to find
+            # out *why* KSeF rejected it may well be missing it or carry something
+            # unparseable, so neither absence nor rubbish may raise here.
+            stated_gross: readable_gross(fa_node),
             currency: text(fa_node, "KodWaluty") || "PLN",
             # Read, not defaulted. These are declarations with tax consequences — cash
             # accounting, reverse charge, split payment, an actual VAT exemption — and
@@ -140,6 +144,19 @@ module Ksef
             rounding: :per_line,
             raw_document: document
           )
+        end
+
+        # @return [String, nil] `P_15` when it is a number this model can hold, nil otherwise.
+        #   An unreadable one is left to tiers 1 and 2 to complain about; refusing to parse it
+        #   would deny the reader the rest of a document they are trying to diagnose.
+        def readable_gross(fa_node)
+          stated = text(fa_node, "P_15")
+          return nil if stated.nil?
+
+          Formatting.decimal(stated)
+          stated
+        rescue ValidationError
+          nil
         end
 
         def party(root, name, role:)
@@ -177,26 +194,6 @@ module Ksef
           RoundingInference.apply(
             invoice, RoundingInference.stated_from(fa_node) { |node, name| text(node, name) }
           )
-        end
-
-        # `P_15` is `minOccurs="1"`, so every document states one — but an invoice that
-        # derives its summary recomputes it from buckets that are individually rounded, and
-        # the two need not agree. {Invoice#stated_gross} carries the document's figure **only
-        # when it differs**, which is the same rule {Line#row_number} follows and for the same
-        # reason: stored unconditionally it would make a built invoice unequal to itself
-        # parsed back, and DESIGN.md §7.6's round-trip law with it.
-        #
-        # One sample in twenty-six needs it. Przykład 1 states `2051` where the buckets sum to
-        # `2050.99`; re-emitting the derived figure made the Ministry's own first example a
-        # grosz cheaper, invisibly (docs/REFERENCE.md §17.1).
-        def resolve_stated_gross(invoice, fa_node, totals)
-          return invoice if totals
-
-          stated = text(fa_node, "P_15")
-          return invoice if stated.nil?
-
-          gross = Formatting.decimal(stated).round(Formatting::AMOUNT_SCALE)
-          gross == invoice.gross_total ? invoice : invoice.with(stated_gross: gross)
         end
       end
     end

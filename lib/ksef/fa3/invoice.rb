@@ -112,7 +112,7 @@ module Ksef
           invoice_type: Formatting.text(invoice_type),
           correction: correction, totals: totals, order: order,
           advances: Correction.wrap(advances).dup.freeze, raw_document: raw_document,
-          stated_gross: self.class.scaled_gross(stated_gross, totals),
+          stated_gross: self.class.scaled_gross(stated_gross, totals, rows, rounding),
           # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
           # Date it denotes must not produce two unequal invoices (§8.2b).
           issue_date: Formatting.to_date(issue_date),
@@ -124,21 +124,30 @@ module Ksef
       end
 
       # `P_15` as the **document stated it**, for an invoice whose summary is otherwise derived
-      # from its rows. It is `nil` for a built invoice, which has no document to have stated
-      # anything, and `nil` when {#totals} is present, because a stated summary already carries
-      # its own gross and two sources for one figure is one too many.
+      # from its rows. `nil` for a built invoice with nothing to state, `nil` when {#totals} is
+      # present (a stated summary already carries its own gross), and **`nil` when it equals
+      # what the rows derive** — the {Line#row_number} rule, and here for the same reason:
+      # kept unconditionally, a built invoice would be unequal to itself parsed back and
+      # DESIGN.md §7.6 would fail.
       #
-      # Why it has to exist: `P_15` is `minOccurs="1"`, so **every** document states it, and a
-      # derived gross need not equal the stated one. The Ministry's Przykład 1 is the witness —
-      # `1666.66 + 383.33 + 0.95 + 0.05` is `2050.99` against a stated `P_15` of `2051`, because
-      # tax is rounded per bucket and the invoice's true total is not. Deriving it re-emitted the
-      # invoice a grosz cheaper, with `#unmapped_elements` silent (the element is present either
-      # way) and `#errors` empty. A stated amount altered in silence — the same class as `P_9A`
-      # (§8.6), and found the same way, by measuring rather than by reading the code.
-      def self.scaled_gross(stated_gross, totals)
+      # That canonicalisation lives here rather than in the parser deliberately. It was in the
+      # parser until the 2026-08-26 audit, which pointed out that {.positioned} does the
+      # equivalent job for `row_number` in the **model**, so `Invoice.new(stated_gross:)` and
+      # `#with(stated_gross:)` — both public — bypassed it and broke the round-trip law with
+      # no diagnostic.
+      #
+      # Why the field exists at all: `P_15` is mandatory in `Fa`, so **every** document states
+      # it, and a derived gross need not equal the stated one. The Ministry's Przykład 1 is the
+      # witness — its nets are computed back from round gross prices of 2000/50/1 and rounded
+      # down, so the rows total 2050.99 against a stated `P_15` of 2051. Deriving it re-emitted
+      # the invoice a grosz cheaper, with `#unmapped_elements` silent (the element is present
+      # either way) and `#errors` empty. A stated amount altered in silence — the same class as
+      # `P_9A` (§8.6), and found the same way, by measuring rather than by reading the code.
+      def self.scaled_gross(stated_gross, totals, rows, rounding)
         return nil if stated_gross.nil? || totals
 
-        Formatting.decimal(stated_gross).round(Formatting::AMOUNT_SCALE)
+        gross = Formatting.decimal(stated_gross).round(Formatting::AMOUNT_SCALE)
+        gross == Summaries.derived_gross(rows, rounding) ? nil : gross
       end
 
       # The two constructor invariants that are about the line list rather than a field, kept
@@ -188,16 +197,13 @@ module Ksef
       # and the row serialises without a `P_11`. The short-circuit's justification survives on
       # the remaining three; the guard against that row is now tier 1's alone.)
       #
-      # Then {DocumentValidator} (tier 1b) and {Validator} (tier 2) on the same bytes, and
-      # {BusinessValidator} (tier 3) on the model again.
+      # Then {DocumentValidator} (tier 1b) and {Validator} (tier 2) on the same bytes.
       #
-      # **Tier 3 runs last and runs regardless.** Last because a reconciliation complaint is
-      # the least actionable thing here — being told the buckets are out by 40 zloty is no
-      # help while the document is also missing a mandatory element. Regardless, because
-      # unlike tier 1a it cannot *cause* an exception downstream: it reads figures that have
-      # already been computed, so there is nothing for it to short-circuit. Its catalogue is
-      # very nearly empty and honestly so — see {BusinessValidator} and docs/REFERENCE.md
-      # §15.6, §17.
+      # **Tier 3 is deliberately not here.** {BusinessValidator} reconciles figures the
+      # document states independently, and a Polish invoice priced from round gross prices
+      # routinely fails that check while being perfectly legal — so making it an error would
+      # refuse legal documents, which is exactly what got KSeF's own proposed business rule
+      # withdrawn (docs/REFERENCE.md §15.6). It is advisory, and lives on {#warnings}.
       #
       # @param max_bytes [Integer] the document-size ceiling for this context. KSeF's 1 MB is a
       #   *default* that an organisation can have raised on application (docs/REFERENCE.md
@@ -209,13 +215,21 @@ module Ksef
 
         document = to_xml
         DocumentValidator.errors_for(document, max_bytes: max_bytes) +
-          Validator.errors_for(document).map { |message| Issue.new(field: "schema", message: message) } +
-          BusinessValidator.errors_for(self)
+          Validator.errors_for(document).map { |message| Issue.new(field: "schema", message: message) }
       rescue Ksef::Error => e
         # A serialisation refusal the model tier did not anticipate. Reported rather than
         # raised, so `#errors` always answers the question it was asked.
         [Issue.new(field: "document", message: e.message)]
       end
+
+      # Tier 3 (§7.7): reconciliation between figures the document states independently.
+      # **Advisory** — these never make an invoice invalid and never block a send. A warning
+      # here means "these numbers do not add up; that may be fine", not "KSeF will reject
+      # this" (docs/REFERENCE.md §17.1, and §14.3 for the precedent).
+      #
+      # @return [Array<Issue>] empty when nothing disagrees, or when nothing states two
+      #   figures independently to compare
+      def warnings = BusinessValidator.warnings_for(self)
 
       def valid?(**) = errors(**).empty?
 

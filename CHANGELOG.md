@@ -25,19 +25,22 @@ gem version for which API state".
 
 ### Added
 
-- **Validator tier 3** — `Ksef::FA3::BusinessValidator`, on `Invoice#errors` after the other
-  three tiers. It holds **one rule**, and the size is the finding rather than a shortfall: no
+- **Validator tier 3** — `Ksef::FA3::BusinessValidator`, reached through **`Invoice#warnings`**. It holds **one rule**, and the size is the finding rather than a shortfall: no
   file in `CIRFMF/ksef-api` states a reconciliation rule anywhere, and the only business
   validation KSeF ever proposed was withdrawn after it turned out to reject legal invoices. So
   the tier is built on the one grounding that needs no catalogue — arithmetic that follows from
   what a field is documented to be. `P_13_1` is annotated as a sum; checking a sum is not policy.
 
-  The rule is `Σ P_13_* + Σ P_14_* == P_15`, with a **one-grosz tolerance** and a
-  **bucket-presence guard**, both fixed by measurement over the Ministry's 26 worked examples
-  rather than by text: Przykład 1 is out by a grosz through per-bucket tax rounding, and
-  Przykład 16 states `P_15` alone. Without either, the rule rejects the Ministry's own invoices.
-  The `W` twins are excluded — `P_14_1W` is a PLN equivalent, not a second tax.
-  (`docs/REFERENCE.md` §17.)
+  **It is advisory and never makes an invoice invalid**, which is the whole design. The rule is
+  `Σ P_13_* + Σ P_14_* ≈ P_15` compared over figures the *document* states — never against the
+  model's own derivation — with a one-grosz tolerance and a bucket-presence guard. A Polish
+  invoice whose nets are computed back from round gross prices misses it by roughly a grosz per
+  line and is entirely legal; the Ministry's own Przykład 1 is one. Making that an error would
+  refuse legal documents through `Client#send_invoice`, which is exactly what got KSeF's own
+  proposed business rule withdrawn. The `W` twins are excluded — `P_14_1W` is a PLN equivalent,
+  not a second tax. (`docs/REFERENCE.md` §17.)
+
+- **`Invoice#warnings`**, the advisory tier — empty unless a document's own figures disagree.
 
 - **`Invoice#stated_gross`** and **`Invoice#summary_buckets`**, both public. The first carries
   the document's `P_15` when it differs from the derived figure; the second is the summary as
