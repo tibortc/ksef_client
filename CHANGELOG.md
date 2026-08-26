@@ -24,6 +24,23 @@ gem version for which API state".
 > yet, so it is absent rather than stubbed.
 
 ### Added
+- **A recorded flow for the two retrieval paths nothing had ever run**:
+  `GET /invoices/ksef/{ksefNumber}` and the pre-signed **storage** leg. All 31 interactions in
+  the first three cassettes were on the API host, and none touched `/invoices/ksef/` — so
+  `Invoices::Client#download`, `HTTP::Connection.storage` and `x-ms-meta-hash` verification *on
+  that route* were carried, documented and WebMock-verified without ever having run. DESIGN.md
+  §9.1 asserted the storage request "is part of the cassette too", which was never true:
+  `Client#upo` deliberately uses the metered per-invoice route, so the unmetered link is only
+  reached by `#collective_upo`. The `uri_without_param` matcher existed the whole time for a
+  request nothing made. One invoice covers both paths.
+
+  Scrubbing that request needed two changes. The **request URI** is now redacted, not just
+  bodies — the storage leg puts the signature in the request line, where nothing was looking.
+  And the placeholder stays a query *parameter* (`sig=<REDACTED>`), because a bare marker leaves
+  a query the matcher cannot strip, so a request replayed from the scrubbed body would not match
+  the recorded one. All twelve SAS parameters are ignored for matching now, not just the six
+  that look secret.
+
 
 - **A golden file for the attachment** (`spec/fixtures/fa3/golden/vat_attachment.xml`), carrying
   two blocks. A mutation audit found eight of thirty-eight mutations surviving a suite with

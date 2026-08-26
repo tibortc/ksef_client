@@ -105,12 +105,30 @@ module RecordedTier
   SIGNED_URL_FIELD = /("(?:upoDownloadUrl|downloadUrl)"\s*:\s*")([^"?]+)\?[^"]*(")/
 
   # What a stripped one looks like, so the scanner can tell "scrubbed" from "never had a query".
-  SIGNED_URL_PLACEHOLDER = "<REDACTED-SIGNATURE>"
+  #
+  # **It stays a query parameter on purpose.** A bare marker would leave the URL with a query
+  # that is not a parameter list, and {IGNORED_QUERY} could not strip it — so a request replayed
+  # from the scrubbed body would not match the recorded one, whose query still had its
+  # parameters. Written as `sig=`, both sides reduce to the bare path and the storage leg is
+  # replayable.
+  SIGNED_URL_PLACEHOLDER = "sig=<REDACTED>"
+
+  # Every parameter of an Azure user-delegation SAS. The signature is the secret; the rest name
+  # the delegation key and its window, and all of them vary per recording — so a URI matcher has
+  # to ignore the lot or nothing on the storage host will ever match.
+  IGNORED_QUERY = %w[sig se sp sr sv st skoid sktid skt ske sks skv].freeze
 
   # Headers carrying session state that no replay needs. Dropped outright: this client has no
   # cookie jar — `grep -rn cookie lib/` is empty — so a recorded cookie is dead weight that
   # happens to be a session identifier.
   DROPPED_HEADERS = %w[Set-Cookie Cookie].freeze
+
+  # Anything shaped like a SAS parameter, wherever it appears.
+  SIGNED_QUERY = /([?&](?:sig|skoid|sks)=)(?!<)[^&\s"]+/
+
+  # **A request URI is scrubbed too.** Redaction started life on bodies, and the storage leg
+  # puts the signature in the request line instead — where nothing was looking.
+  def self.redact_url(uri) = uri.to_s.gsub(SIGNED_QUERY) { "#{Regexp.last_match(1)}<REDACTED>" }
 
   # Redacts what a header may carry and removes what none of them should.
   def self.clean_headers!(message)
@@ -126,7 +144,7 @@ module RecordedTier
   def self.redact_header(value)
     value.to_s
          .gsub(JWT, "<REDACTED-JWT>")
-         .gsub(/([?&](?:sig|skoid|sks)=)(?!<)[^&\s]+/) { "#{Regexp.last_match(1)}#{SIGNED_URL_PLACEHOLDER}" }
+         .gsub(SIGNED_QUERY) { "#{Regexp.last_match(1)}#{SIGNED_URL_PLACEHOLDER}" }
   end
 
   # **Why this exists, and why `filter_sensitive_data` was not enough.**
@@ -194,7 +212,7 @@ VCR.configure do |config|
     # `rake vcr:record` sets `KSEF_VCR_RECORD`; nothing else does, so an ordinary run cannot
     # record by accident even if a cassette is deleted.
     record: ENV["KSEF_VCR_RECORD"] == "1" ? :all : :none,
-    match_requests_on: [:method, VCR.request_matchers.uri_without_param(*%w[sig se sp sr sv st])]
+    match_requests_on: [:method, VCR.request_matchers.uri_without_param(*RecordedTier::IGNORED_QUERY)]
   }
 
   RecordedTier::SECRET_ENV.each do |name|
@@ -217,6 +235,7 @@ VCR.configure do |config|
   config.before_record do |interaction|
     interaction.request.body = RecordedTier.redact(interaction.request.body)
     interaction.response.body = RecordedTier.redact(interaction.response.body)
+    interaction.request.uri = RecordedTier.redact_url(interaction.request.uri)
     RecordedTier.clean_headers!(interaction.request)
     RecordedTier.clean_headers!(interaction.response)
   end

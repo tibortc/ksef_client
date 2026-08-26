@@ -424,7 +424,7 @@ http_interactions:
       - 61-31781195-31747492 PNYN RT(1787747881101 12) q(0 0 0 4) r(0 0) U16
     body:
       encoding: ASCII-8BIT
-      string: '{"ordinalNumber":1,"invoiceNumber":"REC/20260826123758","ksefNumber":"2621394686-20260826-66E3D7000000-6E","referenceNumber":"20260826-EE-2B5F7B3000-A964DD580C-EE","invoiceHash":"+aoNy2shfBIgOSMgbh0/LwKdJzAsFQkslx1a8o5h4dk=","acquisitionDate":"2026-08-26T12:37:59.9899137+00:00","invoicingDate":"2026-08-26T12:37:59.8592268+00:00","upoDownloadUrl":"https://api-test.ksef.mf.gov.pl/storage/06/20260826-so-2b5f6ce000-a96aeb7827-db/invoice-upo/upo_2621394686-20260826-66E3D7000000-6E.xml?<REDACTED-SIGNATURE>","upoDownloadUrlExpirationDate":"2026-08-29T12:38:01.1408387+00:00","invoicingMode":"Online","status":{"code":200,"description":"Sukces"}}'
+      string: '{"ordinalNumber":1,"invoiceNumber":"REC/20260826123758","ksefNumber":"2621394686-20260826-66E3D7000000-6E","referenceNumber":"20260826-EE-2B5F7B3000-A964DD580C-EE","invoiceHash":"+aoNy2shfBIgOSMgbh0/LwKdJzAsFQkslx1a8o5h4dk=","acquisitionDate":"2026-08-26T12:37:59.9899137+00:00","invoicingDate":"2026-08-26T12:37:59.8592268+00:00","upoDownloadUrl":"https://api-test.ksef.mf.gov.pl/storage/06/20260826-so-2b5f6ce000-a96aeb7827-db/invoice-upo/upo_2621394686-20260826-66E3D7000000-6E.xml?sig=<REDACTED>","upoDownloadUrlExpirationDate":"2026-08-29T12:38:01.1408387+00:00","invoicingMode":"Online","status":{"code":200,"description":"Sukces"}}'
   recorded_at: Wed, 26 Aug 2026 12:38:01 GMT
 - request:
     method: get
