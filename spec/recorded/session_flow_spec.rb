@@ -29,7 +29,21 @@ require "spec_helper"
 # checksum — only PROD checks the digits (§15.3) — and fails the schema's structural rule that
 # the first digit is non-zero (§13). So every value that differs between the two modes is read
 # from the environment, and the fallback exists only so a replay can construct.
-RSpec.describe "the session flow, recorded", :recorded, vcr: { cassette_name: "session_flow" } do
+# **One cassette per example, not one for the describe block.** The first version shared a
+# single `session_flow` cassette across every example, and each example runs a *whole* flow —
+# open a session, send, poll, close, fetch the UPO. Their interactions therefore interleaved in
+# one file, and because every `POST /sessions/online` has the same URI, replay handed them out
+# in recorded order: one example drifting by a single request left a later one asking for a UPO
+# under session references that belonged to a different flow. VCR called it
+# `UnhandledHTTPRequestError`, which is accurate and unhelpful.
+#
+# `vcr: true` with `configure_rspec_metadata!` names the cassette after the example, so each is
+# self-contained, order-independent, and re-recordable on its own.
+#
+# The examples are grouped rather than split one-assertion-each for a reason that is not style:
+# **each example is one real invoice in TEST**, permanent and unwithdrawable. Two examples cost
+# two invoices per recording; four cost four.
+RSpec.describe "the session flow, recorded", :recorded, :vcr do
   def recording? = ENV["KSEF_VCR_RECORD"] == "1"
 
   # The real context when recording; a format-valid stand-in when replaying. The stand-in is
@@ -71,49 +85,34 @@ RSpec.describe "the session flow, recorded", :recorded, vcr: { cassette_name: "s
     end
   end
 
-  it "sends an invoice and is given a KSeF number" do
+  # One invoice, three facts that only a real response can establish: KSeF accepted what this
+  # gem encrypted, it assigned a number, and our CRC-8 agrees with the one it chose (§13).
+  it "sends an invoice, and the KSeF number it returns passes our own checksum" do
     status = wait_for(client.send_invoice(invoice, encryptor: encryptor))
 
     expect(status).to be_success
     expect(status.ksef_number).to be_a(String)
-  end
-
-  # §13: the checksum is ours and the number is theirs, so agreement is a real assertion.
-  it "is given a KSeF number whose CRC-8 agrees with ours" do
-    status = wait_for(client.send_invoice(invoice, encryptor: encryptor))
-
     expect(Ksef::KsefNumber.parse(status.ksef_number)).to be_checksum_verified
   end
 
-  # §12.3: the UPO comes back over a credential-free connection to a different host, and its
-  # bytes are kept verbatim because it is legal proof of receipt (§12.2).
+  # A second invoice, for the UPO. §12.3: it arrives over a credential-free connection to a
+  # different host, and its bytes are kept verbatim because it is legal proof of receipt.
   #
-  # **The first version asserted `include("upo-v4-3")` and failed on a perfectly good UPO.**
-  # `upo-v4-3` is the `X-KSeF-Feature` *header* value ({Sessions::UPO_VERSION}); the document's
-  # namespace is `…/KSeF/v4-3`. Asserted against the bundled schema's own namespace rather than
-  # a literal, so the two cannot drift apart.
-  it "returns a UPO in the version whose schema this gem bundles" do
+  # The signature assertion is the one this tier exists for. §14.7: a real UPO is XAdES-signed
+  # while upstream's own UPO schema declares no `ds:Signature`, and none of the six published
+  # examples is signed — so nothing offline could reveal it. The live run of 2026-08-24 found
+  # it; this is what keeps it found.
+  it "returns a signed UPO in the version whose schema this gem bundles" do
     receipt = client.send_invoice(invoice, encryptor: encryptor)
     wait_for(receipt)
 
-    root = Nokogiri::XML(client.upo(receipt).xml).root
+    upo = client.upo(receipt)
+    document = Nokogiri::XML(upo.xml)
 
-    expect(root.name).to eq("Potwierdzenie")
-    expect(root.namespace.href).to eq(Ksef::UPO::NAMESPACE)
-  end
-
-  # §14.7, and only a real UPO can show it: the document is XAdES-signed, while upstream's own
-  # UPO schema declares no `ds:Signature`. None of the six published examples is signed, so
-  # nothing offline could have revealed it — the live run of 2026-08-24 found it, and this is
-  # what keeps it found.
-  it "is signed, which upstream's own schema does not allow for" do
-    receipt = client.send_invoice(invoice, encryptor: encryptor)
-    wait_for(receipt)
-
-    document = Nokogiri::XML(client.upo(receipt).xml)
-
+    expect(document.root.name).to eq("Potwierdzenie")
+    expect(document.root.namespace.href).to eq(Ksef::UPO::NAMESPACE)
     expect(document.xpath("//ds:Signature", "ds" => Ksef::UPO::Validator::SIGNATURE_NAMESPACE))
       .not_to be_empty
-    expect(Ksef::UPO::Validator.validate(client.upo(receipt).xml)).to be_valid
+    expect(Ksef::UPO::Validator.validate(upo.xml)).to be_valid
   end
 end
