@@ -34,9 +34,15 @@ RSpec.describe "invoice retrieval, recorded", :recorded, :vcr do
     Ksef::Crypto::Encryptor.new(key: ["33" * 32].pack("H*"), iv: ["44" * 16].pack("H*"))
   end
 
+  # The prefix is fixed and the suffix is not: §15.2's duplicate key is NIP + number + issue
+  # date, so a re-recording needs a number no earlier recording used — which is exactly why the
+  # *number* cannot be asserted on replay. The prefix can be, and it is what distinguishes our
+  # invoice from any other the context holds.
+  def number_prefix = "FV/REC/DL/"
+
   def invoice
     Ksef::FA3.build do |f|
-      f.number "FV/REC/DL/#{Time.now.strftime("%Y%m%d%H%M%S")}"
+      f.number "#{number_prefix}#{Time.now.strftime("%Y%m%d%H%M%S")}"
       f.issue_date Date.today
       f.seller nip: context_nip, name: "Recorded Seller sp. z o.o.",
                address: { street: "Prosta 1", city: "Warszawa", postal_code: "00-001", country: "PL" }
@@ -63,8 +69,7 @@ RSpec.describe "invoice retrieval, recorded", :recorded, :vcr do
   end
 
   it "downloads an accepted invoice by its KSeF number, and follows the unmetered UPO link" do
-    sent = invoice
-    receipt = client.send_invoice(sent, encryptor: encryptor)
+    receipt = client.send_invoice(invoice, encryptor: encryptor)
     accepted = wait_for(receipt)
     wait_for_session(receipt.session_reference)
 
@@ -73,12 +78,23 @@ RSpec.describe "invoice retrieval, recorded", :recorded, :vcr do
     expect(accepted).to be_success
 
     # 2. `GET /invoices/ksef/{ksefNumber}`. KSeF hands back the FA(3) document verbatim, so it
-    #    must parse and carry the number we sent — this is the round trip through the service
-    #    rather than through our own serializer.
-    downloaded = client.download_invoice(accepted.ksef_number)
+    #    must parse, validate, and be *ours* — a round trip through the service rather than
+    #    through our own serializer.
+    #
+    #    Asserted on the prefix and the seller rather than the whole number: the number carries
+    #    a timestamp so each recording is unique, so a replay regenerates a different one and
+    #    comparing them would fail on every run but the recording itself.
+    downloaded = Ksef::FA3.parse(client.download_invoice(accepted.ksef_number))
 
-    expect(Ksef::FA3.parse(downloaded).number).to eq(sent.number)
-    expect(Ksef::FA3::Validator.errors_for(downloaded)).to be_empty
+    #    The seller is checked against the NIP the **KSeF number itself carries** (§13), not
+    #    against `context_nip` — that one is a placeholder on replay, while the document holds
+    #    the real one. This way the assertion says the same thing in both modes: the document
+    #    KSeF returned belongs to the number we asked it for.
+    expect(downloaded).to have_attributes(
+      number: start_with(number_prefix),
+      seller: have_attributes(nip: Ksef::KsefNumber.parse(accepted.ksef_number).nip),
+      errors: be_empty
+    )
 
     # 3. The storage leg. `#collective_upo` follows the pre-signed link, on a connection with no
     #    bearer and no base URL, and verifies `x-ms-meta-hash` over the bytes it gets back —
