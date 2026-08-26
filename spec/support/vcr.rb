@@ -21,7 +21,20 @@ module RecordedTier
 
   # Env vars whose values must never reach a cassette. Read rather than listed literally, so a
   # machine that holds a real credential scrubs its own.
-  SECRET_ENV = %w[KSEF_TEST_TOKEN KSEF_TEST_NIP].freeze
+  #
+  # **`KSEF_TEST_NIP` is deliberately not here, and that took a failed recording to learn.**
+  # A NIP is a public company identifier: it is printed on every invoice, and
+  # `Ksef::KsefNumber::FORMAT` opens with `(\d{10})` — the KSeF number *embeds* it. Scrubbing
+  # it therefore rewrote the middle of every KSeF number into `<KSEF_TEST_NIP>-20260826-…`,
+  # which `KsefNumber.parse` refuses, and altered the UPO's bytes so they no longer matched the
+  # `x-ms-meta-hash` KSeF sent, which `UPO::Document#verify!` refuses.
+  #
+  # Both of those checks are things **only** a real response can give — our CRC-8 meeting a
+  # number KSeF generated, and KSeF's own integrity header over its own bytes — so scrubbing
+  # the NIP cost exactly the assertions the recorded tier exists for. `docs/REFERENCE.md` §4.1
+  # classes the **token** as the confidential thing and says nothing about the NIP; confirmed
+  # as a deliberate decision by the maintainer, 2026-08-26.
+  SECRET_ENV = %w[KSEF_TEST_TOKEN].freeze
 
   # @return [Boolean] whether anything has been recorded yet
   def self.recorded? = Dir.glob(File.join(DIR, "**", "*.yml")).any?
