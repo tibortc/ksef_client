@@ -102,6 +102,58 @@ RSpec.describe "the recorded test tier" do
     expect(counts.values.sum).to eq(1)
   end
 
+  # **VCR hands `before_record` an `ASCII-8BIT` body**, and a UTF-8 pattern matched against one
+  # raises `Encoding::CompatibilityError` as soon as it holds a non-ASCII byte — which KSeF's
+  # bodies always do. The hooks run only while recording, so no local run exercised them: a real
+  # recording died here *after* creating a permanent TEST invoice, which is the second
+  # recording-only failure this tier has had (DESIGN.md §9.1).
+  #
+  # These call the hooks the way VCR does.
+  describe "the record hooks, against bodies encoded as VCR delivers them" do
+    let(:polish) { "Uwierzytelnianie zakończone" }
+
+    it "redacts a binary JSON body without raising, and keeps its encoding" do
+      body = %({"token":"eyJhbGciOi.JzdWIi.sig","opis":"#{polish}"}).force_encoding("ASCII-8BIT")
+      redacted = RecordedTier.redact(body)
+
+      # Read back as UTF-8 to compare: the result keeps the binary tag VCR gave it, and
+      # comparing a binary String against a UTF-8 literal raises rather than answering false.
+      expect(redacted.dup.force_encoding("UTF-8")).to include("<REDACTED>", polish)
+      expect(redacted.encoding).to eq(Encoding::ASCII_8BIT)
+    end
+
+    it "leaves a binary XML body exactly as it was, so its published hash still matches" do
+      upo = %(<?xml version="1.0"?><Potwierdzenie>Łódź</Potwierdzenie>).dup.force_encoding("ASCII-8BIT")
+
+      expect(RecordedTier.redact(upo)).to eq(upo)
+    end
+
+    it "exempts XML that carries a byte-order mark, which lstrip does not remove" do
+      expect(RecordedTier.xml?(%(\xEF\xBB\xBF<?xml version="1.0"?><a/>).b)).to be(true)
+    end
+
+    it "does not exempt a body merely because it starts with a less-than sign" do
+      expect(RecordedTier.xml?("<<< not xml".b)).to be(false)
+      expect(RecordedTier.xml?(%({"a":1}).b)).to be(false)
+    end
+
+    # The storage leg puts the signature in the request line, not the body.
+    it "redacts a signature out of a binary request URI" do
+      url = "https://s/upo.xml?skoid=aa&sig=SECRET%3D&se=2026-08-29T12:00:00Z".dup.force_encoding("ASCII-8BIT")
+
+      expect(RecordedTier.redact_url(url)).to eq("https://s/upo.xml?skoid=<REDACTED>&sig=<REDACTED>&se=2026-08-29T12:00:00Z")
+    end
+
+    # A bare marker would leave a query the URI matcher cannot strip, so a request replayed from
+    # the scrubbed body would never match the recorded one.
+    it "leaves a scrubbed download URL shaped like a query parameter" do
+      body = %({"upoDownloadUrl":"https://s/u.xml?skoid=a&sig=S%3D"}).dup.force_encoding("ASCII-8BIT")
+
+      expect(RecordedTier.redact(body)).to include("?sig=<REDACTED>")
+      expect(RecordedTier::IGNORED_QUERY).to include("sig", "skoid", "sks", "skv")
+    end
+  end
+
   # DESIGN.md §11 Phase 3 publishes 0.1.0. The recorded tier is Phase 2 scope, so it must not
   # still be empty by then — and this is the gate that will say so, rather than a reader
   # noticing. Runs only under KSEF_RELEASE_CHECK=1, like the other release gates.

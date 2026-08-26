@@ -556,10 +556,23 @@ clock — see obstacle 2 — or the replay fails for a reason that has nothing t
 **5. Polling is a sequence, not a request.** §12.1 requires polling while `code < 200`, so a
 recorded run contains several `GET`s of the same URI returning *different* bodies. VCR replays
 matching interactions in order only if `allow_playback_repeats` is left `false`; the specs must
-also stub the poller's sleep or a replay takes as long as the original. The UPO arrives on a
-different host through `HTTP::Connection.storage` (no bearer, no base URL, §12.3), so that
-request is part of the cassette too and its pre-signed query string must be scrubbed **and**
-excluded from URI matching.
+also stub the poller's sleep or a replay takes as long as the original.
+
+**The storage leg needs a flow that actually reaches it.** This paragraph used to assert that
+the UPO "arrives on a different host through `HTTP::Connection.storage` … so that request is
+part of the cassette too". It was not, for two rounds: `Client#upo` deliberately uses the
+**metered per-invoice route** (§11.2a), so the pre-signed link is only followed by
+`#collective_upo`, and the first three cassettes recorded neither that nor
+`GET /invoices/ksef/{ksefNumber}` — all 31 of their interactions were on the API host. The
+`uri_without_param` matcher existed the whole time for a request nothing made.
+`spec/recorded/invoice_download_spec.rb` records both, sharing one invoice.
+
+Scrubbing that request taught one more thing: **the placeholder has to stay a query
+parameter.** A bare marker leaves a query that is not a parameter list, so the matcher cannot
+strip it, and a request replayed from the scrubbed body no longer matches the recorded one. It
+is written `sig=<REDACTED>` so both sides reduce to the bare path. All twelve SAS parameters are
+ignored for matching, not just the six that look secret — the rest name the delegation key and
+vary per recording just as much.
 
 #### Order of work
 
@@ -818,6 +831,35 @@ about pinning was false for one of three cassettes. Harmless at that distance; n
 general, since a far enough origin puts the pinned clock before the token was minted.
 
 Removed 2026-08-26. When re-recording, check the interaction list belongs to one flow.
+
+#### The record hooks run on bytes, and only during a recording
+
+Found 2026-08-26 by a real recording that died **after** creating a permanent TEST invoice and
+before writing the cassette:
+
+```
+Encoding::CompatibilityError:
+  incompatible encoding regexp match (UTF-8 regexp with BINARY (ASCII-8BIT) string)
+```
+
+VCR hands `before_record` an `ASCII-8BIT` body. A UTF-8 pattern matched against one raises as
+soon as the string holds a non-ASCII byte — and KSeF's bodies are full of Polish. The first three
+cassettes never hit it because their bodies arrived tagged UTF-8; the first `application/xml`
+responses (a UPO from storage, and a downloaded invoice) did not.
+
+**Nothing local could have caught it**, because `before_record` does not run on replay. That is
+the same shape as the fifteen-minute credential and the injected dispatch input: code that only
+executes in a credentialed run, where the cost of a mistake is a TEST invoice rather than a red
+build. Every pattern in `spec/support/vcr.rb` now matches in binary — they are all pure ASCII, as
+is everything they match — and the body's original encoding is restored afterwards.
+`spec/recorded_tier_spec.rb` calls the hooks with bodies encoded the way VCR delivers them, which
+is the check that was missing.
+
+**Before spending a recording, dry-run the hooks.** Build a synthetic cassette of the shapes the
+new flow will produce and run `RecordedTier.redact` and `.redact_url` over every interaction with
+its body forced to `ASCII-8BIT`. That, and replaying the flow against the synthetic cassette,
+found three defects here before any of them cost an invoice — including that `#collective_upo`
+reads the session state a *second* time, which a one-read cassette cannot satisfy.
 
 #### What not to do
 

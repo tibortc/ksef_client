@@ -83,13 +83,17 @@ RSpec.shared_context "with a recorded KSeF flow" do
   after do |example|
     next if recording? || example.exception
 
+    # **At least**, not exactly: the authentication poll is the sleep this can count from the
+    # cassette, and a spec may poll something else as well — `invoice_download_spec` waits for
+    # the session to finish processing, through the same injected sleeper. The floor is what
+    # catches the regression this guards, since removing the injection takes the count to zero.
     expected = [cassette_facts[:status_polls] - 1, 0].max
-    next if sleeper.calls.size == expected
+    next if sleeper.calls.size >= expected
 
     # `raise` rather than `expect`: an assertion belongs in an example, and this is a hook.
-    raise "expected #{expected} injected sleep(s) between #{cassette_facts[:status_polls]} " \
-          "recorded status polls, got #{sleeper.calls.size}. If it is 0, this replay used the " \
-          "real `sleep` — check `sleeper:` still reaches " \
+    raise "expected at least #{expected} injected sleep(s) between " \
+          "#{cassette_facts[:status_polls]} recorded status polls, got #{sleeper.calls.size}. " \
+          "If it is 0, this replay used the real `sleep` — check `sleeper:` still reaches " \
           "`Auth::Client#wait_until_complete` (DESIGN.md §9.1)."
   end
 

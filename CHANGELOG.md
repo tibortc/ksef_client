@@ -24,6 +24,23 @@ gem version for which API state".
 > yet, so it is absent rather than stubbed.
 
 ### Added
+- **A recorded flow for the two retrieval paths nothing had ever run**:
+  `GET /invoices/ksef/{ksefNumber}` and the pre-signed **storage** leg. All 31 interactions in
+  the first three cassettes were on the API host, and none touched `/invoices/ksef/` — so
+  `Invoices::Client#download`, `HTTP::Connection.storage` and `x-ms-meta-hash` verification *on
+  that route* were carried, documented and WebMock-verified without ever having run. DESIGN.md
+  §9.1 asserted the storage request "is part of the cassette too", which was never true:
+  `Client#upo` deliberately uses the metered per-invoice route, so the unmetered link is only
+  reached by `#collective_upo`. The `uri_without_param` matcher existed the whole time for a
+  request nothing made. One invoice covers both paths.
+
+  Scrubbing that request needed two changes. The **request URI** is now redacted, not just
+  bodies — the storage leg puts the signature in the request line, where nothing was looking.
+  And the placeholder stays a query *parameter* (`sig=<REDACTED>`), because a bare marker leaves
+  a query the matcher cannot strip, so a request replayed from the scrubbed body would not match
+  the recorded one. All twelve SAS parameters are ignored for matching now, not just the six
+  that look secret.
+
 
 - **A golden file for the attachment** (`spec/fixtures/fa3/golden/vat_attachment.xml`), carrying
   two blocks. A mutation audit found eight of thirty-eight mutations surviving a suite with
@@ -158,6 +175,16 @@ gem version for which API state".
   the document will carry it, rounded per bucket.
 
 ### Fixed
+
+- **The VCR record hooks raised on any body VCR delivered as `ASCII-8BIT`.** A UTF-8 pattern
+  matched against a binary string raises as soon as it holds a non-ASCII byte, and KSeF's bodies
+  are full of Polish. The first three cassettes never hit it because their bodies arrived tagged
+  UTF-8; the first `application/xml` responses did not, and a real recording died after creating
+  a permanent TEST invoice. `before_record` does not run on replay, so no local check exercised
+  it. Every pattern now matches in binary — all of them are pure ASCII, as is everything they
+  match — with the body's encoding restored afterwards, and `spec/recorded_tier_spec.rb` calls
+  the hooks with bodies encoded as VCR delivers them.
+
 
 - **`#errors` raised instead of reporting for two attachment shapes.** `Invoice#attachment` was
   a public constructor field tier 1a never inspected, so a value that was not an `Attachment`
