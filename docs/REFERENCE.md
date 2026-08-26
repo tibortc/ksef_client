@@ -2952,3 +2952,99 @@ One oddity, flagged rather than resolved: the 2.7.0 row is dated `21.07.2027` fo
 year after the commit that introduces it (authored 2026-07-21). Every other row is
 chronologically consistent. Most likely an upstream typo for 2026; do not build anything on
 that date.
+
+---
+
+## 17. Validator tier 3 — what it checks, and why it checks so little
+
+Built 2026-08-26. `Ksef::FA3::BusinessValidator`, attached to `Invoice#errors` after tiers 1a,
+1b and 2. It holds **one rule**, and the small size is the finding rather than a shortfall.
+
+§15.6 is the reason: no file in `ksef-api` states a reconciliation rule, the only business
+validation KSeF ever proposed was withdrawn after it turned out to reject legal invoices, and
+the Ministry's own remark in that thread — that no production invoice violated it — is evidence
+the service today enforces nothing beyond the schema. So the tier is built on the one grounding
+that needs no catalogue: **arithmetic that follows from what a field is documented to be.**
+`P_13_1` is annotated as a *sum*; checking a sum is not policy. Everything else waits.
+
+### 17.1 The summary-reconciliation rule
+
+`Σ P_13_* + Σ P_14_* == P_15`, within one grosz, skipped when no buckets are stated.
+
+**Measured, not read.** Every figure below was taken from the 26 pinned samples:
+
+| | Samples | Note |
+|---|---|---|
+| reconcile exactly | 24 | including all six non-`VAT` types |
+| out by one grosz | 1 | Przykład 1 |
+| no buckets to reconcile | 1 | Przykład 16 |
+
+**Przykład 1 is why there is a tolerance.** It states `P_13_1` 1666.66, `P_14_1` 383.33,
+`P_13_3` 0.95, `P_14_3` 0.05 and `P_15` **2051**. The buckets sum to 2050.99. Nothing is wrong
+with the invoice: each `P_14_x` is the tax on its own bucket rounded to `TKwotowy`'s two
+places, while `P_15` is the amount actually owed, and rounding several buckets then adding them
+need not equal the total. A rule without the tolerance rejects the Ministry's own first example.
+
+The tolerance is **exactly one grosz and is not scaled by bucket count**. Scaling would be the
+theoretically tidier choice and would also be an invention: 24 samples reconcile exactly and
+one is out by one, so there is no evidence for a wider band.
+
+**Przykład 16 is why there is a guard.** A `UPR` may state `P_15` alone — it states 450 with no
+`P_13_*`/`P_14_*` at all. Summing nothing gives zero, so an unguarded rule reports it as 450
+out. No breakdown is not the same as a breakdown that disagrees.
+
+**The `W` twins are excluded, and that is load-bearing.** `P_14_1W` is the PLN equivalent of
+`P_14_1` on a foreign-currency invoice, not a second tax — the XSD says so: *"W przypadku gdy
+faktura jest wystawiona w walucie obcej — kwota podatku … przeliczona"*. Przykład 20 states
+`P_13_1` 13560, `P_14_1` 3118.80, `P_14_1W` 14036.16 against a `P_15` of 16678.80. Counting the
+twin gives 30714.96 and fails a correct invoice. `Totals::ELEMENTS` already excluded them, so
+the rule reads that list rather than deriving its own.
+
+The rule compares the figures **as the document will carry them** — rounded per bucket, exactly
+as `#to_xml` rounds them. Comparing unrounded `BigDecimal`s would make it pass invoices the
+corpus shows to be a grosz out, which is to say it would test something the document is not.
+
+### 17.2 The defect grounding the rule uncovered: `P_15` was derived, not read
+
+**A `VAT` invoice re-serialised the Ministry's Przykład 1 a grosz cheaper, and nothing said so.**
+
+`P_15` is `minOccurs="1"`, so every document states one. The six types in
+`Invoice::STATED_TOTALS_TYPES` read it into `Totals#gross`; `VAT` derived it from its rows
+instead. For 21 of the 22 modelled samples the two agree. For Przykład 1 they do not — 2051
+stated, 2050.99 derived — so parsing and re-serialising it produced an invoice asking for one
+grosz less than the original.
+
+Invisible to everything: tier 2 passes (the value is well-typed), `#unmapped_elements` is silent
+(`P_15` is present either way — a path-difference diagnostic cannot see a changed *value*), and
+even the round-trip law held, because a parsed invoice is already a fixed point. Exactly the
+`P_9A` class from §8.6, found the same way — by measuring the corpus rather than by reading the
+code.
+
+`Invoice#stated_gross` now carries the document's `P_15` **only when it differs** from the
+derived figure. That asymmetry is the `Line#row_number` idiom (§8.4) and it is there for the
+same reason: stored unconditionally, a built invoice would be unequal to itself parsed back and
+DESIGN.md §7.6's round-trip law would fail. It is nil when `totals` is present, because a stated
+summary already carries its own gross and two sources for one figure is one too many.
+
+**And it is what makes tier 3's rule non-vacuous.** A derived summary reconciles with itself by
+construction — `gross_total` *was* `net_total + vat_total`, so the rule could never fire. With a
+stated `P_15` the comparison has two independent figures, one from the document and one from the
+rows, and a real disagreement is now expressible.
+
+Measured after the fix: **`P_15` is byte-identical on re-serialisation for all 22 modelled
+samples**, a property a spec now asserts. The only remaining summary drift in the corpus is
+`P_14_1W` on Przykład 20 and 21, which the model does not carry — and `#unmapped_elements`
+reports that, so it is a visible limit rather than a silent loss.
+
+### 17.3 Two asymmetries of the same shape, still open
+
+Both predate this work and neither is fixed here; recorded so they are not rediscovered.
+
+- **A line built with a quantity and a price and no `net_amount`** serialises a derived `P_11`
+  that parses back *into* `net_amount`, so the built invoice and the parsed one differ in a
+  field the caller never set. DESIGN.md §8's own snippet does this.
+- **An invoice with no `issued_at`** gets one written at serialisation and reads it back.
+
+Both are the same shape as §17.2 — a value the document must carry that the model derives
+rather than holds — and the same remedy would apply. They are separated because each needs its
+own measurement, and because §17.2's had a corpus witness while these have only reasoning.

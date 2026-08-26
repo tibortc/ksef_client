@@ -74,7 +74,9 @@ module Ksef
           type = supported_type!(Formatting.text(text(fa_node, "RodzajFaktury")) || "VAT")
           totals = Invoice::STATED_TOTALS_TYPES.include?(type) ? CorrectionReader.totals_from(fa_node) : nil
 
-          resolve_rounding(build(document, root, fa_node, type, totals), fa_node, totals)
+          invoice = resolve_rounding(build(document, root, fa_node, type, totals), fa_node, totals)
+          # **After** the rounding inference, which decides what "derived" even means here.
+          resolve_stated_gross(invoice, fa_node, totals)
         end
 
         private
@@ -175,6 +177,26 @@ module Ksef
           RoundingInference.apply(
             invoice, RoundingInference.stated_from(fa_node) { |node, name| text(node, name) }
           )
+        end
+
+        # `P_15` is `minOccurs="1"`, so every document states one — but an invoice that
+        # derives its summary recomputes it from buckets that are individually rounded, and
+        # the two need not agree. {Invoice#stated_gross} carries the document's figure **only
+        # when it differs**, which is the same rule {Line#row_number} follows and for the same
+        # reason: stored unconditionally it would make a built invoice unequal to itself
+        # parsed back, and DESIGN.md §7.6's round-trip law with it.
+        #
+        # One sample in twenty-six needs it. Przykład 1 states `2051` where the buckets sum to
+        # `2050.99`; re-emitting the derived figure made the Ministry's own first example a
+        # grosz cheaper, invisibly (docs/REFERENCE.md §17.1).
+        def resolve_stated_gross(invoice, fa_node, totals)
+          return invoice if totals
+
+          stated = text(fa_node, "P_15")
+          return invoice if stated.nil?
+
+          gross = Formatting.decimal(stated).round(Formatting::AMOUNT_SCALE)
+          gross == invoice.gross_total ? invoice : invoice.with(stated_gross: gross)
         end
       end
     end

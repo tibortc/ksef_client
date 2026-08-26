@@ -418,7 +418,26 @@ field path, so a caller learns *which* value to fix. Two properties worth keepin
   `Encoding::CompatibilityError` from `String#strip`. Stated as behaviour rather than as a
   guarantee: it is bounded by the input classes that have been tried.
 
-Tier 3 remains unbuilt and unblocked-but-ungrounded; `Invoice#errors` is where it attaches.
+**Tier 3 built 2026-08-26** — `Ksef::FA3::BusinessValidator`, attached to `Invoice#errors` after
+the other three. It holds **one rule**, and that is the honest state rather than a shortfall:
+§15.6 searched all 77 upstream files and found no reconciliation rule stated anywhere, so the
+tier is built on the only grounding that needs no catalogue — arithmetic that follows from what
+a field is *documented to be*. `P_13_1` is annotated as a sum; checking a sum is not policy.
+
+The rule is `Σ P_13_* + Σ P_14_* == P_15`, and its shape is fixed by measurement over the
+Ministry's 26 worked examples rather than by text: a **one-grosz tolerance**, because Przykład 1
+is out by one through per-bucket tax rounding, and a **bucket-presence guard**, because Przykład
+16 states `P_15` alone. Without either, the rule rejects the Ministry's own invoices. The `W`
+twins are excluded — `P_14_1W` is a PLN equivalent, not a second tax. `docs/REFERENCE.md` §17
+records all of it.
+
+Grounding the rule found a real defect, which §17.2 records: **`P_15` was derived rather than
+read on a `VAT` invoice**, so re-serialising Przykład 1 produced an invoice a grosz cheaper with
+every diagnostic silent. `Invoice#stated_gross` fixes it, and incidentally makes the rule
+non-vacuous — a derived summary reconciles with itself by construction.
+
+The catalogue grows as evidence arrives. **Do not synthesise rules from Polish VAT law and
+record them as verified facts** (§15.6).
 
 ---
 

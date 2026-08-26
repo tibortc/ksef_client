@@ -404,7 +404,10 @@ RSpec.describe Ksef::FA3::Invoice do
         totals: Ksef::FA3::Totals.new(gross: "1500.00", buckets: { "P_13_1" => "1500.00" }),
         order: Ksef::FA3::Order.new(total: "1845.00",
                                     lines: Ksef::FA3::OrderLine.new(name: "Consulting")),
-        advances: [Ksef::FA3::AdvanceInvoice.new(number: "FZ/2026/01/001")]
+        advances: [Ksef::FA3::AdvanceInvoice.new(number: "FZ/2026/01/001")],
+        # The document's own `P_15`, kept only when it differs from the derived one. It is
+        # identity because it changes the amount the invoice says is owed.
+        stated_gross: "9999.00"
       }
     end
 

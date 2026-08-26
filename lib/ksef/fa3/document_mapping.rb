@@ -18,6 +18,20 @@ module Ksef
         }
       end
 
+      # The summary buckets as the document will carry them: element name => amount, rounded
+      # to the two places `TKwotowy` allows. A stated summary answers with what it states; a
+      # derived one with what it derives, rounded per bucket exactly as `#to_xml` rounds it.
+      #
+      # Public because tier 3 reconciles against it ({BusinessValidator}) and reaching for it
+      # through `send` would have made a private method load-bearing from outside.
+      #
+      # @return [Hash{String => BigDecimal}]
+      def summary_buckets
+        return totals.buckets if totals
+
+        bucket_totals.transform_values { |amount| amount.round(Formatting::AMOUNT_SCALE) }
+      end
+
       private
 
       def header

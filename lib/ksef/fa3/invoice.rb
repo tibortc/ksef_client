@@ -16,7 +16,7 @@ module Ksef
     Invoice = Data.define(
       :seller, :buyer, :number, :issue_date, :lines,
       :currency, :issued_at, :rounding, :invoice_type, :annotations,
-      :correction, :totals, :order, :advances, :raw_document
+      :correction, :totals, :order, :advances, :raw_document, :stated_gross
     )
 
     # Computation, defaults and serialisation for {Ksef::FA3::Invoice}.
@@ -79,6 +79,10 @@ module Ksef
       # `#to_fa3` and the element-name mapping behind it.
       include DocumentMapping
 
+      # The summary arithmetic (§8.1a), extracted so this class stays under its length gate
+      # and so tier 3 has one obvious place to read the figures from.
+      include Summaries
+
       # `issued_at` is normalised to the string the document will carry, which is the same
       # rule {Address} and {Line} follow: **the model stores the document's representation,
       # not the caller's input.** A `Time` renders to `"2026-08-22T10:00:00Z"` here rather
@@ -98,7 +102,7 @@ module Ksef
       def initialize(seller:, buyer:, number:, issue_date:, lines: [],
                      currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT",
                      annotations: nil, correction: nil, totals: nil, order: nil, advances: [],
-                     raw_document: nil)
+                     raw_document: nil, stated_gross: nil)
         rows = self.class.rows_for(lines, rounding: rounding, totals: totals)
 
         super(
@@ -108,6 +112,7 @@ module Ksef
           invoice_type: Formatting.text(invoice_type),
           correction: correction, totals: totals, order: order,
           advances: Correction.wrap(advances).dup.freeze, raw_document: raw_document,
+          stated_gross: self.class.scaled_gross(stated_gross, totals),
           # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
           # Date it denotes must not produce two unequal invoices (§8.2b).
           issue_date: Formatting.to_date(issue_date),
@@ -116,6 +121,24 @@ module Ksef
           # invoice parsed back hold the same value and compare equal.
           annotations: annotations || DEFAULT_ANNOTATIONS
         )
+      end
+
+      # `P_15` as the **document stated it**, for an invoice whose summary is otherwise derived
+      # from its rows. It is `nil` for a built invoice, which has no document to have stated
+      # anything, and `nil` when {#totals} is present, because a stated summary already carries
+      # its own gross and two sources for one figure is one too many.
+      #
+      # Why it has to exist: `P_15` is `minOccurs="1"`, so **every** document states it, and a
+      # derived gross need not equal the stated one. The Ministry's Przykład 1 is the witness —
+      # `1666.66 + 383.33 + 0.95 + 0.05` is `2050.99` against a stated `P_15` of `2051`, because
+      # tax is rounded per bucket and the invoice's true total is not. Deriving it re-emitted the
+      # invoice a grosz cheaper, with `#unmapped_elements` silent (the element is present either
+      # way) and `#errors` empty. A stated amount altered in silence — the same class as `P_9A`
+      # (§8.6), and found the same way, by measuring rather than by reading the code.
+      def self.scaled_gross(stated_gross, totals)
+        return nil if stated_gross.nil? || totals
+
+        Formatting.decimal(stated_gross).round(Formatting::AMOUNT_SCALE)
       end
 
       # The two constructor invariants that are about the line list rather than a field, kept
@@ -150,36 +173,6 @@ module Ksef
       end
 
       # Net totals per rate code, in the order the lines first mention each rate, so the
-      # output is stable for a given invoice.
-      #
-      # **This is what the *lines* say**, always — {#totals} does not enter into it, because
-      # a stated summary is keyed by bucket and cannot be resolved back to rate codes
-      # (§8.1a). For a correction that states its own summary the two are different
-      # questions, and an invoice with no lines answers `{}` here while {#net_total} answers
-      # what the document declares.
-      # @return [Hash{String => BigDecimal}]
-      def net_by_rate
-        lines.each_with_object({}) do |line, acc|
-          # A row with no amount, or none with a rate to bucket it under, contributes nothing.
-          # It is legal — see {Line#net} — and tier 1 is what stops one appearing on an invoice
-          # that derives its summary from its rows.
-          next unless line.summarised?
-
-          acc[line.vat_rate] = (acc[line.vat_rate] || BigDecimal(0)) + line.net
-        end
-      end
-
-      # @return [Hash{String => BigDecimal}]
-      def vat_by_rate
-        rounding == :per_line ? vat_rounded_per_line : vat_rounded_per_summary
-      end
-
-      # The three figures the document actually carries: read from {#totals} when the invoice
-      # states them, computed from the lines otherwise.
-      def net_total = totals ? totals.net : net_by_rate.values.sum(BigDecimal(0))
-      def vat_total = totals ? totals.vat : vat_by_rate.values.sum(BigDecimal(0))
-      def gross_total = totals ? totals.gross : net_total + vat_total
-
       def to_xml = Serializer.new(to_fa3).to_xml
 
       # Every validation tier that exists, model first (DESIGN.md §7.7). Document and schema
@@ -195,9 +188,16 @@ module Ksef
       # and the row serialises without a `P_11`. The short-circuit's justification survives on
       # the remaining three; the guard against that row is now tier 1's alone.)
       #
-      # Then {DocumentValidator} (tier 1b) and {Validator} (tier 2) on the same bytes. Tier 3 —
-      # the reconciliation rules — does not exist: its catalogue is absent upstream
-      # (docs/REFERENCE.md §15.6), and this is where it will attach when it does.
+      # Then {DocumentValidator} (tier 1b) and {Validator} (tier 2) on the same bytes, and
+      # {BusinessValidator} (tier 3) on the model again.
+      #
+      # **Tier 3 runs last and runs regardless.** Last because a reconciliation complaint is
+      # the least actionable thing here — being told the buckets are out by 40 zloty is no
+      # help while the document is also missing a mandatory element. Regardless, because
+      # unlike tier 1a it cannot *cause* an exception downstream: it reads figures that have
+      # already been computed, so there is nothing for it to short-circuit. Its catalogue is
+      # very nearly empty and honestly so — see {BusinessValidator} and docs/REFERENCE.md
+      # §15.6, §17.
       #
       # @param max_bytes [Integer] the document-size ceiling for this context. KSeF's 1 MB is a
       #   *default* that an organisation can have raised on application (docs/REFERENCE.md
@@ -209,7 +209,8 @@ module Ksef
 
         document = to_xml
         DocumentValidator.errors_for(document, max_bytes: max_bytes) +
-          Validator.errors_for(document).map { |message| Issue.new(field: "schema", message: message) }
+          Validator.errors_for(document).map { |message| Issue.new(field: "schema", message: message) } +
+          BusinessValidator.errors_for(self)
       rescue Ksef::Error => e
         # A serialisation refusal the model tier did not anticipate. Reported rather than
         # raised, so `#errors` always answers the question it was asked.
@@ -225,27 +226,6 @@ module Ksef
 
         raise ValidationError,
               "Invoice #{number.inspect} is not valid:\n#{found.sort.map { |issue| "  - #{issue}" }.join("\n")}"
-      end
-
-      private
-
-      # Round each line, then sum. Matches an ERP that prices line by line.
-      def vat_rounded_per_line
-        lines.each_with_object({}) do |line, acc|
-          next unless line.summarised?
-
-          acc[line.vat_rate] = (acc[line.vat_rate] || BigDecimal(0)) + line.vat
-        end
-      end
-
-      # Sum the nets, then round once. Fewer rounding events, so it can differ from
-      # :per_line by a grosz — which is exactly why the choice is explicit.
-      def vat_rounded_per_summary
-        net_by_rate.to_h do |code, net|
-          percentage = VatRate.percentage(code)
-          rounded = percentage ? (net * percentage / 100).round(Formatting::AMOUNT_SCALE) : BigDecimal(0)
-          [code, rounded]
-        end
       end
     end
   end
