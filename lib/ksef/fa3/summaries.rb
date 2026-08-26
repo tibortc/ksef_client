@@ -22,11 +22,29 @@ module Ksef
         # where {Invoice.positioned} canonicalises `row_number`, rather than only in the
         # parser (docs/REFERENCE.md §17.2).
         def net_by_rate(lines)
-          lines.each_with_object({}) do |line, acc|
-            next unless line.summarised?
-
+          summable(lines).each_with_object({}) do |line, acc|
             acc[line.vat_rate] = (acc[line.vat_rate] || BigDecimal(0)) + line.net
           end
+        end
+
+        # **`StanPrzed` rows are excluded, and that is a correctness fix rather than a tidy.**
+        # A row marked "stan przed korektą" states the position *as it was*; a correction shows
+        # it beside its replacement. Adding the two together answers a question nobody asked:
+        # on the Ministry's Przykład 2 it gave 3089.42 — 1626.01 before plus 1463.41 after —
+        # against a `net_total` of −162.60. A caller building a per-rate VAT report over
+        # downloaded invoices got a figure nineteen times the truth, with no error and a
+        # passing `#valid?`.
+        #
+        # Nothing that *derives* a summary is affected: tier 1's `SummaryChecks` already
+        # refuses a `state_before` row on an invoice that derives, so these rows only ever
+        # appear where the summary is stated.
+        #
+        # A non-{Line} entry is skipped rather than raised on, matching what
+        # `ModelValidator#line_errors` and `SummaryChecks` already tolerate — this runs inside
+        # `Invoice.new`, and blowing up here would turn a reportable tier-1 issue into a
+        # `NoMethodError` outside this gem's hierarchy.
+        def summable(lines)
+          lines.select { |line| line.is_a?(Line) && !line.state_before && line.summarised? }
         end
 
         def vat_by_rate(lines, rounding)
@@ -43,9 +61,7 @@ module Ksef
 
         # Round each line, then sum. Matches an ERP that prices line by line.
         def per_line(lines)
-          lines.each_with_object({}) do |line, acc|
-            next unless line.summarised?
-
+          summable(lines).each_with_object({}) do |line, acc|
             acc[line.vat_rate] = (acc[line.vat_rate] || BigDecimal(0)) + line.vat
           end
         end

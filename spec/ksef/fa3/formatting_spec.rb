@@ -227,4 +227,53 @@ RSpec.describe Ksef::FA3::Formatting do
         .to eq("2026-08-22T10:00:00Z")
     end
   end
+
+  # `BigDecimal("NaN")` succeeds where `BigDecimal("abc")` raises, so these arrive through the
+  # *String* door: a document stating `<P_11>NaN</P_11>` reached the model and serialised as
+  # `NaN.00`. They also break the `==`/`hash` contract the negative-zero rule exists to hold —
+  # `NaN != NaN`, so two identical lines compared unequal while hashing the same.
+  describe "values that are not amounts" do
+    it "refuses NaN, whichever door it comes through" do
+      ["NaN", BigDecimal("NaN")].each do |value|
+        expect { described_class.decimal(value) }
+          .to raise_error(Ksef::ValidationError, /NaN is not a monetary or quantity value/)
+      end
+    end
+
+    it "refuses Infinity" do
+      expect { described_class.decimal(BigDecimal("Infinity")) }
+        .to raise_error(Ksef::ValidationError, /Infinity is not a monetary or quantity value/)
+    end
+
+    it "reaches a document, which is why it is refused rather than merely discouraged" do
+      source = File.read("spec/fixtures/fa3/golden/vat_single_line.xml", encoding: "UTF-8")
+                   .sub(%r{<P_11>[^<]*</P_11>}, "<P_11>NaN</P_11>")
+
+      expect { Ksef::FA3.parse(source) }.to raise_error(Ksef::ValidationError, /NaN is not/)
+    end
+  end
+
+  # A string can be *invalid* — bytes that decode as nothing — or *validly encoded in
+  # something that is not UTF-8*. `valid_encoding?` answers true for the second, so a
+  # Windows-1250 name (what a Polish ERP emits) passed every guard and then raised
+  # `Encoding::CompatibilityError` out of `#errors`, `#to_xml` and `Client#send_invoice`.
+  describe "encodings that are valid but are not UTF-8" do
+    it "accepts UTF-8, and ASCII or valid UTF-8 bytes tagged binary" do
+      expect(Ksef::FA3::FieldChecks).to be_utf8("Łódź")
+      expect(Ksef::FA3::FieldChecks).to be_utf8("plain".b)
+      expect(Ksef::FA3::FieldChecks).to be_utf8(File.binread("spec/fixtures/fa3/golden/vat_single_line.xml"))
+    end
+
+    it "refuses a named non-UTF-8 encoding, and invalid bytes" do
+      expect(Ksef::FA3::FieldChecks).not_to be_utf8("Łódź".encode("Windows-1250"))
+      expect(Ksef::FA3::FieldChecks).not_to be_utf8("Łódź".encode("ISO-8859-2"))
+      expect(Ksef::FA3::FieldChecks).not_to be_utf8((+"Consul\xFFting").force_encoding("UTF-8"))
+    end
+
+    it "leaves such a value alone rather than collapsing it, so it survives to be reported" do
+      windows = "Łódź".encode("Windows-1250")
+
+      expect(described_class.text(windows)).to equal(windows)
+    end
+  end
 end

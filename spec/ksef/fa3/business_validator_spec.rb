@@ -90,6 +90,32 @@ RSpec.describe Ksef::FA3::BusinessValidator do
       expect(invoice.warnings).to be_empty
     end
 
+    # It reads `raw_document`, and strips namespaces to do so. Without the `dup` that is an
+    # in-place edit of the value object's retained source — the one thing this model promises
+    # to keep verbatim — by an advisory, read-only query. Mutation testing found it: nothing
+    # else in the suite notices, because `#unmapped_elements` strips namespaces itself.
+    it "leaves the retained document exactly as it found it" do
+      invoice = sample("mf-samples/przyklad-20.xml")
+      before = invoice.raw_document.to_xml
+
+      invoice.warnings
+
+      expect(invoice.raw_document.to_xml).to eq(before)
+      expect(invoice.raw_document.root.namespace&.href).to eq("http://crd.gov.pl/wzor/2025/06/25/13775/")
+    end
+
+    # The advisory tier must not raise, and `Parser#readable_gross` already tolerates exactly
+    # these. Reading the same elements off the same document with no tolerance undid that one
+    # method later — on the diagnostic case the tolerance was added for.
+    it "says nothing about a summary it cannot read, rather than raising" do
+      %w[P_15 P_13_1].product(["", "abc"]).each do |element, text|
+        source = FA3Corpus.read("mf-samples/przyklad-01.xml")
+                          .sub(%r{<#{element}>[^<]*</#{element}>}, "<#{element}>#{text}</#{element}>")
+
+        expect { Ksef::FA3.parse(source).warnings }.not_to raise_error, "#{element}=#{text.inspect}"
+      end
+    end
+
     it "says nothing when the document states no buckets, as Przykład 16 does" do
       invoice = sample("mf-samples/przyklad-16.xml")
 
@@ -147,12 +173,22 @@ RSpec.describe Ksef::FA3::BusinessValidator do
   # earlier example named for it cited Przykład 20, whose summary is *derived*, where no W
   # element can ever appear whatever the list says.
   describe "the W twins" do
-    it "are not counted as buckets" do
-      source = FA3Corpus.read("mf-samples/przyklad-06.xml")
-                        .sub("<P_14_1>-9349.59</P_14_1>", "<P_14_1>-9349.59</P_14_1><P_14_1W>-9999.00</P_14_1W>")
-      invoice = Ksef::FA3.parse(source)
+    # **Przykład 20 is where the exclusion bites, and the earlier version of this example had
+    # it backwards.** It injected a twin into Przykład 6 — a `KOR`, which parses *with* totals,
+    # so `stated_summary` takes the `invoice.totals` branch and never reaches `buckets_in` at
+    # all. Since tier 3 was rebuilt to read the document, a derived-summary invoice like
+    # Przykład 20 falls through to `document_summary`, and its document really does carry
+    # `P_14_1W` — 14036.16 against a `P_15` of 16678.80, so counting it would accuse a correct
+    # invoice of being 14036.16 out.
+    it "are not counted as buckets on the invoice that actually carries one" do
+      invoice = sample("mf-samples/przyklad-20.xml")
 
+      expect(invoice.totals).to be_nil
+      expect(invoice.raw_document.to_xml).to include("<P_14_1W>")
       expect(invoice.warnings).to be_empty
+    end
+
+    it "are excluded from the one definition of a bucket" do
       expect(Ksef::FA3::Totals::ELEMENTS).not_to include("P_14_1W")
     end
   end
@@ -223,6 +259,15 @@ RSpec.describe Ksef::FA3::BusinessValidator do
 
     # `#summary_buckets` is public API — "the summary as the document will carry it" — so the
     # rounding is the whole promise. Dropping it left the suite green.
+    # The stated branch was exercised only through Przykład 16, whose buckets are `{}` — which
+    # is also what the derived branch returns, so deleting the branch left the suite green.
+    # `docs/field_mapping.md` sells this method as the way to reach one bucket on all seven
+    # types; under that mutation every correction, advance and settlement answered nil.
+    it "answers a stated summary with what the document states" do
+      expect(sample("mf-samples/przyklad-06.xml").summary_buckets)
+        .to eq("P_13_1" => BigDecimal("-40650.41"), "P_14_1" => BigDecimal("-9349.59"))
+    end
+
     it "rounds summary_buckets to what the document will carry" do
       invoice = built(lines: [{ name: "A", qty: 1, unit: "szt.", net_unit_price: "100.005", vat: "23" }])
 

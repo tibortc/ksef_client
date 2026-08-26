@@ -28,9 +28,17 @@ module Ksef
     # that every constructor here is side-effect free — `#with` going through `new` is now
     # load-bearing for correctness, not just for portability.
     module Canonical
+      # **`members`, not `to_h`.** {Provenance#to_h} redacts `raw_document` so that logging or
+      # `JSON.dump`ing an invoice does not embed its entire source; rebuilding from that
+      # redacted Hash silently dropped the retained document on every copy, taking
+      # `#unmapped_elements` and `#source_errors` with it. Reading the members directly keeps
+      # `#with` a copy rather than a partial one.
+      #
       # @param changes [Hash] members to replace
       # @return [Data] a new instance, constructed and therefore validated
-      def with(**changes) = self.class.new(**to_h, **changes)
+      def with(**changes)
+        self.class.new(**self.class.members.to_h { |name| [name, public_send(name)] }, **changes)
+      end
     end
   end
 end

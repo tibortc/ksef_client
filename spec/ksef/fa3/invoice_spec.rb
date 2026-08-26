@@ -497,4 +497,55 @@ RSpec.describe Ksef::FA3::Invoice do
       expect(parsed).not_to be_fully_mapped
     end
   end
+
+  # libxml2 recovers from broken XML by default, so a document with a mismatched closing tag
+  # parses into a perfectly good-looking invoice — and `#errors` runs tier 2 over `#to_xml`,
+  # bytes this gem has just produced and which are well-formed by construction. Tier 2 is
+  # therefore structurally incapable of seeing the input, and `#valid?` answered **true** for
+  # XML that is not XML. libxml2's diagnosis was there all along; nothing read it.
+  describe "#source_errors" do
+    def sample = File.read("spec/fixtures/fa3/golden/vat_single_line.xml", encoding: "UTF-8")
+
+    it "is empty for a built invoice, which has no source to complain about" do
+      expect(Ksef::FA3.parse(sample).source_errors).to be_empty
+    end
+
+    it "reports a source document that is not well-formed, and makes the invoice invalid" do
+      broken = Ksef::FA3.parse(sample.sub("</Faktura>", "</Fakturra>"))
+
+      expect(broken.source_errors.map(&:to_s))
+        .to include(/document: the source document is not well-formed: .*tag mismatch/)
+      expect(broken.errors).not_to be_empty
+      expect(broken).not_to be_valid
+    end
+
+    it "says nothing about a document this gem built itself" do
+      built = Ksef::FA3.parse(sample)
+
+      expect(built.with(number: "FV/OTHER").source_errors).to be_empty
+    end
+  end
+
+  # `#inspect` was written to redact the retained document so `p invoice` stays readable.
+  # `to_h` is a `Data` freebie and was not, so `JSON.dump(invoice.to_h)` embedded the whole
+  # source XML — a real hazard for anyone logging or serialising an invoice into a job queue.
+  describe "#to_h" do
+    let(:parsed) { Ksef::FA3.parse(File.read("spec/fixtures/fa3/golden/vat_single_line.xml", encoding: "UTF-8")) }
+
+    it "redacts the retained document, as #inspect does" do
+      expect(parsed.raw_document).not_to be_nil
+      expect(parsed.to_h).not_to have_key(:raw_document)
+      expect(parsed.deconstruct_keys(nil)).not_to have_key(:raw_document)
+    end
+
+    it "still carries every field that is identity" do
+      expect(parsed.to_h.keys).to match_array(Ksef::FA3::Invoice::IDENTITY)
+    end
+
+    # `Canonical#with` rebuilds from the members rather than from `to_h`, precisely so the
+    # redaction does not turn every copy into a partial one.
+    it "does not cost a copy its retained document" do
+      expect(parsed.with(number: "FV/OTHER").raw_document).to be(parsed.raw_document)
+    end
+  end
 end

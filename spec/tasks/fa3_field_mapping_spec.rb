@@ -211,6 +211,8 @@ RSpec.describe Fa3FieldMapping do
   describe "rendering" do
     let(:rendered) { described_class::Renderer.new(schema: schema).render }
 
+    def index_of(document) = document[/## Element index.*/m]
+
     it "matches the committed document, so a stale file fails the build" do
       expect(rendered).to eq(File.read(described_class::OUT, encoding: "UTF-8"))
     end
@@ -229,20 +231,45 @@ RSpec.describe Fa3FieldMapping do
     # generated under the same gate. It failed once: the element index sorted on the element
     # name alone, `sort_by` is not stable, and three names appear twice — so the tie order came
     # out one way on macOS and the other on Linux. Green locally, stale in CI.
+    # **`before` is captured ahead of the stub, and that is the whole example.** It used to
+    # reference the `rendered` `let` inside the `expect`, i.e. after `stub_const` had already
+    # replaced `MODELS` — so both sides were the shuffled render and it passed with the
+    # determinism bug reintroduced. Mutation testing found it comparing a value to itself.
     it "renders identically from a shuffled declaration, so ties are not left to sort order" do
+      before = rendered
       shuffled = described_class::MODELS.map { |model| model.merge(fields: model[:fields].reverse) }
       stub_const("#{described_class}::MODELS", shuffled)
 
-      expect(described_class::Renderer.new(schema: schema).render.lines.grep(/^\| `NIP` \|/))
-        .to eq(rendered.lines.grep(/^\| `NIP` \|/))
+      # Scoped to the element index: reversing the declaration legitimately reorders rows
+      # within each model's own table, which is declaration order and not a tie. The index is
+      # the section that sorts, and therefore the only one where a tie can be resolved twice.
+      expect(index_of(described_class::Renderer.new(schema: schema).render)).to eq(index_of(before))
+    end
+
+    # The path is `fields[1]`, never `.last`, because a row may carry a third element — its
+    # English note. Benign today only by coincidence: every three-element row's path segments
+    # happen to be contributed by some two-element row as well. Add a note to the row that
+    # uniquely carries a segment and the negative list would gain `KodWaluty`, telling an
+    # auditor the model does not carry the invoice currency two rows below where it maps it.
+    it "reads the path from fields[1], so a note is never taken for a path" do
+      before = rendered
+      noted = described_class::MODELS.map do |model|
+        model.merge(fields: model[:fields].map { |attribute, path, *| [attribute, path, "a note"] })
+      end
+      stub_const("#{described_class}::MODELS", noted)
+
+      expect(described_class::Renderer.new(schema: schema).render.lines.grep(/^\| `Faktura/))
+        .to eq(before.lines.grep(/^\| `Faktura/))
     end
 
     # One language per column: the Ministry's own text in one, ours in the other. The first
     # version put our English notes into the column headed "The Ministry's description", so a
     # reader met two languages under one heading with no way to tell whose sentence was whose.
     it "keeps the Ministry's Polish and this project's English in separate columns" do
+      # The **whole** tail of the row, not just the last two cells: matching `"| — | why |"`
+      # alone still passed when the English was duplicated into the Polish column as well.
       described_class::UNMAPPED.each_value do |entry|
-        expect(rendered).to include("| — | #{entry[:why]} |"), entry[:why][0, 40]
+        expect(rendered).to include("| — | — | #{entry[:why]} |"), entry[:why][0, 40]
       end
     end
 

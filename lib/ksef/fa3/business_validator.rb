@@ -105,6 +105,14 @@ module Ksef
           return nil if gross.nil?
 
           { buckets: buckets_in(fa), gross: Formatting.decimal(gross) }
+        rescue Ksef::ValidationError
+          # **An advisory check must not raise.** `Parser#readable_gross` already tolerates an
+          # empty or unparseable `P_15`, for the stated reason that a document being read to
+          # find out why KSeF rejected it may be one whose `P_15` is the problem — and this
+          # method then re-read the same element off the same retained document with no such
+          # tolerance, undoing it one method later. A summary this cannot read is a summary it
+          # has nothing to say about.
+          nil
         end
 
         def buckets_in(node)

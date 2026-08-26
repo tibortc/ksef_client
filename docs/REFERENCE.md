@@ -2798,15 +2798,27 @@ code — **`450` "Błąd weryfikacji semantyki dokumentu faktury"** — with fre
 no code for "totals do not reconcile" and none for a malformed correction reference.
 
 **What the Ministry's samples add.** §1.5 records the measurement: `Σ P_13_* + Σ P_14_* == P_15`
-holds in 24 of 26 official examples, failing on Przykład 1 by one grosz (bucket-level tax
-rounding — *not* gross pricing, see §1.5)
-and on Przykład 16 by omission (a `UPR` may carry `P_15` alone). That is *empirical* grounding —
-grounding 3 — for a rule the text does not state, and it fixes the rule's shape: a tolerance of a
-grosz and a guard for absent buckets, or it rejects the Ministry's own first example.
+holds exactly in **22** of the 26, Przykład 1 misses by a grosz, and **three** state no buckets
+at all (5, 13 and 16). That is *empirical* grounding — grounding 3 — for a rule the text does not
+state, and it fixes the rule's shape: a tolerance of a grosz and a guard for absent buckets, or
+it rejects the Ministry's own first example.
 
-**Recommendation, for the human to decide (DESIGN.md §12):** build tier 3's engine now on
-grounding 1, where the rule *is* the field definition, and let the catalogue grow — which
-is what DESIGN.md §7.7 already anticipates with "the catalog grows over the gem's life".
+**Corrected 2026-08-26, twice over.** This paragraph said "24 of 26" — which counts Przykład 5
+and 13, whose `0 == 0` the guard skips before comparing, so they witness nothing — and it named
+the cause of Przykład 1's grosz as bucket-level tax rounding, which §1.5 shows is arithmetically
+false: that mechanism moves the invoice by 0.0007. The real cause is nets computed back *w stu*
+from round gross prices and rounded down. Both errors were fixed in §1.5 and §17 and left
+standing here, in the higher-precedence document, which is the drift this ledger exists to
+prevent.
+
+**Superseded 2026-08-26 — tier 3 shipped, and not on this recommendation.** This section
+advised building on **grounding 1**, where the rule is the field definition. That turned out
+not to be implementable here: `P_15`'s annotation says nothing about the buckets, and the
+definitional rule one would check instead — `P_13_1` against the rows — is falsified by ten of
+the fourteen modelled stated-summary samples, because a correction's buckets are deltas and an
+advance's are pre-payments. **Grounding 1 yields no rule at all on this model.** What shipped is
+grounding 3, empirical, advisory, and recorded in §17. The one genuine grounding-1 rule anyone
+has found is `Rozliczenie/DoZaplaty`, above — blocked only by the model not carrying it.
 Do not synthesise rules from Polish VAT law and record them as verified facts; that is
 inference wearing a citation. Grounding 2 is a licensing and scope question, not a coding
 one.
@@ -3163,3 +3175,69 @@ document any issuer can produce.
 **The buyer's name being optional is §8.2a's three-time bug**, and printing it as mandatory in
 a table aimed at auditors is the same error in a new medium. Anything that needs *effective*
 cardinality must walk the XSD; `Generated::Types` answers a different question.
+
+### 17.4 `StanPrzed` rows are not summed
+
+Recorded 2026-08-26. `Summaries#net_by_rate` and `#vat_by_rate` skip a line marked
+`state_before`, and that is a correctness fix rather than a tidy.
+
+A `StanPrzed` row states a position **as it was** before the correction; a `KOR` shows it beside
+its replacement so a reader can see both. Adding the two together answers a question nobody
+asked. Measured on Przykład 2:
+
+| | before the fix | after |
+|---|---|---|
+| `net_by_rate` | `{"23" => 3089.42}` — 1626.01 *plus* 1463.41 | `{"23" => 1463.41}` |
+| `net_total` | −162.60 | −162.60 |
+
+A caller building a per-rate VAT report over downloaded invoices got a figure nineteen times
+the truth, with no error and a passing `#valid?`.
+
+**Nothing that derives a summary is affected**, which is what makes the change safe: tier 1's
+`SummaryChecks::DERIVATION_BLOCKERS` already refuses a `state_before` row on an invoice that
+derives, so these rows only ever appear where the summary is stated and `net_by_rate` is not
+what produces the document.
+
+Note what the fix does *not* claim. `net_by_rate` now answers the **after** state, not the
+delta — the delta is what `Totals` states and what `#net_total` returns. Two different
+questions, and §8.4 is why: a correction's buckets are deltas that its rows need not determine.
+
+### 17.5 The parser's own document was never consulted
+
+`Invoice#errors` runs tier 2 over `#to_xml` — bytes this gem has just produced, well-formed by
+construction — so **tier 2 is structurally incapable of seeing the input**. libxml2 recovers
+from broken XML by default, so a document with a mismatched closing tag parsed into a
+good-looking invoice and `#valid?` answered **true** for XML that is not XML.
+
+That is the same defect §15.1 records as fixed on 2026-08-24, one level up: the fix then was to
+teach `Validator` to consult `document.errors`, and the parser's own retained document was never
+wired the same way. `Provenance#source_errors` now reads it, and `#errors` reports it first.
+
+Recovery also substitutes silently — an invalid UTF-8 byte becomes U+FFFD — and this is the only
+record that it happened.
+
+**It bounds a wider family.** These all parse, and none is legal FA(3): `+1500.00`, `0001500.00`,
+`1.5e3`, a duplicated `<P_11>`, and `<P_11>1500.4567</P_11>` stored and re-emitted as `1500.46`.
+The last is §8.6's `P_9A` class at a different element. Catching those needs the input validated
+against the schema rather than the output — *"validate the bytes you were given, not the bytes
+you would write"* — which is a larger change than this one and is not made here.
+
+### 17.6 Two encodings, one predicate
+
+`String#valid_encoding?` answers **true** for a string that is validly encoded in something that
+is not UTF-8. Every guard in this gem tested it, so a `Windows-1250` or `ISO-8859-2` name — what
+a Polish ERP emits — passed tier 1 and then raised `Encoding::CompatibilityError` out of
+`#errors`, `#to_xml` and `Ksef::Client#send_invoice`. §7.7 promises `#errors` reports rather than
+raises "including for text that is tagged UTF-8 but is not"; that held for invalid *bytes* and
+failed for a valid non-UTF-8 tag.
+
+`FieldChecks.utf8?` is now the one place that decides, and it distinguishes three cases:
+
+| Encoding | Rule | Why |
+|---|---|---|
+| `UTF-8` | `valid_encoding?` | as before |
+| `ASCII-8BIT` | valid when the bytes *are* UTF-8 | binary asserts nothing, so reading unambiguous bytes is not a guess — this is what `File.binread` produces |
+| anything else | refused, naming the encoding | a declared encoding is a statement, and overriding it would be guessing |
+
+`Windows-1250` "Łódź" begins `A3`, a UTF-8 continuation byte, so it fails the binary test too and
+could not slip through even if mislabelled.

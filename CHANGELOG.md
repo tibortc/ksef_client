@@ -39,8 +39,10 @@ gem version for which API state".
 - **Validator tier 3** — `Ksef::FA3::BusinessValidator`, reached through **`Invoice#warnings`**. It holds **one rule**, and the size is the finding rather than a shortfall: no
   file in `CIRFMF/ksef-api` states a reconciliation rule anywhere, and the only business
   validation KSeF ever proposed was withdrawn after it turned out to reject legal invoices. So
-  the tier is built on the one grounding that needs no catalogue — arithmetic that follows from
-  what a field is documented to be. `P_13_1` is annotated as a sum; checking a sum is not policy.
+  the tier is built on the one grounding that needs no *catalogue*: measurement over the
+  Ministry's 26 worked examples. It is **empirical, not definitional** — `P_15`'s annotation says
+  nothing about the buckets, and checking `P_13_1` against the rows instead is falsified by ten
+  of the fourteen modelled stated-summary samples, because a correction's buckets are deltas.
 
   **It is advisory and never makes an invoice invalid**, which is the whole design. The rule is
   `Σ P_13_* + Σ P_14_* ≈ P_15` compared over figures the *document* states — never against the
@@ -64,8 +66,9 @@ gem version for which API state".
   clean, `#errors` empty and `#unmapped_elements` silent, because `P_15` is present either way
   and a path-difference diagnostic cannot see a changed value. Even the round-trip law held: a
   parsed invoice is already a fixed point. The same class as the `P_9A` rounding defect, found
-  the same way, by measuring the corpus. `P_15` is now byte-identical on re-serialisation for
-  all 22 modelled samples, and a spec asserts it. (`docs/REFERENCE.md` §17.2.)
+  the same way, by measuring the corpus. `P_15` is now **numerically unchanged** on
+  re-serialisation for all 22 modelled samples, and a spec asserts it — numerically, not
+  byte-for-byte, since 17 of the 22 reformat (`2051` → `2051.00`). (`docs/REFERENCE.md` §17.2.)
 
 ### Added
 
@@ -85,6 +88,45 @@ gem version for which API state".
   documents it, along with what a *technical correction* actually is (§16.2).
 
 ### Fixed
+
+- **`#valid?` answered `true` for XML that is not XML.** `Invoice#errors` ran the schema tier
+  over `#to_xml` — bytes this gem had just produced, well-formed by construction — so it could
+  not see the input at all, while libxml2's recovery made the parsed tree look fine.
+  `Invoice#source_errors` now reports what libxml2 said about the document it was given, and
+  `#errors` reports it first. (`docs/REFERENCE.md` §17.5.)
+
+- **Text that is validly encoded but is not UTF-8 crashed the tier meant to report it.**
+  `String#valid_encoding?` answers true for `Windows-1250` and `ISO-8859-2` — what a Polish ERP
+  emits — so such a name passed every guard and then raised `Encoding::CompatibilityError` out
+  of `#errors`, `#to_xml` and `Ksef::Client#send_invoice`. It is now reported, naming the
+  encoding. Bytes tagged `ASCII-8BIT` are accepted when they *are* UTF-8, which is what
+  `File.binread` produces. (§17.6.)
+
+- **`net_by_rate` and `vat_by_rate` summed a correction's before-state into its after-state.**
+  On the Ministry's Przykład 2 that gave 3089.42 against a `net_total` of −162.60 — a per-rate
+  VAT report nineteen times the truth, with no error and a passing `#valid?`. Rows marked
+  `StanPrzed` are now skipped. (§17.4.)
+
+- **`NaN` and `Infinity` passed the money gate.** `BigDecimal("NaN")` succeeds where
+  `BigDecimal("abc")` raises, so a document stating `<P_11>NaN</P_11>` reached the model and
+  serialised as `NaN.00` — and broke the `==`/`hash` contract on the way, since `NaN != NaN`.
+  Refused now, for the same reason a `Float` is.
+
+- **`Invoice#to_h` handed out the entire source document.** `#inspect` redacts `raw_document`
+  so `p invoice` stays readable; `to_h` is a `Data` freebie and did not, so
+  `JSON.dump(invoice.to_h)` embedded the whole XML. Both `to_h` and `deconstruct_keys` now
+  redact it, as `#==` already ignored it.
+
+- **A parsed invoice could lose the `P_15` it was given.** Settling the rounding strategy by
+  copying the invoice meant the copy's constructor re-ran with `stated_gross` already dropped,
+  so a `:per_summary` document was re-serialised with a derived total. The strategy is now
+  decided from the lines *before* the invoice is built. Every one of the 26 pinned samples
+  infers `:per_line`, so the corpus could not have caught it.
+
+- **The advisory tier raised.** `Invoice#warnings` read `P_15` and the buckets off the retained
+  document with no tolerance for an empty or unparseable one — the very case
+  `Parser#readable_gross` had just been taught to survive. It also stripped namespaces from
+  that document in place, mutating the value object's retained source from a read-only query.
 
 - **A unit price was silently rounded from eight decimal places to two.** `P_9A` — and `P_9AZ`
   on an order position — is `TKwotowy2`, *"22 znaki max, w tym 8 znaków po przecinku"*, not the

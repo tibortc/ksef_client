@@ -359,4 +359,43 @@ RSpec.describe Ksef::FA3::ModelValidator do
       end
     end
   end
+
+  # The message has to say *which* problem it is. Invalid bytes and a valid non-UTF-8 encoding
+  # need different remedies — the first is corrupt data, the second is a transcode the caller
+  # must do, because guessing the source encoding is exactly what this gem refuses to do.
+  describe "text that is not UTF-8" do
+    def with_name(name)
+      Ksef::FA3::Invoice.new(
+        seller: Ksef::FA3::Subject.new(nip: "9999999999", name: "A", address: address),
+        buyer: Ksef::FA3::Subject.new(nip: "1111111111", name: "B", address: address),
+        number: "FV/1", issue_date: "2026-08-26",
+        lines: [Ksef::FA3::Line.new(name: name, net_amount: "1", vat_rate: "23")]
+      )
+    end
+
+    def address
+      Ksef::FA3::Address.new(street: "ul. Testowa 1", city: "Warszawa", postal_code: "00-001")
+    end
+
+    it "names the encoding, and reports rather than raising" do
+      issues = with_name("Łódź".encode("Windows-1250")).errors.map(&:to_s)
+
+      expect(issues).to include(/lines\[0\].name: is Windows-1250 text, not UTF-8/)
+      expect(issues.first).to include("Transcode it before building the invoice")
+    end
+
+    it "says something different for bytes that decode as nothing" do
+      expect(with_name((+"Consul\xFFting").force_encoding("UTF-8")).errors.map(&:to_s))
+        .to include(/lines\[0\].name: contains bytes that are not valid UTF-8/)
+    end
+
+    # The whole point: this used to escape as Encoding::CompatibilityError, out of the tier
+    # whose contract is to report, and through Ksef::Client#send_invoice with it.
+    it "does not raise from #errors, #valid? or #to_xml" do
+      invoice = with_name("Łódź".encode("ISO-8859-2"))
+
+      expect { invoice.errors }.not_to raise_error
+      expect(invoice).not_to be_valid
+    end
+  end
 end

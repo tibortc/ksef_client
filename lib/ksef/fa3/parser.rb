@@ -74,7 +74,11 @@ module Ksef
           type = supported_type!(Formatting.text(text(fa_node, "RodzajFaktury")) || "VAT")
           totals = Invoice::STATED_TOTALS_TYPES.include?(type) ? CorrectionReader.totals_from(fa_node) : nil
 
-          resolve_rounding(build(document, root, fa_node, type, totals), fa_node, totals)
+          # **Before** building, not after: the strategy decides what the rows derive, and the
+          # constructor drops a `stated_gross` that merely repeats it. Copying an invoice to
+          # change its strategy afterwards therefore threw the document's `P_15` away.
+          build(document, root, fa_node, type: type, totals: totals,
+                                         rounding: rounding_for(fa_node, totals))
         end
 
         private
@@ -99,10 +103,9 @@ module Ksef
             "got <#{root.name}> in #{root.namespace&.href.inspect}"
         end
 
-        # Built with `:per_line`, which {#resolve_rounding} then confirms or replaces. The
-        # strategy is not a field in the document, so it cannot be read — only inferred from
-        # the summaries, and that needs the lines parsed first.
-        def build(document, root, fa_node, type, totals)
+        # The rounding strategy is not a field in the document, so it cannot be read — only
+        # inferred from the summaries, and that needs the lines parsed first.
+        def build(document, root, fa_node, type:, totals:, rounding:)
           Invoice.new(
             seller: party(root, "Podmiot1", role: :seller),
             buyer: party(root, "Podmiot2", role: :buyer),
@@ -141,7 +144,8 @@ module Ksef
             # byte — {Formatting.date_time} passes a String through untouched. Parsing it
             # into a Time would re-render it, and `+02:00` would come back as `Z`.
             issued_at: text(root, "Naglowek/DataWytworzeniaFa"),
-            rounding: :per_line,
+            # Settled from the lines before we got here; see {#rounding_for}.
+            rounding: rounding,
             raw_document: document
           )
         end
@@ -188,11 +192,12 @@ module Ksef
         # Skipped entirely when the invoice states its own totals. There is then nothing to
         # infer: the summaries were read, not computed, so no strategy produced them and
         # comparing the lines against them would answer a question nobody asked.
-        def resolve_rounding(invoice, fa_node, totals)
-          return invoice if totals
+        def rounding_for(fa_node, totals)
+          return :per_line if totals
 
-          RoundingInference.apply(
-            invoice, RoundingInference.stated_from(fa_node) { |node, name| text(node, name) }
+          RoundingInference.strategy_for(
+            RowReader.lines_from(fa_node, required: false),
+            RoundingInference.stated_from(fa_node) { |node, name| text(node, name) }
           )
         end
       end
