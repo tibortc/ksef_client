@@ -129,7 +129,7 @@ RSpec.describe "the recorded test tier" do
     end
 
     it "exempts XML that carries a byte-order mark, which lstrip does not remove" do
-      expect(RecordedTier.xml?(("\xEF\xBB\xBF" + %(<?xml version="1.0"?><a/>)).b)).to be(true)
+      expect(RecordedTier.xml?(%(\xEF\xBB\xBF<?xml version="1.0"?><a/>).b)).to be(true)
     end
 
     it "does not exempt a body merely because it starts with a less-than sign" do

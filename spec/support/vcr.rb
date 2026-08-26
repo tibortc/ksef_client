@@ -217,7 +217,7 @@ module RecordedTier
 
   # First bytes an XML name may begin with, per the production. Compared as byte values so this
   # never builds a pattern against a string whose encoding it does not control.
-  NAME_START_BYTES = [*"a".ord.."z".ord, *"A".ord.."Z".ord, "_".ord].freeze
+  NAME_START_BYTES = ("a".."z").to_a.concat(("A".."Z").to_a, ["_"]).map(&:ord).freeze
 
   def self.xml?(body)
     bytes = body.b
