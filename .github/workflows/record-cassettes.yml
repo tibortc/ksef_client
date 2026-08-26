@@ -1,0 +1,79 @@
+name: record-cassettes
+
+# Records the VCR cassettes for the recorded test tier (DESIGN.md §9.1).
+#
+# **Manual only, and it runs here rather than on a developer machine for one reason: this is
+# where the credentials are.** `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN` are environment secrets on
+# `ksef-test`, scoped so that only a job declaring that environment can read them — which is
+# also why nobody should mint a second credential locally just to record.
+#
+# It creates a **permanent TEST invoice** and consumes rate-limited quota (docs/REFERENCE.md
+# §6), so it is `workflow_dispatch` and nothing else. No schedule.
+#
+# The cassettes are uploaded as an artifact rather than committed. A cassette is the one
+# artifact in this repository that could carry a live credential, and the scrub happens on
+# write — so a human reviews it before it enters git history, which `git` would then remember
+# whatever the fix. The hygiene spec runs here first, but "the scanner passed" is not the same
+# as "someone looked".
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "record" to confirm this will create a permanent TEST invoice'
+        required: true
+        default: ""
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    environment: ksef-test
+
+    steps:
+      - name: Require explicit confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "record" ]; then
+            echo "::error::Confirmation not given. This job creates a permanent TEST invoice."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Refuse to run against production
+        run: |
+          if [ "${KSEF_ENV}" = "prod" ]; then
+            echo "::error::Recording must never target production."
+            exit 1
+          fi
+        env:
+          KSEF_ENV: test
+
+      - name: Record
+        run: bundle exec rake vcr:record
+        env:
+          KSEF_ENV: test
+          KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
+          KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
+
+      - name: Scan the recordings for credentials
+        # The scrub happens on write; this proves it worked, with the same secrets in the
+        # environment that the scan compares against.
+        run: bundle exec rspec spec/cassette_hygiene_spec.rb
+        env:
+          KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
+          KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
+
+      - name: Replay them with no credentials at all
+        # The point of the tier. If this fails, the cassettes depend on something the replay
+        # cannot supply — a live token, a fresh timestamp — and are not yet usable.
+        run: bundle exec rspec spec/recorded
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cassettes
+          path: spec/cassettes/
+          if-no-files-found: error

@@ -563,6 +563,18 @@ excluded from URI matching.
 
 #### Order of work
 
+**Recording runs in CI, not on a developer machine, because that is where the credentials are.**
+`KSEF_TEST_NIP` and `KSEF_TEST_TOKEN` are environment secrets on `ksef-test`, scoped so only a
+job declaring that environment can read them (§6a.3). `rake auth:bootstrap` can mint a second
+credential from nothing, and doing so *to record locally* would be creating a third-party
+identity to work around a secret that already exists — so `.github/workflows/record-cassettes.yml`
+is the route: manual dispatch, typed confirmation, no schedule.
+
+It uploads the cassettes as an **artifact rather than committing them**. A cassette is the one
+artifact here that could carry a live credential, and git remembers whatever is committed — so a
+human looks before it enters history. The hygiene spec runs in the same job, but "the scanner
+passed" is not "someone looked".
+
 1. Read `spec/cassette_hygiene_spec.rb`; add `filter_sensitive_data` hooks for every secret it
    scans for, plus the storage signature, **before** recording anything.
 2. Add the `Ksef::Client` encryptor seam (obstacle 3).
