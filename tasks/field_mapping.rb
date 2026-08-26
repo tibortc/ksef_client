@@ -92,6 +92,13 @@ module Fa3FieldMapping
     ["Totals#vat", "`P_14_*` (sum)", "Sum of the stated tax buckets."]
   ].freeze
 
+  # One column header, used everywhere the Ministry's own text appears — and **only** where it
+  # appears. The first version put our English notes into this column for the rows that have no
+  # single element, so a reader met two languages under one heading with no way to tell which
+  # sentences were the Ministry's and which were ours. That is worse than it sounds in a
+  # document whose whole claim is that the Polish is quoted rather than paraphrased.
+  OPIS = "The Ministry's description (Polish, verbatim)"
+
   DERIVED_INTRO = "These are methods, not stored fields, and for several elements they are what " \
                   "you actually read. **`P_15` is here, not in the Invoice table** — on a `VAT` " \
                   "invoice nothing stores it."
@@ -131,10 +138,16 @@ module Fa3FieldMapping
     rather than this file — a declared element that does not exist in the schema fails the
     build rather than appearing here, and a model field nobody has mapped fails it too.
 
-    Descriptions are the Ministry's own `xsd:documentation`, **complete and unabridged**, in
-    Polish, with runs of whitespace collapsed. Several are long, and several say different
-    things for a correction than for an ordinary invoice — that is the point of quoting them
-    whole. **Field-name truth is the XSD**, not this table.
+    **One language per column.** The *Ministry's description* column is the Ministry's own
+    `xsd:documentation`, in Polish, **complete, unabridged and quoted rather than translated** —
+    only runs of whitespace are collapsed. Nothing this project wrote appears in it: our own
+    remarks are in *Notes*, in English, and every heading and column label is English too.
+    Several descriptions are long, and several say different things for a correction than for
+    an ordinary invoice — that is exactly why they are quoted whole.
+
+    The Polish is not translated because it is the operative text: it carries statutory
+    citations, and a paraphrase of a tax rule is a different tax rule. **Field-name truth is
+    the XSD**, not this table.
 
     "Required?" is **effective** cardinality: an element inside an optional group is optional
     however it declares itself, and a branch of a choice is never required on its own.
@@ -166,13 +179,20 @@ module Fa3FieldMapping
         %w[issued_at Faktura/Naglowek/DataWytworzeniaFa],
         %w[seller Faktura/Podmiot1],
         %w[buyer Faktura/Podmiot2],
-        %w[lines Faktura/Fa/FaWiersz],
+        ["lines", "Faktura/Fa/FaWiersz", "A true container: everything a line writes is under it."],
         # Representative elements: `correction`, `totals`, `order` and `advances` are each a
         # group rather than one element, so the row names the member that is mandatory once
         # the group is present, and the group's own section below lists the rest.
         %w[annotations Faktura/Fa/Adnotacje],
-        %w[correction Faktura/Fa/DaneFaKorygowanej],
-        %w[totals Faktura/Fa/P_15],
+        ["correction", "Faktura/Fa/DaneFaKorygowanej",
+         "**A group, not one element.** The attribute also writes `PrzyczynaKorekty`, " \
+         "`TypKorekty`, `OkresFaKorygowanej`, `NrFaKorygowany`, `Podmiot1K`, `Podmiot2K`, " \
+         "`P_15ZK` and `KursWalutyZK` as siblings; this is the one that is mandatory once any " \
+         "of them is present. See the Correction section."],
+        ["totals", "Faktura/Fa/P_15",
+         "**The buckets are the substance**, and they are listed under Summary buckets. Note " \
+         "`P_15` is written for every invoice, whether or not a summary is stated — see " \
+         "`#gross_total` under Computed readers."],
         %w[order Faktura/Fa/Zamowienie],
         %w[advances Faktura/Fa/FakturaZaliczkowa],
         ["rounding", nil],
@@ -231,9 +251,14 @@ module Fa3FieldMapping
       fields: [
         %w[name Faktura/Fa/FaWiersz/P_7],
         %w[unit Faktura/Fa/FaWiersz/P_8A],
-        %w[quantity Faktura/Fa/FaWiersz/P_8B],
-        %w[net_unit_price Faktura/Fa/FaWiersz/P_9A],
-        %w[net_amount Faktura/Fa/FaWiersz/P_11],
+        ["quantity", "Faktura/Fa/FaWiersz/P_8B", "Also feeds `P_11` when the row states no net."],
+        ["net_unit_price", "Faktura/Fa/FaWiersz/P_9A",
+         "`TKwotowy2` — **eight decimal places**, four times the amount it produces. Also " \
+         "feeds `P_11` when the row states no net."],
+        ["net_amount", "Faktura/Fa/FaWiersz/P_11",
+         "**`P_11` has two sources.** Stated here when the row states one; otherwise derived " \
+         "from `quantity` × `net_unit_price`. `Line#net` is the reader that answers either " \
+         "way, and nil when the row states no amount at all."],
         %w[vat_rate Faktura/Fa/FaWiersz/P_12],
         %w[row_number Faktura/Fa/FaWiersz/NrWierszaFa],
         %w[state_before Faktura/Fa/FaWiersz/StanPrzed]
@@ -348,8 +373,17 @@ module Fa3FieldMapping
       { name: node["name"], type: node["type"], occurs: occurs(node), documentation: annotation(node) }
     end
 
-    # @return [Array<String>] the element names declared directly under this path
-    def children_of(path) = scope_of(node_for(path)).xpath("xsd:sequence/xsd:element", XSD_NS).map { |e| e["name"] }
+    # Every element the type declares, **including those nested in inner sequences and
+    # choices** — `P_6` sits in one, and reading only the outer sequence left it named neither
+    # in a table nor in the negative list, which is the gap that list exists to close.
+    #
+    # @return [Array<String>] element names, in document order
+    def children_of(path)
+      scope = scope_of(node_for(path))
+      scope.xpath(".//xsd:element[@name]", XSD_NS)
+           .select { |element| owning_type(element) == scope }
+           .map { |element| element["name"] }
+    end
 
     # @return [String] e.g. "1-0E", read the same way the codegen reads it
     def version
@@ -470,9 +504,9 @@ module Fa3FieldMapping
     def section(model)
       verify_members!(Object.const_get(model[:model]), model)
       prefix = model[:key] || model[:model].split("::").last
-      rows = model[:fields].map { |attribute, path| row(prefix, attribute, path) }
+      rows = model[:fields].map { |attribute, path, note| row(prefix, attribute, path, note) }
       table("## #{model[:title]}", "`#{model[:model]}` — #{model[:intro]}",
-            "Attribute | FA(3) element | Type | Required? | The Ministry's description", rows)
+            "Attribute | FA(3) element | Type | Required? | #{OPIS} | Notes", rows)
     end
 
     # Check 2 and check 3, both aborting.
@@ -485,12 +519,12 @@ module Fa3FieldMapping
       raise "#{model[:model]}: member(s) neither mapped nor in UNMAPPED: #{unaccounted.inspect}" if unaccounted.any?
     end
 
-    def row(key_prefix, attribute, path)
+    def row(key_prefix, attribute, path, note = nil)
       return unmapped_row(key_prefix, attribute) if path.nil?
 
       field = @schema.field(path)
       "| `#{attribute}` | `#{field[:name]}` | #{type_of(field)} | #{required(field[:occurs])} | " \
-        "#{field[:documentation] || "—"} |"
+        "#{field[:documentation] || "—"} | #{note || "—"} |"
     end
 
     # An element with no `type` attribute has an **anonymous** `complexType` declared inline —
@@ -513,7 +547,9 @@ module Fa3FieldMapping
     def unmapped_row(key_prefix, attribute)
       key = "#{key_prefix}##{attribute}"
       entry = UNMAPPED.fetch(key) { raise "#{key} has a nil path and no UNMAPPED entry" }
-      "| `#{attribute}` | #{entry[:element] || "—"} | — | — | #{entry[:why]} |"
+      # The Ministry's column stays empty rather than carrying our prose: one language per
+      # column, and this row has no single element whose annotation would belong there.
+      "| `#{attribute}` | #{entry[:element] || "—"} | — | — | — | #{entry[:why]} |"
     end
 
     def table(heading, intro, header, rows)
@@ -538,7 +574,7 @@ module Fa3FieldMapping
         field = @schema.field("Faktura/Fa/Adnotacje/#{name}")
         "| `#{name}` | #{required(field[:occurs])} | #{field[:documentation] || "—"} |"
       end
-      table("## Annotations", ANNOTATIONS_INTRO, "Element | Required? | The Ministry's description", rows)
+      table("## Annotations", ANNOTATIONS_INTRO, "Element | Required? | #{OPIS}", rows)
     end
 
     def buckets_section
@@ -548,7 +584,7 @@ module Fa3FieldMapping
         "| `#{name}` | #{codes.empty? ? "*(none)*" : codes.map { |c| "`#{c}`" }.join(", ")} " \
           "| #{field[:documentation] || "—"} |"
       end
-      table("## Summary buckets", BUCKETS_INTRO, "Element | Rate codes | The Ministry's description", rows)
+      table("## Summary buckets", BUCKETS_INTRO, "Element | Rate codes | #{OPIS}", rows)
     end
 
     # The negative list. DESIGN.md §7.2 deferred this document precisely because a partial one
@@ -563,7 +599,14 @@ module Fa3FieldMapping
     end
 
     def mapped_names
-      MODELS.flat_map { |model| model[:fields].map(&:last) }.compact.map { |path| path.split("/").last }
+      # **Every segment**, not just the last. A container this model walks through — `Fa`,
+      # `Naglowek`, `Podmiot1`, `Adres` — is carried as surely as the leaf inside it, and
+      # counting only leaves listed those containers as "not carried".
+      #
+      # `fields[1]`, never `.last`: a row may carry a third element, its English note, and
+      # taking the last of a three-element tuple silently reads the note as a path.
+      MODELS.flat_map { |model| model[:fields].map { |field| field[1] } }
+            .compact.flat_map { |path| path.split("/") }.uniq
     end
 
     # Named elsewhere in the document rather than in a model's own row.

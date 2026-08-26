@@ -202,7 +202,7 @@ RSpec.describe Fa3FieldMapping do
     end
 
     it "resolves every declared path" do
-      paths = described_class::MODELS.flat_map { |model| model[:fields].map(&:last) }.compact
+      paths = described_class::MODELS.flat_map { |model| model[:fields].map { |field| field[1] } }.compact
 
       expect { paths.each { |path| schema.field(path) } }.not_to raise_error
     end
@@ -235,6 +235,29 @@ RSpec.describe Fa3FieldMapping do
 
       expect(described_class::Renderer.new(schema: schema).render.lines.grep(/^\| `NIP` \|/))
         .to eq(rendered.lines.grep(/^\| `NIP` \|/))
+    end
+
+    # One language per column: the Ministry's own text in one, ours in the other. The first
+    # version put our English notes into the column headed "The Ministry's description", so a
+    # reader met two languages under one heading with no way to tell whose sentence was whose.
+    it "keeps the Ministry's Polish and this project's English in separate columns" do
+      described_class::UNMAPPED.each_value do |entry|
+        expect(rendered).to include("| — | #{entry[:why]} |"), entry[:why][0, 40]
+      end
+    end
+
+    it "labels the Polish column as quoted rather than translated" do
+      expect(rendered).to include("The Ministry's description (Polish, verbatim)")
+    end
+
+    # The negative list is the answer to "is my field supported", so it has to name the
+    # elements a reader will actually look for — and must not name the containers this model
+    # walks through, which it did while counting only the last segment of each declared path.
+    it "names what the model does not carry, and only that" do
+      absent = rendered.lines.grep(%r{^\| `Faktura/Fa` \|}).first
+
+      expect(absent).to include("`P_6`", "`Rozliczenie`", "`P_14_1W`", "`Platnosc`")
+      expect(rendered.lines.grep(/^\| `Faktura` \|/).first).not_to include("`Fa`", "`Naglowek`")
     end
 
     it "orders an element carried by two models deterministically" do
