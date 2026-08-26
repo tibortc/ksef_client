@@ -466,7 +466,7 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Tier | Tooling | Scope | When |
 |---|---|---|---|
 | Unit | RSpec + WebMock | request shaping, crypto primitives, models, serializer, validator | every push, full matrix |
-| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **planned, not yet built** — no cassette exists as of 2026-08-23; WebMock stubs cover this ground for now |
+| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **planned, not yet built** — no cassette exists as of 2026-08-26; WebMock stubs cover this ground for now. **§9.1 is the specification**: requirements, five obstacles, and the order of work |
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors — NIST/FIPS, not C#, see §6.4 | every push |
 | Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning. Three specs exist — auth, crypto, session — and **all three have run green against TEST** (auth 2026-08-23, the other two 2026-08-24) | **nightly** CI + pre-release, never per-PR |
 
@@ -481,6 +481,105 @@ Floors sit just under the achieved numbers so they ratchet. Raise them as the re
 A filtered run — one file, one example, or a tag selector — legitimately exercises less of the library, so the gate applies to full runs only. Otherwise the nightly `--tag integration` job would fail on coverage rather than on tests.
 
 A threaded smoke spec for §5.2. A spec asserting no committed cassette contains unscrubbed secrets.
+
+### 9.1 The recorded tier — requirements, obstacles and order of work
+
+Written 2026-08-26, when this became **the last outstanding Phase 2 scope item**. Nothing is
+implemented yet; this is the specification, and it exists because the obstacles below are not
+obvious and one of them decides the shape of everything else.
+
+#### What the tier is for
+
+Not coverage — WebMock already exercises every request shape, and the live tier already proves
+KSeF accepts what this gem produces. The recorded tier answers a third question: **does the flow
+still work against responses the service actually sent, on a machine with no credentials, in
+under a second?** It is what makes a regression in the multi-step flows visible per-push rather
+than at 02:30 the next morning, and it is what a contributor without a TEST NIP can run.
+
+So the target is the **flows**, not the endpoints: authenticate → open session → send → poll →
+close → fetch UPO, and the XAdES challenge → sign → redeem → token sequence. A cassette per
+endpoint would duplicate the unit tier and prove nothing new.
+
+#### Hard requirements
+
+1. **Scrubbing before commit** (§4.5). Tokens, JWTs, the encrypted symmetric key, the IV, and
+   the pre-signed `downloadUrl` signature must go through `filter_sensitive_data`.
+   `spec/cassette_hygiene_spec.rb` already scans committed cassettes for `Bearer ` and for the
+   values of `KSEF_TEST_NIP`/`KSEF_TEST_TOKEN`; it passes vacuously today and stops doing so the
+   moment the first cassette lands. **Read that spec before recording**, not after.
+2. **No network in the default suite.** `spec_helper` calls
+   `WebMock.disable_net_connect!(allow_localhost: false)` suite-wide; VCR must `hook_into
+   :webmock` and the recorded specs must *not* carry the `:integration` tag, or they will be
+   excluded from every ordinary run and the tier will be worthless.
+3. **Recording is a human-run, credentialed operation**, like `rake auth:bootstrap`: it needs
+   `KSEF_ENV=test` and real credentials, it consumes shared TEST state, and it creates real
+   invoices in TEST that cannot be withdrawn. It must hard-fail on `KSEF_ENV=prod` (§4.5).
+4. **Cassettes are not packaged.** They live under `spec/`, which `ksef_client.gemspec` excludes
+   and `spec/release_readiness_spec.rb` asserts is excluded.
+5. **Coverage.** These run in the default suite, so they count toward the floors and toward the
+   Coveralls decline gate. Expect them to *raise* branch coverage — several `&.` guards in the
+   transport layer are uncovered precisely because no test drives a real response shape.
+
+#### The five obstacles, with evidence
+
+**1. The request body is different every run, by design.** `Crypto::Encryptor.generate` uses
+`cipher.random_key` and `random_iv` (`crypto/encryptor.rb:42`), and RSA-OAEP padding is itself
+randomised — so `encryptedSymmetricKey` differs even when the AES key does not. VCR's default
+request matcher is `[:method, :uri]`, which is fine; **do not add `:body`** to it for any request
+carrying encrypted material, and do not assume a recorded body can be compared to a fresh one.
+
+**2. Signatures and timestamps.** `Auth::Signer` embeds `SigningTime`
+(`auth/signature_template.rb:86`) and `Auth::Challenge` carries `timestampMs`. Both matter
+because the KSeF-token flow encrypts `{token}|{timestampMs}` (`auth/challenge.rb:7`).
+
+**The seams already exist and were not built for this**, which is a piece of luck worth using:
+`Signer` takes `signing_time:` and `clock_skew:` (`auth/signer.rb:43`), `AccessToken` takes
+`clock:` (`auth/access_token.rb:44`), and `Encryptor.new(key:, iv:)` is public alongside
+`.generate`. Replay should inject fixed values through these rather than freeze global time.
+
+**3. `Ksef::Client` has no encryptor seam.** `client.rb:82` calls `Crypto::Encryptor.generate`
+inline. Either add an injection point or drive the recorded session tests through
+`Sessions::Online` directly. **Prefer adding the seam** — the point of the tier is to exercise
+the facade a user actually calls, and a test that bypasses it proves less.
+
+**4. Replayed identifiers are stale.** `referenceNumber`, the KSeF number, `validUntil` and the
+UPO `downloadUrl` all come from the server. A cassette recorded today has a `validUntil` in the
+past, so anything consulting `Session#expired?` or `AccessToken` expiry must take an injected
+clock — see obstacle 2 — or the replay fails for a reason that has nothing to do with the flow.
+
+**5. Polling is a sequence, not a request.** §12.1 requires polling while `code < 200`, so a
+recorded run contains several `GET`s of the same URI returning *different* bodies. VCR replays
+matching interactions in order only if `allow_playback_repeats` is left `false`; the specs must
+also stub the poller's sleep or a replay takes as long as the original. The UPO arrives on a
+different host through `HTTP::Connection.storage` (no bearer, no base URL, §12.3), so that
+request is part of the cassette too and its pre-signed query string must be scrubbed **and**
+excluded from URI matching.
+
+#### Order of work
+
+1. Read `spec/cassette_hygiene_spec.rb`; add `filter_sensitive_data` hooks for every secret it
+   scans for, plus the storage signature, **before** recording anything.
+2. Add the `Ksef::Client` encryptor seam (obstacle 3).
+3. Wire VCR: `hook_into :webmock`, `cassette_library_dir` under `spec/`, default
+   `record: :none` so a missing cassette fails rather than silently reaching the network,
+   `match_requests_on: [:method, :uri]` with the storage URL normalised.
+4. Record the **session flow** first — it is the one Phase 2's first gate turns on, and the one
+   with all five obstacles in it. Auth follows; it is simpler and shares the scrubbing.
+5. Assert the hygiene spec is no longer vacuous: it reports how many cassettes it scanned
+   precisely so "nothing to scan" can be told from "scanner broken".
+6. Update §9's table, `SECURITY.md` ("**No cassette exists yet**"), `CONTRIBUTING.md` and
+   `CLAUDE.md`, all of which currently say the tier is planned.
+
+#### What not to do
+
+- **Do not hand-write a cassette.** A recorded response this gem has never actually received is
+  a WebMock stub with extra ceremony, and the tier's whole value is that the bytes came from
+  KSeF. Two of the four defects the first live run found were invisible to stubs precisely
+  because the stubs encoded our own assumptions (§11's Phase 2 notes).
+- **Do not re-record casually.** Each recording creates permanent TEST invoices and burns
+  rate-limited quota (§6). Re-record when a flow changes, not when a test is inconvenient.
+- **Do not let the recorded tier replace the live one.** A cassette proves this gem still parses
+  what KSeF said in August; only the nightly proves KSeF still says it.
 
 ---
 
