@@ -15,6 +15,19 @@
 # {#advance} past the refresh deadline makes the *next* call to `#bearer` renew, in both modes.
 # Recording therefore needs no twelve-minute wait, and replay exercises the real arithmetic
 # against the `validUntil` KSeF actually sent rather than a synthetic one.
+# A sleeper that does nothing and remembers being asked.
+#
+# Doing nothing is what a replay needs — every answer is already on disk. Remembering is what
+# makes the seam *checkable*: removing the injection leaves the suite green and 54× slower, and
+# a no-op lambda cannot tell you it was bypassed.
+class RecordingSleeper
+  attr_reader :calls
+
+  def initialize = @calls = []
+
+  def call(seconds) = @calls << seconds
+end
+
 class RecordedClock
   # @param origin [Time] the moment this flow is pinned to
   def initialize(origin)
@@ -57,19 +70,53 @@ RSpec.shared_context "with a recorded KSeF flow" do
   # Real waits while recording — the authentication really is asynchronous — and none while
   # replaying, where every answer is already on disk. Without this the tier spent eight of its
   # nine seconds asleep between recorded status calls.
-  let(:sleeper) { recording? ? method(:sleep) : ->(_seconds) {} }
+  #
+  # The replay sleeper *records* rather than merely doing nothing, so {#slept} can prove it was
+  # used. Removing the injection is otherwise completely silent: the suite still passes, 54×
+  # slower, and nothing says so.
+  let(:sleeper) { recording? ? method(:sleep) : RecordingSleeper.new }
 
-  # Captured eagerly, before the first request: replaying consumes interactions out of the
-  # list, so `.first` does not stay the first for long.
-  let(:clock) { RecordedClock.new(recording? ? Time.now : first_recorded_at) }
+  # `Auth::Client#wait_until_complete` sleeps *between* polls, so a flow whose first status
+  # answer was already terminal sleeps not at all — and one of these cassettes is exactly that.
+  # The expected count therefore comes from the cassette rather than from an assumption that
+  # every flow waits, which is what a first version of this guard assumed and got wrong.
+  after do |example|
+    next if recording? || example.exception
 
-  # The moment the cassette was made. Guarded, because an absent cassette otherwise reports
-  # `undefined method 'recorded_at' for nil` from inside the clock — which says nothing about
-  # the actual problem, and the actual problem is the one this tier is most likely to have.
-  def first_recorded_at
+    expected = [cassette_facts[:status_polls] - 1, 0].max
+    next if sleeper.calls.size == expected
+
+    # `raise` rather than `expect`: an assertion belongs in an example, and this is a hook.
+    raise "expected #{expected} injected sleep(s) between #{cassette_facts[:status_polls]} " \
+          "recorded status polls, got #{sleeper.calls.size}. If it is 0, this replay used the " \
+          "real `sleep` — check `sleeper:` still reaches " \
+          "`Auth::Client#wait_until_complete` (DESIGN.md §9.1)."
+  end
+
+  # Read once, **before the first request**: replaying consumes interactions out of the list, so
+  # neither `.first` nor a count survives the flow. `clock` forces this and `client` forces
+  # `clock`, so both facts are captured while the cassette is still whole.
+  let(:cassette_facts) do
+    next { origin: Time.now, status_polls: 0 } if recording?
+
+    interactions = recorded_interactions
+    {
+      origin: interactions.first.recorded_at,
+      # `GET /v2/auth/{referenceNumber}`. A reference number carries the `-AU-` document code
+      # (docs/REFERENCE.md §13), which separates these from every other auth route.
+      status_polls: interactions.count { |i| i.request.uri.include?("-AU-") }
+    }
+  end
+
+  let(:clock) { RecordedClock.new(cassette_facts[:origin]) }
+
+  # Guarded, because an absent cassette otherwise reports `undefined method 'recorded_at' for
+  # nil` from inside the clock — which says nothing about the actual problem, and the actual
+  # problem is the one this tier is most likely to have.
+  def recorded_interactions
     cassette = VCR.current_cassette
-    first = cassette && cassette.http_interactions.interactions.first
-    return first.recorded_at if first
+    interactions = cassette ? cassette.http_interactions.interactions : []
+    return interactions unless interactions.empty?
 
     raise "No cassette for this example. Record the tier before running it: " \
           "dispatch .github/workflows/record-cassettes.yml, or `rake vcr:record` with " \

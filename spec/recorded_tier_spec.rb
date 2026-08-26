@@ -91,6 +91,17 @@ RSpec.describe "the recorded test tier" do
     expect(lifetimes).to all(be < 3600)
   end
 
+  # **`auth_refresh_spec`'s "does not renew twice" assertion is enforced by the cassette**, not
+  # by the expectation: a second renewal raises `UnhandledHTTPRequestError` only because exactly
+  # one refresh interaction was recorded. Nothing said so, and a re-recording that captured two
+  # — a slower flow, a retry — would silently downgrade that assertion to `x == x`.
+  it "records exactly one token refresh, which is what makes 'it does not renew twice' bite" do
+    counts = RecordedTier.request_counts("/auth/token/refresh")
+
+    expect(counts).to include("renews_the_access_token_before_it_expires_without_re-authenticating" => 1)
+    expect(counts.values.sum).to eq(1)
+  end
+
   # DESIGN.md §11 Phase 3 publishes 0.1.0. The recorded tier is Phase 2 scope, so it must not
   # still be empty by then — and this is the gate that will say so, rather than a reader
   # noticing. Runs only under KSEF_RELEASE_CHECK=1, like the other release gates.

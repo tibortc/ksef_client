@@ -41,6 +41,15 @@ RSpec.describe "committed VCR cassettes" do
   # check uses, rather than against a copy of it that could drift.
   let(:jwt_pattern) { /eyJ[A-Za-z0-9_-]{8,}\./ }
 
+  # **A pre-signed URL is a credential that is not shaped like one**, which is how two cassettes
+  # reached git carrying a live three-day Azure SAS while this file passed 5/5. The path is
+  # public; the query string *is* the authorisation. `sig` is the HMAC; `skoid`/`sks` identify
+  # the delegation key. Any of them with a real value means an unscrubbed capability.
+  #
+  # `(?!<)` lets the scrubbed form through — `?<REDACTED-SIGNATURE>` — so this distinguishes
+  # "redacted" from "never signed".
+  let(:signed_url_pattern) { /[?&](?:sig|skoid|sks)=(?!<)[^&"'\s]{8,}/ }
+
   let(:cassettes) do
     Dir.glob(File.expand_path("**/*.{yml,yaml}", __dir__)).select do |path|
       content = File.read(path, encoding: "UTF-8")
@@ -91,10 +100,24 @@ RSpec.describe "committed VCR cassettes" do
                          "Check RecordedTier.redact covers the field it came from."
   end
 
+  # DESIGN.md §9.1 hard requirement 1 lists the pre-signed `downloadUrl` signature alongside
+  # tokens and key material. The URI matcher stripped those parameters from the start; nothing
+  # scrubbed them, and nothing looked for them, until 2026-08-26.
+  it "does not contain a pre-signed URL that still carries its signature" do
+    offenders = cassettes.select { |path| signed_url_pattern.match?(scannable(path)) }
+
+    expect(offenders).to be_empty,
+                         "an unscrubbed pre-signed URL is in: #{offenders.join(", ")}. " \
+                         "RecordedTier::SIGNED_URL_FIELD should have stripped its query."
+  end
+
   it "does not contain any value this machine holds as a secret" do
     secrets = secret_env_keys.filter_map { |key| ENV.fetch(key, nil) }.reject(&:empty?)
     offenders = cassettes.select do |path|
-      body = scannable(path)
+      # `.scrub`, because `String#include?` answers **false** on a broken-encoding receiver
+      # rather than raising — so a single invalid byte anywhere would make the check against
+      # the real live token silently pass. Failing open is the one thing this must not do.
+      body = scannable(path).scrub
       secrets.any? { |secret| body.include?(secret) }
     end
 
@@ -128,10 +151,15 @@ RSpec.describe "committed VCR cassettes" do
     end
   end
 
-  # Guards the guard. If cassettes ever appear, the two examples above become meaningful and
-  # this documents that the vacuous pass was expected until then — so a future reader can
-  # tell "nothing to scan" from "scanner broken".
-  it "reports how many cassettes were scanned, so a vacuous pass is visible" do
-    expect(cassettes.size).to be >= 0
+  # Guards the guard — and it used to be `be >= 0`, which is the vacuous pass it exists to
+  # expose, in the file written to expose vacuous passes. `size` is never negative.
+  #
+  # Now it asserts the scanner actually found the cassettes that are committed, so a broken
+  # glob or a moved directory turns this red instead of quietly scanning nothing.
+  it "scans every committed cassette, so a vacuous pass is visible" do
+    committed = Dir.glob(File.expand_path("cassettes/**/*.yml", __dir__))
+
+    expect(committed).not_to be_empty
+    expect(cassettes).to include(*committed)
   end
 end

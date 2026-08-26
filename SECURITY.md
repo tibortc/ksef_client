@@ -53,8 +53,15 @@ Enforced by:
   response body, so it was neither a `Bearer ` header nor a value this machine held in its
   environment. Scanning for the shape of a credential catches the ones you did not predict. It
   finds cassettes by content, not by path, so one saved somewhere unconventional is still
-  scanned. **No cassette exists yet** — the harness landed on 2026-08-26 but nothing has been
-  recorded — so the check still passes vacuously. The scrubbing hooks it depends on are in
+  scanned. **Three cassettes are committed** as of 2026-08-26, so the check is live rather than
+  vacuous. What it scans is the *decoded* content — bodies, including the ones YAML stores as
+  `!binary`, and every header value — because a scan of the file misses a secret in a body that
+  carries one non-ASCII byte, and Polish text in this domain routinely does.
+
+  It looks for four shapes: a `Bearer` value, anything JWT-shaped, any value this machine holds
+  in `KSEF_TEST_TOKEN`, and **a pre-signed URL that still carries its signature**. That last one
+  was added after two cassettes reached git holding a live Azure SAS for a TEST UPO — read-only,
+  three-day, and invisible to the other three checks because a SAS `sig` is none of them. The scrubbing hooks it depends on are in
   `spec/support/vcr.rb`, written before the first recording rather than after, because a
   cassette committed without them is a leak `git` remembers.
 - Integration tests reading credentials only from environment variables

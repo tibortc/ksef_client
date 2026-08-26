@@ -75,6 +75,8 @@ module Ksef
         include SummaryChecks
         # `Zamowienie` and `FakturaZaliczkowa`, for `ZAL` and `ROZ`.
         include AdvanceChecks
+        # `Zalacznik`, which nothing looked at until an audit found `#errors` raising on it.
+        include AttachmentChecks
 
         # @param invoice [Invoice]
         # @return [Array<Issue>] empty when the model is sound
@@ -86,6 +88,7 @@ module Ksef
             *annotation_errors(invoice.annotations),
             *summary_errors(invoice),
             *type_specific_errors(invoice),
+            *attachment_errors(invoice),
             *invoice.lines.each_with_index.flat_map do |line, index|
               line_errors(line, index, derived: invoice.totals.nil?)
             end
@@ -128,14 +131,18 @@ module Ksef
         def annotation_errors(annotations, type_key = ANNOTATIONS_TYPE, field = "annotations")
           return [Issue.new(field: field, message: "must be a Hash")] unless annotations.is_a?(Hash)
 
-          # **A leaf first.** `Generated::Types` keys only complex types, so a nil entry means
-          # this element takes text — `P_16` and its siblings — and a Hash under one is
-          # something the serializer refuses outright. Falling through to the guard below
-          # treated a leaf's empty element list as "the codegen changed" and returned no
-          # issues, so `annotations: {"P_16" => {"X" => 1}}` passed tier 1a and then made
-          # `#to_xml` raise: the contract above, broken by the recursion that was added to
-          # uphold it (found by audit 2026-08-26).
-          if Generated::Types[type_key].nil?
+          # **A leaf first.** An element takes text when the metadata gives it no content model
+          # — either no entry at all, or an entry whose `:content` is nil because the type is
+          # `simpleContent`. A Hash under one is something the serializer refuses outright.
+          # Falling through to the guard below treated a leaf's empty element list as "the
+          # codegen changed" and returned no issues, so `annotations: {"P_16" => {"X" => 1}}`
+          # passed tier 1a and then made `#to_xml` raise: the contract above, broken by the
+          # recursion added to uphold it (found by audit 2026-08-26).
+          #
+          # The test was `Types[type_key].nil?`, which was equivalent until the codegen started
+          # emitting simpleContent types — `TNaglowek/KodFormularza` is the first entry that
+          # exists *and* is textual. Asking about `:content` is the exact question.
+          if Generated::Types[type_key].nil? || Generated::Types[type_key][:content].nil?
             return [Issue.new(field: field, message: "takes a text value, not nested elements")]
           end
 

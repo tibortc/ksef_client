@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Faktura xmlns="http://crd.gov.pl/wzor/2025/06/25/13775/">
+  <Naglowek>
+    <KodFormularza kodSystemowy="FA (3)" wersjaSchemy="1-0E">FA</KodFormularza>
+    <WariantFormularza>3</WariantFormularza>
+    <DataWytworzeniaFa>2026-02-15T00:00:00Z</DataWytworzeniaFa>
+  </Naglowek>
+  <Podmiot1>
+    <DaneIdentyfikacyjne>
+      <NIP>9999999999</NIP>
+      <Nazwa>ACME sp. z o.o.</Nazwa>
+    </DaneIdentyfikacyjne>
+    <Adres>
+      <KodKraju>PL</KodKraju>
+      <AdresL1>ul. Prosta 1, 00-001 Warszawa</AdresL1>
+    </Adres>
+  </Podmiot1>
+  <Podmiot2>
+    <DaneIdentyfikacyjne>
+      <NIP>1111111111</NIP>
+      <Nazwa>Klient S.A.</Nazwa>
+    </DaneIdentyfikacyjne>
+    <Adres>
+      <KodKraju>PL</KodKraju>
+      <AdresL1>ul. Dluga 2, 30-001 Krakow</AdresL1>
+    </Adres>
+    <JST>2</JST>
+    <GV>2</GV>
+  </Podmiot2>
+  <Fa>
+    <KodWaluty>PLN</KodWaluty>
+    <P_1>2026-02-15</P_1>
+    <P_2>FV/2026/02/ZAL-1</P_2>
+    <P_13_1>100.00</P_13_1>
+    <P_14_1>23.00</P_14_1>
+    <P_15>123.00</P_15>
+    <Adnotacje>
+      <P_16>2</P_16>
+      <P_17>2</P_17>
+      <P_18>2</P_18>
+      <P_18A>2</P_18A>
+      <Zwolnienie>
+        <P_19N>1</P_19N>
+      </Zwolnienie>
+      <NoweSrodkiTransportu>
+        <P_22N>1</P_22N>
+      </NoweSrodkiTransportu>
+      <P_23>2</P_23>
+      <PMarzy>
+        <P_PMarzyN>1</P_PMarzyN>
+      </PMarzy>
+    </Adnotacje>
+    <RodzajFaktury>VAT</RodzajFaktury>
+    <FaWiersz>
+      <NrWierszaFa>1</NrWierszaFa>
+      <P_7>Energia elektryczna</P_7>
+      <P_8A>kWh</P_8A>
+      <P_8B>20</P_8B>
+      <P_9A>5.00</P_9A>
+      <P_11>100.00</P_11>
+      <P_12>23</P_12>
+    </FaWiersz>
+  </Fa>
+  <Zalacznik>
+    <BlokDanych>
+      <ZNaglowek>Rozliczenie</ZNaglowek>
+      <MetaDane>
+        <ZKlucz>Miejsce poboru energii</ZKlucz>
+        <ZWartosc>ul. Polna 1, 00-001 Warszawa</ZWartosc>
+      </MetaDane>
+      <MetaDane>
+        <ZKlucz>Kod PPE</ZKlucz>
+        <ZWartosc>999999999999999999</ZWartosc>
+      </MetaDane>
+      <Tekst>
+        <Akapit>Pierwszy akapit.</Akapit>
+        <Akapit>Drugi akapit.</Akapit>
+      </Tekst>
+      <Tabela>
+        <TMetaDane>
+          <TKlucz>Informacja</TKlucz>
+          <TWartosc>o akcyzie</TWartosc>
+        </TMetaDane>
+        <Opis>Odczyty</Opis>
+        <TNaglowek>
+          <Kol Typ="txt">
+            <NKom>Licznik</NKom>
+          </Kol>
+          <Kol Typ="date">
+            <NKom>Data</NKom>
+          </Kol>
+          <Kol Typ="dec">
+            <NKom/>
+          </Kol>
+        </TNaglowek>
+        <Wiersz>
+          <WKom>Licznik rozliczeniowy nr 99999999</WKom>
+        </Wiersz>
+        <Wiersz>
+          <WKom>calodobowa</WKom>
+          <WKom>2026-02-28</WKom>
+          <WKom>20.00</WKom>
+        </Wiersz>
+        <Wiersz>
+          <WKom>nocna</WKom>
+          <WKom>2026-02-28</WKom>
+          <WKom/>
+        </Wiersz>
+        <Suma>
+          <SKom>Razem</SKom>
+          <SKom/>
+          <SKom>20.00</SKom>
+        </Suma>
+      </Tabela>
+    </BlokDanych>
+    <BlokDanych>
+      <MetaDane>
+        <ZKlucz>Uwagi</ZKlucz>
+        <ZWartosc>Blok bez tabel</ZWartosc>
+      </MetaDane>
+    </BlokDanych>
+  </Zalacznik>
+</Faktura>

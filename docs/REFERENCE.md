@@ -518,6 +518,12 @@ The full flow, verified end to end from `uwierzytelnianie.md` (retrieved 2026-08
 Note the header at steps 4–5 is the *temporary* `authenticationToken`, not an
 `accessToken`. Conflating them is the obvious implementation error here.
 
+**Step 4 must poll without a deadline on DEMO and PROD.** Those environments verify the
+signing certificate's status with the issuer over OCSP/CRL, and the operation legitimately
+reports "in progress" until the issuer answers — the docs state the duration depends on the
+certificate provider. A client that gives up after a fixed timeout will report failure for
+authentications that were about to succeed. (On TEST, self-signed certificates skip this.)
+
 #### 4.2a Step 6 measured — `/auth/token/refresh`, recorded 2026-08-26
 
 The last of the six to be exercised against the live service, and the only one whose response
@@ -539,7 +545,7 @@ Three things follow, each of which the implementation had assumed:
 | The refresh token's life is "up to 7 days" | **exactly 7 days on TEST**, to the second: redeemed `13:30:06.5720816`, valid until `2026-09-02T13:30:06.5720816` |
 
 **A renewed access token gets a full fresh lifetime, not the remainder of the old one.** The
-redeemed token was valid until `13:45:06`; refreshing eighteen seconds later returned one valid
+redeemed token was valid until `13:45:06`; refreshing eight seconds later returned one valid
 until `13:45:24` — fifteen minutes from the refresh, not from the original issue. So a
 long-running session renews indefinitely without re-authenticating, bounded only by the refresh
 token's seven days.
@@ -548,21 +554,21 @@ token's seven days.
 three cassettes, as `validUntil` minus the moment the response was received: **900.2, 898.7,
 890.6, 900.2** seconds.
 
-The spread is ours, not KSeF's. The 890.6 figure is a redeem whose authentication took ten
-seconds to poll to completion — KSeF dates the grant from when it minted the token, and we can
-only measure from when we took delivery. Which is exactly why {Ksef::Auth::AccessToken} records
-`@acquired_at` rather than trusting a constant: measuring from delivery can only *under*-estimate
-the remaining life, so it refreshes slightly early rather than slightly late. The refresh
-response, arriving immediately, measures the full 900.2.
+**Read those to the nearest second, not to the tenth.** `recorded_at` is an RFC 2822 timestamp
+with whole-second granularity, so each figure carries about a second of error — which is also why
+two of them read as 900.2 rather than 900.0, and why the claim that measuring from delivery "can
+only under-estimate" is not something these four numbers demonstrate. The underlying grant *is*
+exactly 900 s: the refresh response's `validUntil` is 900.0000000 s after the mint instant its own
+body implies.
+
+The spread is ours, not KSeF's. The 890.6 figure is a redeem whose authentication needed four
+polls over nine seconds — KSeF dates the grant from when it minted the token, and we can only
+measure from when we took delivery. That is why {Ksef::Auth::AccessToken} records `@acquired_at`
+rather than trusting a constant: a lifetime measured from delivery is never longer than the real
+one, so it refreshes slightly early rather than slightly late.
 
 Nothing here is hard-coded. This is a TEST observation, not a documented guarantee, so the
 threshold stays a proportion of the observed lifetime.
-
-**Step 4 must poll without a deadline on DEMO and PROD.** Those environments verify the
-signing certificate's status with the issuer over OCSP/CRL, and the operation legitimately
-reports "in progress" until the issuer answers — the docs state the duration depends on the
-certificate provider. A client that gives up after a fixed timeout will report failure for
-authentications that were about to succeed. (On TEST, self-signed certificates skip this.)
 
 ### 4.3 XAdES signature requirements — resolves the §9 blocker
 
@@ -1843,6 +1849,53 @@ reported by `#unmapped_elements` as whole elements, so nothing is silently lost 
 
 
 ---
+
+### 8.7 `Zalacznik`, the attachment — measured 2026-08-26
+
+FA(3)'s attachment is **not a file**. There is no MIME type, no encoding, no bytes: `Zalacznik`
+is a structured document of headings, key/value metadata, paragraphs and tables, sitting as a
+**sibling of `Fa`** rather than one of its children. That placement is the first thing worth
+knowing — it takes part in no summary and no arithmetic, so modelling it could not affect a
+single tax figure.
+
+Two of the Ministry's samples carry one (Przykład 24 and 25, both energy bills): one block, eight
+metadata pairs, three tables.
+
+**Four facts the schema states that a naive model would get wrong:**
+
+| Fact | Where | Consequence |
+|---|---|---|
+| `MetaDane` is mandatory (`minOccurs` defaults to 1; the schema writes only `maxOccurs="1000"`) | inside `BlokDanych` | It is the *only* mandatory child. A block with a heading and a table but no metadata is schema-invalid, so {DataBlock} refuses one at construction |
+| `Kol` and `WKom` each repeat 1..20, **related nowhere** — no `xsd:key`, `keyref` or `unique` in any of the four schemas | `TNaglowek` / `Wiersz` | **Rows are ragged.** Measured widths across the corpus: `[1, 9]`, `[1, 6]` and `[1, 9, 1, 9, …]` — one-cell rows label what follows, alternating rather than heading a block of them, and one of the three tables is six columns wide. Storing rows as a rectangle would invent cells or drop them |
+| `TZnakowy2` has `minLength="0"` | `NKom`, `WKom`, `SKom` | An **empty cell is legal**, and distinct from an absent one. `Formatting.text("")` returns `""` rather than nil precisely so it survives; a dropped cell shifts every cell after it |
+| `Kol/@Typ` is `use="required"` with six inline values | `Kol` | FA(3)'s only inline *attribute* enumeration — `date`, `datetime`, `dec`, `int`, `time`, `txt`. {TableColumn} reads them from the generated metadata, which is why §18.2's codegen fix came first |
+
+`Suma` is `minOccurs="0"`, so a table with no summary row must not re-serialise with an empty one
+— {AttachmentTable#totals} is nil rather than `[]` for that reason.
+
+**One defect no tier catches, and it is undecidable rather than unimplemented.** A column
+declared `dec` whose cells hold `"nie liczba"` is XSD-clean, silent to `#errors`, `#warnings`
+and `#unmapped_elements` alike — every cell is `TZnakowy2` whatever its column says. It is not
+checked because **a cell cannot be reliably associated with a column at all**: rows are ragged,
+so a one-cell label row belongs to no column and the association has no general answer. Recorded
+so it is not mistaken for an oversight.
+
+**The reader refuses eight structurally-invalid shapes** rather than reading them — no
+`BlokDanych`, no `MetaDane`, a half-empty `MetaDane`, no `TNaglowek`, no `Wiersz`, an empty
+`Wiersz`, a missing or illegal `Kol/@Typ`. That is consistent with the parser refusing a
+nameless seller, and the cost is that a malformed attachment makes the invoice's *tax* figures
+unreadable. `AttachmentReader`'s own comment weighs it and names the alternative.
+
+**Operational constraints are out of 0.1 scope and stay there** (DESIGN.md §7.4). Sending an
+invoice that carries an attachment needs prior opt-in in `e-Urząd Skarbowy` and, per **§15.5**,
+a batch session — with the exception that section records, an offline *technical correction* may
+use an interactive one. The size ceiling rises from 1 MB to 3 MB (**§6.2**), and both are
+**defaults rather than ceilings of the format**: `limity.md` heads them *"Wartość domyślna"* and
+`GET /limits/context` reports the live values. None of that is modelled here: this is the
+document, not the submission — but the size figure does reach code, because tier 1b must not
+refuse a document the format permits ({DocumentValidator::MAX_BYTES_WITH_ATTACHMENT}).
+
+An earlier version of this paragraph cited "§16", which says nothing about attachments.
 
 ## 9. Still unverified
 
@@ -3223,9 +3276,15 @@ cardinality must walk the XSD; `Generated::Types` answers a different question.
 
 The extractor read attributes down a **descendant** axis, `.//xsd:attribute[@name]`, so every
 complexType inherited the attributes of everything nested beneath it. Seven types claimed an
-attribute; two declare one. `TNaglowek` and `KodFormularza` each claimed `kodSystemowy` and
-`wersjaSchemy`; `Faktura`, `Zalacznik`, `BlokDanych`, `Tabela` and the attachment's own
-`TNaglowek` each claimed `Kol`'s `Typ`.
+attribute; two declare one. Measured by running the pre-fix extractor: `TNaglowek` claimed
+`kodSystemowy` and `wersjaSchemy`, which are declared on `KodFormularza`; and `Faktura`,
+`Zalacznik`, `BlokDanych`, `Tabela`, the attachment's own `TNaglowek` **and `Kol` itself** each
+reported `Kol`'s `Typ` — five inheriting it and one declaring it.
+
+An earlier version of this paragraph listed `KodFormularza` among the claimants, which cannot be
+true and is contradicted by the next paragraph: `KodFormularza` had no key at all. It also
+omitted `Kol`, the one type that really did declare what it reported. Corrected 2026-08-26 after
+an audit re-ran the old extractor rather than reading the description of it.
 
 **It survived because it produced a correct document.** `DocumentMapping#header` reads the two
 fixed attributes and writes them onto `KodFormularza` — the right element, found at the wrong
@@ -3247,6 +3306,24 @@ attribute, and its six values — `date`, `datetime`, `dec`, `int`, `time`, `txt
 types of an attachment table. They are now carried as `values:` on the attribute, because the
 alternative is to restate them in Ruby, which DESIGN.md §7.1 forbids.
 
+**Two more the same audit found, both making the metadata a false statement about the schema.**
+
+`compositor_of` looked for `xsd:sequence`/`xsd:choice` among a type's direct children, so a type
+whose model arrives through `xsd:complexContent/xsd:extension` reported **no content model at
+all**. FA(3) has exactly one, `Faktura/Podmiot1/AdresKoresp` (`<xsd:extension base="tns:TAdres"/>`),
+and the XSD really does permit `KodKraju`/`AdresL1`/`AdresL2`/`GLN` there — so `Serializer`
+refused those elements with a message naming an **empty** list of permitted ones. Latent only
+because no model carries `AdresKoresp`. The general form is worse: a non-empty extension also
+loses every anonymous type declared beneath it.
+
+And `element_particle` kept an inline restriction's `base` while discarding its enumerations and
+any `fixed`. Three elements carry an inline enumeration — `WariantFormularza`, `JST`, `GV` — and
+one carries `fixed` (`PrefiksPodatnika`, `fixed="PL"`, which rendered identically to the
+declaration without it). The cost was immediate and visible: `DocumentMapping#header` hand-wrote
+`"WariantFormularza" => 3` six lines below a comment saying the fixed values are read from this
+metadata. They were not, because the metadata did not carry them. It does now, and the line reads
+the enumeration.
+
 One more, latent: `Renderer::KEY_ORDER` did not list `use` or `fixed`, and `sorted_keys` maps
 every unlisted key to one shared rank. `sort_by` is not stable, so those two tied on every
 rendered attribute — the same determinism trap that reached CI from `tasks/field_mapping.rb`.
@@ -3255,8 +3332,9 @@ Adding `values` would have made three. Every key a rendered Hash can hold is now
 ## 19. Defects the 2026-08-26 audit round found
 
 Numbered as their own chapter because they were appended to §17 while it was being written and
-ended up as a **second** `§17.4`, `§17.5` and `§17.6` — sitting inside chapter 18, and colliding
-with the tier-3 sections of the same numbers that DESIGN.md and CLAUDE.md both cite. Renumbered
+ended up **inside chapter 18**, numbered as though they belonged to §17. One of them, `§17.4`,
+was a true duplicate colliding with the tier-3 section that DESIGN.md and CLAUDE.md both cite;
+`§17.5` and `§17.6` were merely misfiled, with no counterpart to collide with. Renumbered
 2026-08-26; `CHANGELOG.md` and `spec/ksef/fa3/correction_spec.rb` point here now.
 
 ### 19.1 `StanPrzed` rows are not summed
@@ -3310,7 +3388,7 @@ you would write"* — which is a larger change than this one and is not made her
 `String#valid_encoding?` answers **true** for a string that is validly encoded in something that
 is not UTF-8. Every guard in this gem tested it, so a `Windows-1250` or `ISO-8859-2` name — what
 a Polish ERP emits — passed tier 1 and then raised `Encoding::CompatibilityError` out of
-`#errors`, `#to_xml` and `Ksef::Client#send_invoice`. §7.7 promises `#errors` reports rather than
+`#errors`, `#to_xml` and `Ksef::Client#send_invoice`. DESIGN.md §7.7 promises `#errors` reports rather than
 raises "including for text that is tagged UTF-8 but is not"; that held for invalid *bytes* and
 failed for a valid non-UTF-8 tag.
 

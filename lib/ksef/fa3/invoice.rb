@@ -16,7 +16,7 @@ module Ksef
     Invoice = Data.define(
       :seller, :buyer, :number, :issue_date, :lines,
       :currency, :issued_at, :rounding, :invoice_type, :annotations,
-      :correction, :totals, :order, :advances, :raw_document, :stated_gross
+      :correction, :totals, :order, :advances, :raw_document, :stated_gross, :attachment
     )
 
     # Computation, defaults and serialisation for {Ksef::FA3::Invoice}.
@@ -102,7 +102,7 @@ module Ksef
       def initialize(seller:, buyer:, number:, issue_date:, lines: [],
                      currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT",
                      annotations: nil, correction: nil, totals: nil, order: nil, advances: [],
-                     raw_document: nil, stated_gross: nil)
+                     raw_document: nil, stated_gross: nil, attachment: nil)
         rows = self.class.rows_for(lines, rounding: rounding, totals: totals)
 
         super(
@@ -112,6 +112,13 @@ module Ksef
           invoice_type: Formatting.text(invoice_type),
           correction: correction, totals: totals, order: order,
           advances: Correction.wrap(advances).dup.freeze, raw_document: raw_document,
+          # `Zalacznik` is a sibling of `Fa`, not a child, so it takes part in no summary and
+          # no arithmetic — it is carried and re-emitted, nothing more (DESIGN.md §7.4).
+          #
+          # Wrapped **here**, not only in {Builder#attachment}: `Invoice.new` and `#with` are
+          # both public, so canonicalisation outside the constructor is canonicalisation that
+          # can be walked around — the `stated_gross` lesson, three methods below.
+          attachment: attachment.nil? ? nil : Attachment.wrap(attachment),
           stated_gross: self.class.scaled_gross(stated_gross, totals, rows, rounding),
           # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
           # Date it denotes must not produce two unequal invoices (§8.2b).
@@ -209,7 +216,9 @@ module Ksef
       #   *default* that an organisation can have raised on application (docs/REFERENCE.md
       #   §15.5); pass the value `GET /limits/context` reports if yours differs.
       # @return [Array<Issue>] empty when the invoice is sound
-      def errors(max_bytes: DocumentValidator::MAX_BYTES)
+      # `max_bytes` defaults from the document rather than from a constant: an invoice carrying
+      # an attachment is allowed 3 MB, and defaulting to 1 MB refused legal documents.
+      def errors(max_bytes: DocumentValidator.default_max_bytes(attachment: !attachment.nil?))
         # **First**, and before the short-circuit: a document that is not well-formed cannot be
         # made so by anything below, and libxml2's recovery means every later tier sees a tree
         # that looks fine ({Provenance#source_errors}).

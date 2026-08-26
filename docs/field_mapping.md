@@ -32,6 +32,7 @@ Section references such as (§8.4) are to `docs/REFERENCE.md`, which ships with 
 
 | Attribute | FA(3) element | Type | Required? | The Ministry's description (Polish, verbatim) | Notes |
 |---|---|---|---|---|---|
+| `attachment` | `Zalacznik` | *(inline)* | optional | Załącznik do faktury VAT | — |
 | `number` | `P_2` | `TZnakowy` | **yes** | Kolejny numer faktury, nadany w ramach jednej lub więcej serii, który w sposób jednoznaczny identyfikuje fakturę | — |
 | `issue_date` | `P_1` | `TDataT` | **yes** | Data wystawienia, z zastrzeżeniem art. 106na ust. 1 ustawy | — |
 | `currency` | `KodWaluty` | `TKodWaluty` | **yes** | Kod waluty (ISO 4217) | — |
@@ -153,6 +154,60 @@ Section references such as (§8.4) are to `docs/REFERENCE.md`, which ships with 
 | `lines` | `ZamowienieWiersz` | *(inline)* | yes, 1–10000 | Szczegółowe pozycje zamówienia lub umowy w walucie, w której wystawiono fakturę zaliczkową | — |
 
 
+## Attachment — the invoice attachment
+
+`Ksef::FA3::Attachment` — `Zalacznik`, a **sibling of `Fa`** rather than one of its children, so it takes part in no summary and no arithmetic. FA(3) carries no bytes and no MIME type: an attachment here is a structured document of headings, key/value metadata, paragraphs and tables. Operational constraints on sending one are out of 0.1 scope (DESIGN.md §7.4).
+
+| Attribute | FA(3) element | Type | Required? | The Ministry's description (Polish, verbatim) | Notes |
+|---|---|---|---|---|---|
+| `blocks` | `BlokDanych` | *(inline)* | yes, 1–1000 | Szczegółowe dane załącznika | — |
+
+
+## DataBlock — one block of an attachment
+
+`Ksef::FA3::DataBlock` — `BlokDanych`. `MetaDane` is the one child the schema requires, which is why a block describing itself only with a heading or a table is refused at construction.
+
+| Attribute | FA(3) element | Type | Required? | The Ministry's description (Polish, verbatim) | Notes |
+|---|---|---|---|---|---|
+| `heading` | `ZNaglowek` | `TZnakowy512` | optional | Nagłówek bloku danych | — |
+| `metadata` | `MetaDane` | *(inline)* | yes, 1–1000 | Dane opisowe | — |
+| `paragraphs` | `Akapit` | `TZnakowy512` | optional, up to 10 | Opis | — |
+| `tables` | `Tabela` | *(inline)* | optional, up to 1000 | Tabele | — |
+
+
+## MetaEntry — one key/value pair
+
+`Ksef::FA3::MetaEntry` — `MetaDane` on a block and `TMetaDane` on a table are the same shape under different names, so one class serves both. Mapped against the block's names; the table's are `TKlucz`/`TWartosc`.
+
+| Attribute | FA(3) element | Type | Required? | The Ministry's description (Polish, verbatim) | Notes |
+|---|---|---|---|---|---|
+| `key` | `ZKlucz` | `TZnakowy` | **yes** | Klucz | — |
+| `value` | `ZWartosc` | `TZnakowy` | **yes** | Wartość | — |
+
+
+## AttachmentTable — a table inside a block
+
+`Ksef::FA3::AttachmentTable` — `Tabela`. **Rows are ragged**: `Kol` and `WKom` each repeat 1..20 and the schema ties them together nowhere, so a row need not carry one cell per column — both Ministry samples alternate one-cell label rows with full-width ones.
+
+| Attribute | FA(3) element | Type | Required? | The Ministry's description (Polish, verbatim) | Notes |
+|---|---|---|---|---|---|
+| `metadata` | `TMetaDane` | *(inline)* | optional, up to 1000 | Dane opisowe dotyczące tabeli | — |
+| `caption` | `Opis` | `TZnakowy512` | optional | Opis | — |
+| `columns` | `Kol` | *(inline)* | yes, 1–20 | — | — |
+| `rows` | `Wiersz` | *(inline)* | yes, 1–1000 | Wiersze tabeli | An Array of rows, each an Array of `WKom` cells (1–20, and **ragged** — a row need not carry one per column). |
+| `totals` | `SKom` | `TZnakowy2` | optional, up to 20 | Zawartość pola | — |
+
+
+## TableColumn — one column heading
+
+`Ksef::FA3::TableColumn` — `Kol`. Its `Typ` attribute is FA(3)'s **only** inline attribute enumeration, and the six permitted values are read from the generated metadata rather than restated in Ruby (`docs/REFERENCE.md` §18.2).
+
+| Attribute | FA(3) element | Type | Required? | The Ministry's description (Polish, verbatim) | Notes |
+|---|---|---|---|---|---|
+| `name` | `NKom` | *(inline)* | **yes** | Zawartość pola | — |
+| `type` | `Kol/@Typ` | — | — | — | **An attribute, not an element** — the only one in FA(3) carrying an inline enumeration (`date`, `datetime`, `dec`, `int`, `time`, `txt`). Required by the schema, and the permitted values are read from the generated metadata rather than restated (`docs/REFERENCE.md` §18.2). |
+
+
 ## OrderLine — an order position
 
 `Ksef::FA3::OrderLine` — One `ZamowienieWiersz`. Unlike {Line} nothing here is derived: the document states both the net and the tax, so both are read (§8.5).
@@ -250,7 +305,7 @@ Listed rather than omitted, because an absent row would otherwise read as "not s
 
 | Under | Elements |
 |---|---|
-| `Faktura` | `Podmiot3`, `PodmiotUpowazniony`, `Stopka`, `Zalacznik` |
+| `Faktura` | `Podmiot3`, `PodmiotUpowazniony`, `Stopka` |
 | `Faktura/Fa` | `P_1M`, `WZ`, `P_6`, `OkresFa`, `P_14_1W`, `P_14_2W`, `P_14_3W`, `P_14_4W`, `KursWalutyZ`, `ZaliczkaCzesciowa`, `FP`, `TP`, `DodatkowyOpis`, `ZwrotAkcyzy`, `Rozliczenie`, `Platnosc`, `WarunkiTransakcji` |
 
 
@@ -264,6 +319,8 @@ The reverse direction: an element from a Polish invoice, and the attribute that 
 | `Adres` | `Buyer#address`, `Seller#address` |
 | `AdresL1` | `Address#line1` |
 | `AdresL2` | `Address#line2` |
+| `Akapit` | `DataBlock#paragraphs` |
+| `BlokDanych` | `Attachment#blocks` |
 | `DaneFaKorygowanej` | `Correction#corrected`, `Invoice#correction` |
 | `DataWystFaKorygowanej` | `CorrectedInvoice#issue_date` |
 | `DataWytworzeniaFa` | `Invoice#issued_at` |
@@ -274,8 +331,11 @@ The reverse direction: an element from a Polish invoice, and the attribute that 
 | `JST` | `Buyer#local_government_unit` |
 | `KodKraju` | `Address#country` |
 | `KodWaluty` | `Invoice#currency` |
+| `Kol` | `AttachmentTable#columns` |
 | `KursWalutyZK` | `Correction#exchange_rate_before` |
+| `MetaDane` | `DataBlock#metadata` |
 | `NIP` | `Buyer#nip`, `Seller#nip` |
+| `NKom` | `TableColumn#name` |
 | `Nazwa` | `Buyer#name`, `Seller#name` |
 | `NrFaKorygowanej` | `CorrectedInvoice#number` |
 | `NrFaKorygowany` | `Correction#corrected_number` |
@@ -285,6 +345,7 @@ The reverse direction: an element from a Polish invoice, and the attribute that 
 | `NrWierszaFa` | `Line#row_number` |
 | `NrWierszaZam` | `OrderLine#row_number` |
 | `OkresFaKorygowanej` | `Correction#period` |
+| `Opis` | `AttachmentTable#caption` |
 | `P_1` | `Invoice#issue_date` |
 | `P_11` | `Line#net_amount` |
 | `P_11NettoZ` | `OrderLine#net_amount` |
@@ -308,10 +369,18 @@ The reverse direction: an element from a Polish invoice, and the attribute that 
 | `Podmiot2K` | `Correction#previous_buyers` |
 | `PrzyczynaKorekty` | `Correction#reason` |
 | `RodzajFaktury` | `Invoice#invoice_type` |
+| `SKom` | `AttachmentTable#totals` |
 | `StanPrzed` | `Line#state_before` |
 | `StanPrzedZ` | `OrderLine#state_before` |
+| `TMetaDane` | `AttachmentTable#metadata` |
+| `Tabela` | `DataBlock#tables` |
 | `TypKorekty` | `Correction#effect` |
 | `WartoscZamowienia` | `Order#total` |
+| `Wiersz` | `AttachmentTable#rows` |
+| `ZKlucz` | `MetaEntry#key` |
+| `ZNaglowek` | `DataBlock#heading` |
+| `ZWartosc` | `MetaEntry#value` |
+| `Zalacznik` | `Invoice#attachment` |
 | `Zamowienie` | `Invoice#order` |
 | `ZamowienieWiersz` | `Order#lines` |
 

@@ -104,7 +104,17 @@ Cassettes must be scrubbed of tokens, JWTs and keys before committing.
 
 1. Confirm no metadata placeholders were reintroduced: `grep -r UNRESOLVED-DESIGN-12-1`.
    The release gate checks this too, but it is cheaper to notice here.
-2. Update `CHANGELOG.md`, including the KSeF API version and FA schema revision targeted.
+2. Update `CHANGELOG.md`, including the KSeF API version and FA schema revision targeted, and
+   **move the `[Unreleased]` entries under a `## [X.Y.Z] — DATE` heading**. This is not
+   bookkeeping: the GitHub release body is that section, verbatim. Check what will be published
+   before you tag:
+
+   ```bash
+   bundle exec rake 'release:notes[X.Y.Z]'
+   ```
+
+   It fails if the section is missing or empty, and the release workflow fails the same way —
+   after the gem has been pushed, which is recoverable but annoying.
 3. Confirm a **green nightly on the release commit**.
 4. Do one deliberate local full-suite run on **Ruby 3.2** — the floor contract deserves a
    look, not just a matrix tick. RuboCop cannot substitute for this: `TargetRubyVersion`
@@ -121,4 +131,12 @@ Cassettes must be scrubbed of tokens, JWTs and keys before committing.
    The separate `BUNDLE_PATH` leaves your development gem set alone, and resolving without
    the lockfile mirrors CI. Bundler on 3.2 cannot read a lockfile written by Bundler 4.
 5. Tag `vX.Y.Z`. The release workflow runs the suite with `KSEF_RELEASE_CHECK=1`, checks
-   the tag against `Ksef::VERSION`, and publishes via Trusted Publishing.
+   the tag against `Ksef::VERSION`, and publishes via Trusted Publishing. A second job then
+   creates the GitHub release from the CHANGELOG section, marking it a prerelease when
+   `Gem::Version` says the version is one — so `v0.1.0.rc1` is flagged without the workflow
+   holding an opinion about version strings.
+
+   The two jobs are separate so their permissions can be: publishing gets an OIDC token and
+   read-only `contents`, announcing gets `contents: write` and no token. Announcing runs
+   **after** the push — a release pointing at a gem nobody can install would be worse than a
+   gem that is briefly unannounced.

@@ -31,15 +31,31 @@ on:
         required: false
         default: "spec/recorded"
 
+# Least privilege: this job reads the repo and uploads an artifact. It needs nothing else, and
+# it is the one workflow in this repository holding a live KSeF credential — so an injected
+# command should not also inherit a writable GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   record:
     runs-on: ubuntu-latest
     environment: ksef-test
 
     steps:
+      # **Never interpolate `${{ }}` into a `run:` script.** GitHub substitutes it textually
+      # before the shell parses, so a dispatch input can close the quote and append commands —
+      # and this job exports KSEF_TEST_TOKEN, which log masking does not protect from a network
+      # exfiltration. Passing through `env:` puts the value in the process environment, where
+      # the shell only ever sees it as data.
+      #
+      # This guard runs before checkout, so an injection here could also write $GITHUB_ENV and
+      # defeat the confirmation it exists to enforce.
       - name: Require explicit confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
         run: |
-          if [ "${{ inputs.confirm }}" != "record" ]; then
+          if [ "$CONFIRM" != "record" ]; then
             echo "::error::Confirmation not given. This job creates a permanent TEST invoice."
             exit 1
           fi
@@ -61,8 +77,11 @@ jobs:
           KSEF_ENV: test
 
       - name: Record
-        run: bundle exec rake "vcr:record[${{ inputs.target }}]"
+        # `TARGET` through the environment, for the reason above — this step is where the
+        # credential actually lives.
+        run: bundle exec rake "vcr:record[$TARGET]"
         env:
+          TARGET: ${{ inputs.target }}
           KSEF_ENV: test
           KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
           KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
@@ -93,3 +112,7 @@ jobs:
           name: cassettes
           path: spec/cassettes/
           if-no-files-found: error
+          # This artifact is by definition the copy nobody has reviewed yet — the one most
+          # likely to hold whatever the scrubber missed. On a public repository anyone with the
+          # run id can fetch it, so it should not sit around for the default 90 days.
+          retention-days: 1

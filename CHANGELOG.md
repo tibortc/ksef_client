@@ -25,6 +25,48 @@ gem version for which API state".
 
 ### Added
 
+- **A golden file for the attachment** (`spec/fixtures/fa3/golden/vat_attachment.xml`), carrying
+  two blocks. A mutation audit found eight of thirty-eight mutations surviving a suite with
+  100% line, branch and method coverage of this code — coverage was measuring reachability, not
+  constraint. Two facts had nothing pinning them: attribute-versus-child write order and
+  `<WKom/>` versus `<WKom></WKom>` are invisible to the XSD *and* to the round-trip law, because
+  parsing collapses both; and every corpus sample has exactly one `BlokDanych`, so taking
+  `blocks.first` anywhere dropped the rest in silence.
+
+- **`Zalacznik`, the FA(3) attachment**, at build and parse level — the last implementation item
+  in Phase 3's scope (DESIGN.md §7.4). `Ksef::FA3::Attachment`, `DataBlock`, `MetaEntry`,
+  `AttachmentTable` and `TableColumn`, read by `AttachmentReader` and built through
+  `Ksef::FA3.build`'s `f.attachment`. The Ministry's two attachment samples listed 17 attachment
+  paths in `#unmapped_elements`; that set is now empty, and both round-trip.
+
+  An FA(3) attachment carries no bytes and no MIME type: it is a structured document of
+  headings, key/value metadata, paragraphs and tables, sitting beside `Fa` rather than inside
+  it, so it touches no summary. Three schema facts shape the model — **rows are ragged** (`Kol`
+  and `WKom` each repeat 1..20 and are related nowhere, and the corpus has one-cell rows heading
+  nine-cell ones), **an empty cell is legal and distinct from an absent one** (`TZnakowy2` has
+  `minLength="0"`), and **`MetaDane` is the only mandatory child of a block**. Operational
+  constraints on *sending* one stay out of 0.1 scope. (`docs/REFERENCE.md` §8.7.)
+
+- **The release workflow now creates a GitHub release**, with the version's `CHANGELOG.md`
+  section as its body (`rake 'release:notes[X.Y.Z]'` prints what will be published). It is a
+  second job, running **after** the gem is pushed and with its own `contents: write`, so the job
+  that runs this gem's own code during publishing never holds write access to the repository —
+  and a release can never announce a publish that then failed. Prerelease status comes from
+  `Gem::Version#prerelease?`, so `v0.1.0.rc1` is flagged without the workflow keeping its own
+  opinion about version strings. Tagging while the entries are still under `[Unreleased]` fails
+  the job rather than publishing empty notes.
+
+
+- **`spec/tasks/fa3_codegen_spec.rb`** — the codegen had no unit spec and was outside SimpleCov
+  entirely, so `method: 100` never applied to it. Its only checks were `rake fa3:verify`, which
+  proves determinism rather than correctness, and assertions about the one schema it reads. Three
+  defects survived that arrangement. It is now driven against a synthetic schema written to hold
+  the constructs — a `complexContent` extension, an anonymous type nested in a named one, an
+  attribute on a nested type, inline enumerations on both an element and an attribute — because
+  testing only against FA(3) is what let the extension defect through: FA(3) has exactly one
+  extension and it is empty.
+
+
 - **`POST /auth/token/refresh` has now run against live TEST**, closing the last of §4.2's six
   auth calls to have never been exercised — and settling three assumptions the implementation
   was making. The response carries `accessToken` **and nothing else**, so reading
@@ -55,9 +97,9 @@ gem version for which API state".
   restate them in Ruby, which DESIGN.md §7.1 forbids. Groundwork for `Zalacznik`.
   (`docs/REFERENCE.md` §18.2.)
 
-- **The recorded test tier** — two VCR cassettes covering the full session flow, replaying in
-  about two seconds with **no credentials present**: authenticate, open a session, encrypt and
-  submit an invoice, poll to acceptance, fetch the UPO. They pin two things no stub can give —
+- **The recorded test tier** — three VCR cassettes, 31 interactions, replaying in about 1.4
+  seconds with **no credentials present**: authenticate, open a session, encrypt and submit an
+  invoice, poll to acceptance, fetch the UPO, and renew an access token. They pin two things no stub can give —
   a KSeF number whose CRC-8 agrees with ours, and a UPO that is XAdES-signed although upstream's
   own UPO schema declares no `ds:Signature` (`docs/REFERENCE.md` §14.7).
 
@@ -117,6 +159,95 @@ gem version for which API state".
 
 ### Fixed
 
+- **`#errors` raised instead of reporting for two attachment shapes.** `Invoice#attachment` was
+  a public constructor field tier 1a never inspected, so a value that was not an `Attachment`
+  gave `NoMethodError`, and a U+0000 in any of the attachment's nine text fields gave a bare
+  `ArgumentError` from libxml2 — outside this gem's error hierarchy, which the docs tell callers
+  to rescue. `FieldChecks` had the guard and predicted this exact failure in its own comments;
+  the attachment never reached it. `AttachmentChecks` now walks the node and reports with a
+  field path like `attachment.blocks[0].tables[0].rows[1][0]`, and `Attachment.wrap` moved into
+  the constructor so `Invoice.new` and `#with` cannot walk around it.
+
+- **A legal attachment invoice over 1 MB was refused.** `DocumentValidator` hard-coded the
+  no-attachment ceiling with a comment saying attachments "are batch-only, so 0.1 has no reason
+  to carry the larger figure" — true exactly as long as the model could not carry one. The
+  ceiling now follows the document (3 MB with an attachment, `docs/REFERENCE.md` §6.2). This is
+  the "refuses legal invoices" failure §15.6 and §14.3 exist to prevent, introduced by the
+  change that made it reachable.
+
+- **`DataBlock` and `AttachmentTable` froze the caller's array in place**, so building two
+  blocks from one accumulator raised `FrozenError` far from its cause. The `dup` that
+  `Correction` documents three files away was missing from two of five sites.
+
+- **`docs/field_mapping.md` printed `paragraphs` and `totals` as required**, contradicting §8.7
+  in the same commit: both sit inside optional parents (`Tekst`, `Suma`). The cardinality walker
+  only considered wrappers inside an element's own complexType, and no declared path had crossed
+  an optional *element* before. It now reports cardinality relative to each model's own element
+  — "given a `Tabela`, is there a `Suma`?" — which is the question that section's reader is
+  asking. `rows` also showed `WKom`'s 1–20 where the attribute holds rows (1–1000).
+
+- **`AttachmentReader`'s documented contract was the opposite of its behaviour**, claiming
+  nothing refuses a document and naming a reporter that did not exist. Eight structurally
+  invalid shapes raise; the comment now says which, why that is consistent with the rest of the
+  parser, and what the alternative would cost.
+
+- Corrections found by the same audit: `docs/REFERENCE.md` §8.7 was physically inside chapter 18
+  — the mistake chapter 19's own introduction describes being repaired the same day — and cited
+  "§16" for a rule that is in §15.5; `serializer.rb` still said the model does not carry
+  `Zalacznik` three lines above the member added for it; the ragged-row description said
+  "heading a group of nine-cell ones" where the corpus alternates and one table is six wide; and
+  `CLAUDE.md`'s verification line carried the old branch figure in the sentence telling you to
+  keep it current.
+
+
+- **A live pre-signed URL was committed in two cassettes.** KSeF hands out the UPO as an Azure
+  user-delegation SAS, where the query string *is* the authorisation — and both session cassettes
+  carried one, read-only and valid for three days. DESIGN.md §9.1 requirement 1 names this exact
+  value alongside tokens and key material; the requirement's URI-matching half shipped and its
+  scrubbing half did not. All four hygiene checks passed over it, because a SAS `sig` is neither
+  `Bearer`-prefixed, nor JWT-shaped, nor a value the scanning machine holds. The query is now
+  stripped on record, the committed cassettes are scrubbed, and the scanner has a fifth check.
+  History was deliberately not rewritten: the capability is read-only, scoped to one synthetic
+  TEST document, and expires 2026-08-29 by itself (DESIGN.md §9.1).
+
+- **Command injection in the one workflow holding a live credential.** `${{ inputs.target }}` was
+  interpolated into a `run:` script that also exports `KSEF_TEST_TOKEN` — as was
+  `${{ inputs.confirm }}`, inside the guard enforcing the typed confirmation, on a step that runs
+  before checkout. Inputs now reach the shell through `env:`; `rake vcr:record` passes its target
+  as an argv entry rather than a command fragment, and its guard is anchored rather than a
+  `start_with?` that accepted `spec/recorded; …`. Both credential-bearing workflows declare
+  `permissions: contents: read`, and the cassette artifact expires after a day.
+
+- **The cassettes would have stopped replaying on 2027-09-29.** `Client#public_keys` built
+  `Crypto::PublicKeys` without the clock, and `#for_usage` filters published certificates on
+  `valid_at?` — so the recorded certificate list expiring in 2027 would have taken the whole tier
+  with it. The same defect as the fifteen-minute one, in the second wall-clock consumer of the
+  same path.
+
+- **`compositor_of` missed a `complexContent` extension**, so `Faktura/Podmiot1/AdresKoresp`
+  reported no content model and `Serializer` refused its children while naming an **empty** list
+  of permitted ones. A false statement about the schema, sourced from metadata.
+  (`docs/REFERENCE.md` §18.2.)
+
+- **The codegen dropped element-level `fixed` and inline enumerations**, which is why
+  `DocumentMapping#header` hand-wrote `"WariantFormularza" => 3` six lines below a comment saying
+  the fixed values come from the metadata. Three elements carry an inline enumeration and one
+  carries `fixed`; all are captured now, and the header reads the enumeration.
+
+- **`spec/cassette_hygiene_spec.rb`'s anti-vacuity guard was itself vacuous** —
+  `expect(cassettes.size).to be >= 0` — in the file written to expose vacuous passes. It now
+  asserts the scanner found every committed cassette. The env-secret check also failed *open* on
+  a body with invalid bytes, since `String#include?` answers false rather than raising.
+
+- **A cassette held an interaction from an earlier, aborted recording**, on a different auth
+  reference number and 56 minutes older than the flow around it. It never replayed, but
+  `RecordedClock` seeds from the first interaction, so that cassette's pinned "now" was 56
+  minutes before the flow — making §9.1's claim about pinning false for one of three cassettes.
+
+- **`ModelValidator`'s leaf test** asked whether the metadata had an entry, which stopped meaning
+  "takes a text value" the moment the codegen began emitting `simpleContent` types. It now asks
+  about `:content`.
+
 - **The cassette hygiene scan read the file, and a cassette is not entirely text.** Psych stores
   a body it cannot write as a plain scalar as `!binary`, and one non-ASCII byte is enough — five
   of the tier's bodies are stored that way. A JWT inside one matches no regex over the file, and
@@ -147,7 +278,8 @@ gem version for which API state".
 - **The codegen attributed an XML attribute to every type above the one declaring it.** The
   extractor used a descendant axis, so seven complexTypes claimed an attribute where only two
   declare one. It survived because it produced a *correct document*: `DocumentMapping#header`
-  found `kodSystemowy`/`wersjaSchemy` on `TNaglowek`, one level above where the XSD puts them,
+  found `kodSystemowy`/`wersjaSchemy` on `TNaglowek`, one level above where `KodFormularza`
+  declares them,
   and a second defect made that the only lookup available — anonymous types nested inside a
   **named** type were never collected, so `TNaglowek/KodFormularza` did not exist. Both fixed,
   and `Generated::Types` gained one entry. (`docs/REFERENCE.md` §18.2.)

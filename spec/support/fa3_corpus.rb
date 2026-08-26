@@ -84,6 +84,13 @@ module FA3Corpus
   # `validator_spec`, and writes `<P_8B>10.00</P_8B>` where {Ksef::FA3::Formatting.quantity}
   # emits `10` — both legal `TIlosci`, numerically identical, so it belongs to the
   # XSD-validity set and not to the byte-exact one.
+  # `vat_attachment.xml` earns its place on a ground the others do not: the attachment
+  # introduced this gem's first element carrying **both** an attribute and nested children
+  # (`Kol`), and its first empty-element output (`<WKom/>`). Attribute-versus-child write order
+  # and `<WKom/>` versus `<WKom></WKom>` are invisible to the XSD *and* to the round-trip law,
+  # because parsing collapses both forms — only bytes pin them. It carries two blocks for the
+  # same reason: nothing else in the corpus does, so a serializer or reader that handled only
+  # the first went unnoticed by every diagnostic (mutation audit, 2026-08-26).
   OURS = %w[
     golden/vat_single_line.xml
     golden/kor_before_after.xml
@@ -91,6 +98,7 @@ module FA3Corpus
     golden/roz_settlement.xml
     golden/upr_simplified.xml
     golden/kor_zal_order.xml
+    golden/vat_attachment.xml
   ].freeze
 
   # The C# samples are *templates*, not documents: they carry placeholders, and `#nip#` is not

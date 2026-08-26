@@ -6,14 +6,20 @@ on:
 
 # RubyGems Trusted Publishing (OIDC) — no long-lived API key exists anywhere
 # (DESIGN.md §10). Configure the trusted publisher on RubyGems before the first release.
-permissions:
-  contents: read
-  id-token: write
+#
+# **Permissions are per job, not workflow-wide.** Publishing needs an OIDC token and no write
+# access; announcing needs write access to `contents` and no OIDC token. Granting the union to
+# both would mean the job that runs the gem's own code — the suite, RuboCop, the build — also
+# holds a token that can rewrite the repository.
+permissions: {}
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     environment: rubygems
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,3 +58,57 @@ jobs:
       # full-suite run on Ruby 3.2. Both are human pre-release steps, checked off in
       # CONTRIBUTING.md rather than faked here.
       - uses: rubygems/release-gem@7f9650160c1a4e7989fdc9855807bdbd421d8b6b # v1.4.1
+
+  # **After the gem is pushed, never before.** A GitHub release is an announcement that the
+  # version is available; creating one first would announce a publish that might still fail, and
+  # a release pointing at a gem nobody can install is worse than a gem with no release yet. The
+  # reverse gap — pushed but unannounced — is visible and fixable by hand.
+  announce:
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "4.0"
+          # No `bundler-cache`: `tasks/release_notes.rb` reads a file and needs no gems, and a
+          # release should not fail because a development dependency would not install.
+          bundler-cache: false
+
+      - name: Take the notes from the CHANGELOG
+        # `ruby -e` with the version in the environment rather than interpolated, so a tag name
+        # is data. Tags are pushed by anyone with write access, which is not a reason to hand
+        # one a shell (DESIGN.md §9.1).
+        #
+        # This fails when the CHANGELOG has no section for the version — which is the useful
+        # failure. It means the entries are still sitting under [Unreleased].
+        run: |
+          ruby -r./tasks/release_notes \
+               -e 'File.write("release-notes.md", ReleaseNotes.for(ENV.fetch("VERSION")))'
+        env:
+          VERSION: ${{ github.ref_name }}
+
+      - name: Create the GitHub release
+        # `gh` is preinstalled on the runner, so this needs no third-party action — one less
+        # supply-chain surface on the workflow that has write access.
+        #
+        # `--verify-tag` refuses to invent a tag; `--prerelease` is decided by RubyGems' own
+        # rules via `Gem::Version#prerelease?`, so `0.1.0.rc1` is marked as one without this
+        # workflow keeping its own opinion about version strings.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          prerelease=""
+          if ruby -e 'exit Gem::Version.new(ARGV[0]).prerelease?' "$version"; then
+            prerelease="--prerelease"
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            $prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

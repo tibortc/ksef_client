@@ -117,6 +117,8 @@ module Ksef
             lines: RowReader.lines_from(fa_node, required: totals.nil?),
             correction: CorrectionReader.correction_from(fa_node),
             order: AdvanceReader.order_from(fa_node),
+            # A sibling of `Fa`, so it is read from the root rather than the invoice body.
+            attachment: AttachmentReader.attachment_from(root),
             advances: AdvanceReader.advances_from(fa_node),
             totals: totals,
             # Passed as text; {Invoice.scaled_gross} rounds it and drops it when it merely

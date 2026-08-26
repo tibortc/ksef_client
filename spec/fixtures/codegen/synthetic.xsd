@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A synthetic schema for spec/tasks/fa3_generator_spec.rb. Not an upstream artifact: it exists
+  to exercise constructs FA(3) uses rarely or not at all, so the extractor is tested on the
+  shapes it must handle rather than only on the one document it happens to read.
+
+  Every construct here is present for a named reason; see the spec.
+-->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:tns="urn:synthetic"
+            targetNamespace="urn:synthetic"
+            elementFormDefault="qualified">
+
+  <xsd:element name="Faktura">
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="Naglowek" type="tns:TNaglowek"/>
+        <!-- complexContent extension: the model lives on the base, not on this type. -->
+        <xsd:element name="Rozszerzony" minOccurs="0">
+          <xsd:complexType>
+            <xsd:complexContent>
+              <xsd:extension base="tns:TBaza">
+                <xsd:sequence>
+                  <xsd:element name="Dodatkowy">
+                    <!-- An anonymous type *under an extension*, to prove the descent reaches it. -->
+                    <xsd:complexType>
+                      <xsd:sequence>
+                        <xsd:element name="Glebiej" type="xsd:string"/>
+                      </xsd:sequence>
+                    </xsd:complexType>
+                  </xsd:element>
+                </xsd:sequence>
+              </xsd:extension>
+            </xsd:complexContent>
+          </xsd:complexType>
+        </xsd:element>
+        <!-- An empty extension: content is exactly the base's. This is FA(3)'s AdresKoresp. -->
+        <xsd:element name="Pusty" minOccurs="0">
+          <xsd:complexType>
+            <xsd:complexContent>
+              <xsd:extension base="tns:TBaza"/>
+            </xsd:complexContent>
+          </xsd:complexType>
+        </xsd:element>
+        <!-- An element-level inline enumeration and a fixed value. -->
+        <xsd:element name="Wariant" fixed="7">
+          <xsd:simpleType>
+            <xsd:restriction base="xsd:byte">
+              <xsd:enumeration value="7"/>
+            </xsd:restriction>
+          </xsd:simpleType>
+        </xsd:element>
+        <!-- A top-level choice, whose branches must not be flattened into a sequence. -->
+        <xsd:element name="Wybor">
+          <xsd:complexType>
+            <xsd:choice>
+              <xsd:element name="Lewy" type="xsd:string"/>
+              <xsd:element name="Prawy" type="xsd:string"/>
+            </xsd:choice>
+          </xsd:complexType>
+        </xsd:element>
+        <!-- An extension whose base is not a named complexType: nothing to splice, so the
+             extension's own model is the whole model. -->
+        <xsd:element name="Obcy" minOccurs="0">
+          <xsd:complexType>
+            <xsd:complexContent>
+              <xsd:extension base="xsd:anyType">
+                <xsd:sequence>
+                  <xsd:element name="Wlasny" type="xsd:string"/>
+                </xsd:sequence>
+              </xsd:extension>
+            </xsd:complexContent>
+          </xsd:complexType>
+        </xsd:element>
+        <xsd:element name="Nieograniczony" type="xsd:string" maxOccurs="unbounded"/>
+      </xsd:sequence>
+    </xsd:complexType>
+  </xsd:element>
+
+  <xsd:complexType name="TBaza">
+    <xsd:sequence>
+      <xsd:element name="Podstawowy" type="xsd:string"/>
+      <xsd:element name="Opcjonalny" type="xsd:string" minOccurs="0"/>
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <!-- A named type holding an anonymous simpleContent type that declares the attributes.
+       The attributes belong to the child; an ancestor must not claim them. -->
+  <xsd:complexType name="TNaglowek">
+    <xsd:sequence>
+      <xsd:element name="Kod">
+        <xsd:complexType>
+          <xsd:simpleContent>
+            <xsd:extension base="xsd:string">
+              <xsd:attribute name="wersjaSchemy" type="xsd:string" use="required" fixed="9-9Z"/>
+              <xsd:attribute name="tryb" use="optional">
+                <xsd:simpleType>
+                  <xsd:restriction base="xsd:string">
+                    <xsd:enumeration value="a"/>
+                    <xsd:enumeration value="b"/>
+                  </xsd:restriction>
+                </xsd:simpleType>
+              </xsd:attribute>
+            </xsd:extension>
+          </xsd:simpleContent>
+        </xsd:complexType>
+      </xsd:element>
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <xsd:simpleType name="TNazwane">
+    <xsd:restriction base="xsd:string">
+      <xsd:enumeration value="x"/>
+      <xsd:enumeration value="y"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+</xsd:schema>

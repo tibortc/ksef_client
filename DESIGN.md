@@ -466,7 +466,7 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Tier | Tooling | Scope | When |
 |---|---|---|---|
 | Unit | RSpec + WebMock | request shaping, crypto primitives, models, serializer, validator | every push, full matrix |
-| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **built and recorded 2026-08-26.** Two cassettes, 23 interactions, replaying in ~2 s with no credentials. Re-record with `rake vcr:record`. §9.1 |
+| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **built and recorded 2026-08-26.** Three cassettes, 31 interactions, replaying in ~1.4 s with no credentials. Re-record one flow at a time — `rake 'vcr:record[spec/recorded/auth_refresh_spec.rb]'`. §9.1 |
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors — NIST/FIPS, not C#, see §6.4 | every push |
 | Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning. Three specs exist — auth, crypto, session — and **all three have run green against TEST** (auth 2026-08-23, the other two 2026-08-24) | **nightly** CI + pre-release, never per-PR |
 
@@ -484,8 +484,8 @@ A threaded smoke spec for §5.2. A spec asserting no committed cassette contains
 
 ### 9.1 The recorded tier — requirements, obstacles and order of work
 
-**Built and recorded 2026-08-26**, closing the last Phase 2 scope item. Two cassettes, 23
-interactions, replaying in about two seconds with no credentials present.
+**Built and recorded 2026-08-26**, closing the last Phase 2 scope item. Three cassettes, 31
+interactions, replaying in about 1.4 seconds with no credentials present.
 
 A seventh defect surfaced the next morning and is written up below: a cassette recorded against
 a fifteen-minute credential stops replaying about twelve minutes later unless the clock is
@@ -588,6 +588,14 @@ passed" is not "someone looked".
 6. Update §9's table, `SECURITY.md` ("**No cassette exists yet**"), `CONTRIBUTING.md` and
    `CLAUDE.md`, all of which currently say the tier is planned.
 
+**Steps 1–4 were done on 2026-08-26; steps 5 and 6 were not, and both stayed wrong for a day.**
+The hygiene spec's "is it vacuous" guard was `expect(cassettes.size).to be >= 0`, which no
+value of `size` can fail — the vacuous pass, in the example written to expose vacuous passes.
+And `SECURITY.md` went on saying "No cassette exists yet" six lines below a sentence describing
+the cassettes in the repository. Both fixed 2026-08-26 after an audit; the list is kept with
+this note rather than ticked, because *which* steps get skipped when the interesting part is
+finished is the useful thing to know next time.
+
 #### Recording and replaying are not the same run
 
 The first recording attempt failed with `[21405] Invalid NIP format`, because the spec
@@ -627,9 +635,12 @@ still match the `x-ms-meta-hash` KSeF sent. No KSeF XML document carries a beare
 
 #### A cassette is not entirely text, so do not scan it as text
 
-Found 2026-08-26, while verifying the refresh recording. Psych stores any body it cannot write
-as a plain scalar as `!binary` — base64 — and **one non-ASCII byte anywhere in the body is
-enough**. Five of the tier's bodies are stored that way today.
+Found 2026-08-26, while verifying the refresh recording. Psych stores as `!binary` — base64 — any string
+it cannot write as a plain scalar, which for VCR means **any body holding a byte that is not
+valid UTF-8 in the body's encoding**. VCR hands it bodies tagged `ASCII-8BIT`, so in practice one
+Polish character is enough. Five of the tier's bodies are stored that way today. (The trigger is
+the string's encoding rather than the byte as such — `YAML.dump("Łódź")` on a UTF-8 string emits
+plain text.)
 
 Every hygiene check read the file. So a JWT inside such a body matches no regex over the file,
 and `include?` of a known secret value fails too. A planted-secret example now proves both:
@@ -744,6 +755,70 @@ promises, against a `validUntil` KSeF really sent. The figure is derived from th
 than hardcoded: a constant taken from one recording is an assumption, and this one would fail by
 silently not refreshing.
 
+#### The credential that is not shaped like one
+
+Found 2026-08-26 by audit, in git: both session cassettes carried a complete Azure
+user-delegation SAS in `upoDownloadUrl` — twelve parameters, a 44-character HMAC in `sig`,
+read-only, valid for three days. Committed six minutes after issuance.
+
+**Requirement 1 of this section names it**, alongside tokens and key material. The requirement
+has two halves — scrub the signature, and exclude it from URI matching — and only the matching
+half shipped. `Sessions::InvoiceState#inspect` redacts this same field from log lines;
+`spec/support/vcr.rb`'s own comment says the query string "expires and is secret". Everything
+except the scrubber classified it correctly.
+
+Then all four hygiene checks passed over it, because a SAS is **none of the shapes they knew**:
+not `Bearer`-prefixed, not JWT-shaped, and not a value the scanning machine holds in its
+environment. Widening *where* the scanner looks — the `!binary` fix — did not widen *what it
+recognises*, and those are different repairs.
+
+The lesson is narrower than "scan for shapes" and worth stating exactly: **a scanner enumerates
+the credential shapes someone thought of.** The countermeasure is not a better regex but a list
+kept beside the requirement — if §9.1 requirement 1 names a thing as secret, something must scan
+for it, and a spec should fail if nothing does.
+
+Blast radius here was small: TEST data, read-only, self-expiring. The mechanism was not.
+
+**History was deliberately not rewritten** (maintainer decision, 2026-08-26). The capability is
+read-only, scoped to one synthetic TEST UPO, and expires 2026-08-29T12:38Z on its own — so a
+rewrite would trade a real cost (every clone and fork invalidated, the audit trail of this fix
+broken) against a window measured in days. Recorded rather than left implicit, because the next
+occurrence may not have those properties, and "we did not rewrite last time" is not the
+precedent. **The test is whether the credential can still be used after it is noticed**, not
+whether it is embarrassing: a token that can be revoked should be revoked, one that cannot
+should be weighed. This one could not be revoked — KSeF mints them — and expires by itself.
+
+#### Never interpolate a dispatch input into a `run:` script
+
+Found in the same audit, in `record-cassettes.yml` — introduced the day before, by the change
+that made recording targetable.
+
+`${{ inputs.target }}` is substituted textually before the shell parses, so an input that closes
+the quote appends commands — on the one step that exports `KSEF_TEST_TOKEN`. Log masking does
+not stop a network exfiltration. The same pattern sat on `inputs.confirm`, in the guard enforcing
+the typed confirmation, running *before* checkout where it could also write `$GITHUB_ENV`.
+
+Inputs now reach the shell through `env:`, where they are data. `rake vcr:record` takes its
+target as an argv entry rather than a fragment of a command string, and its guard is anchored:
+`start_with?("spec/recorded")` accepted `spec/recorded; curl …`, because it only asked how the
+string began and the string went on to reach a shell.
+
+Both workflows holding this credential now declare `permissions: contents: read`, and the
+cassette artifact expires after a day — it is by definition the copy nobody has reviewed.
+
+#### A recording can contain interactions from an earlier attempt
+
+The UPO cassette's first interaction was a `GET /auth/{ref}` on a **different** reference
+number, recorded 56 minutes before the rest of the flow — a leftover from an aborted attempt.
+It never replayed, because nothing requests that URI.
+
+It was not inert. `RecordedClock` seeds from the first interaction's `recorded_at`, so that
+cassette's pinned "now" was 56 minutes before the flow it replays — this section's own claim
+about pinning was false for one of three cassettes. Harmless at that distance; not harmless in
+general, since a far enough origin puts the pinned clock before the token was minted.
+
+Removed 2026-08-26. When re-recording, check the interaction list belongs to one flow.
+
 #### What not to do
 
 - **Do not hand-write a cassette.** A recorded response this gem has never actually received is
@@ -759,8 +834,9 @@ silently not refreshing.
 
 ## 10. Repository, CI, and release engineering
 
-- **CI (GitHub Actions):** `test.yml` — matrix `["3.2","3.3","3.4","4.0","head"]` (head: `continue-on-error`), RuboCop job, coverage artifact. `nightly.yml` — live TEST-env integration on schedule, creds from **environment** secrets on `ksef-test` (`docs/REFERENCE.md` §6a.3 — a repository secret is readable by every workflow in the repo). `release.yml` — tag-triggered, **RubyGems Trusted Publishing (OIDC)** — no long-lived API keys anywhere.
+- **CI (GitHub Actions):** `test.yml` — matrix `["3.2","3.3","3.4","4.0","head"]` (head: `continue-on-error`), RuboCop job, coverage artifact. `nightly.yml` — live TEST-env integration on schedule, creds from **environment** secrets on `ksef-test` (`docs/REFERENCE.md` §6a.3 — a repository secret is readable by every workflow in the repo). `release.yml` — tag-triggered, **RubyGems Trusted Publishing (OIDC)** — no long-lived API keys anywhere; a second job then creates the **GitHub release** from the CHANGELOG section for that version (`tasks/release_notes.rb`), after the push and with its own `contents: write`, so the publishing job never holds write access to the repository.
 - **Docs:** README (quickstart = §8, support policy, gem-vs-namespace note, JRuby/MRI statement), `docs/field_mapping.md` (generated), `docs/errors.md`, `docs/REFERENCE.md` (verification ledger), CHANGELOG (keep-a-changelog), CONTRIBUTING, SECURITY.md.
+- **Release notes are the CHANGELOG, not generated from commits.** The GitHub release body is the version's CHANGELOG section verbatim, and the workflow fails when there is none — which catches the usual mistake of tagging while the entries are still under `[Unreleased]`. Generating notes from commit subjects would make the hand-written ledger decorative, and "fix parser bug" is worth less than the sentence saying which document the parser read wrongly.
 - **Changelog compatibility header:** every release entry states the KSeF API version and FA schema revision it targets — the Ministry ships changes continuously; users must be able to answer "which gem version for which API state".
 - **Versioning:** SemVer. EOL-ruby drops in minors (documented) — but see the §3 note: the 3.2 floor is a standing exception and is not dropped on EOL. FA(4), when it comes: additive `Ksef::FA4` namespace, `Ksef::FA3` maintained per deprecation policy — never a breaking in-place rewrite.
 - **Pre-release ritual:** green nightly on the release commit **and** one local full-suite run on Ruby 3.2 (the floor contract deserves a deliberate look).
@@ -784,7 +860,7 @@ Build the **certificate flow first**: it is the only one that can bootstrap a cr
 
 **Done when:** §8 contract runs against TEST; a KSeF token can be minted end-to-end by this gem with no external client; all seven types build, validate, round-trip.
 
-**In progress, 2026-08-23.** The DSL is done — §8's snippet runs verbatim and validates. **The certificate flow is complete and verified against live TEST**: request document, XAdES-BES signer, and the four `docs/REFERENCE.md` §4.2 endpoints the bootstrap exercises — challenge, `xades-signature`, `GET /auth/{ref}` and `redeem`. **`refresh` and `ksef-token` are implemented but have never run live** (corrected 2026-08-23: this claimed all six calls were live-verified, which the bootstrap's call list does not support). A KSeF token has been minted end to end by this gem with no external client, which satisfies the second "Done when" gate and resolves §12 item 4.
+**In progress, 2026-08-23.** The DSL is done — §8's snippet runs verbatim and validates. **The certificate flow is complete and verified against live TEST**: request document, XAdES-BES signer, and the four `docs/REFERENCE.md` §4.2 endpoints the bootstrap exercises — challenge, `xades-signature`, `GET /auth/{ref}` and `redeem`. **`refresh` and `ksef-token` are implemented but have never run live** (corrected 2026-08-23: this claimed all six calls were live-verified, which the bootstrap's call list does not support). *Both have since run: `ksef-token` on 2026-08-24, `refresh` on 2026-08-26 (docs/REFERENCE.md §4.2a). Left as written because it dates a state this section describes.* A KSeF token has been minted end to end by this gem with no external client, which satisfies the second "Done when" gate and resolves §12 item 4.
 
 **Both auth flows and the crypto module have since landed** (`Ksef::Crypto`, `Ksef::Auth::Token`, `POST /auth/ksef-token`). One correction to §6.4 while doing it: the golden vectors it asks for **do not exist upstream** — neither reference client commits plaintext/ciphertext pairs — so the primitives are pinned to NIST SP 800-38A and FIPS 180-4 instead, and the OAEP digest and MGF1 digest are pinned behaviourally rather than by trusting an option name. `docs/REFERENCE.md` §10.1 records what replaced them and why it is at least as strong.
 
@@ -804,17 +880,19 @@ Gate status, precisely:
 
 **Phase 2's three gates are met and its build scope is done, as of 2026-08-26.** Validator tier 3 landed that day (§7.7, advisory) and `docs/field_mapping.md` with it (§7.2, generated).
 
-**One scope-list item remains, and it is not a gate: there is no VCR cassette.** The scope above
-asks for the session flow "recorded + live", and §9's own testing table says the recorded half is
-"planned, not yet built".
+**That scope-list item is now closed too.** The scope above asks for the session flow
+"recorded + live"; both halves exist as of 2026-08-26, and §9's testing table records the
+recorded half as built. (This paragraph said the opposite until an audit read it against §9 on
+the same day — two mutually exclusive claims three paragraphs apart.)
 
 **Two further gaps exist and belong to Phase 3, not here** — recorded because they were twice
 mis-assigned to Phase 2 before this was checked against the scope list word by word:
 
-- **`Zalacznik` is not carried.** §7.4 asks for the attachment node "at build/parse level" and
-  puts only *operational* submission constraints out of 0.1 scope, so build/parse support is a
-  0.1.0 requirement. Phase 2 cites §7.4 for the **implementation order of invoice types** and
-  nothing else, so this was never Phase 2's. Two Ministry samples carry one.
+- ~~**`Zalacznik` is not carried.**~~ **Built 2026-08-26**, in Phase 3 where it belonged: §7.4
+  asks for the attachment node "at build/parse level" and puts only *operational* submission
+  constraints out of 0.1 scope. Phase 2 cites §7.4 for the **implementation order of invoice
+  types** and nothing else. Both Ministry samples that carry one now parse, re-serialise,
+  validate and round-trip (`docs/REFERENCE.md` §8.7).
 - **`download` and `refresh` have never run against TEST.** Neither is a stated requirement of
   any phase: the scope above lists `download` as a *feature* and it is implemented, `refresh`
   is not named at all, and Phase 3's bar is "nightly integration green ≥ 3 consecutive nights",
