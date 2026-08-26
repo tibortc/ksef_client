@@ -87,10 +87,33 @@ RSpec.describe "the session flow, recorded", :recorded, vcr: { cassette_name: "s
 
   # §12.3: the UPO comes back over a credential-free connection to a different host, and its
   # bytes are kept verbatim because it is legal proof of receipt (§12.2).
+  #
+  # **The first version asserted `include("upo-v4-3")` and failed on a perfectly good UPO.**
+  # `upo-v4-3` is the `X-KSeF-Feature` *header* value ({Sessions::UPO_VERSION}); the document's
+  # namespace is `…/KSeF/v4-3`. Asserted against the bundled schema's own namespace rather than
+  # a literal, so the two cannot drift apart.
   it "returns a UPO in the version whose schema this gem bundles" do
     receipt = client.send_invoice(invoice, encryptor: encryptor)
     wait_for(receipt)
 
-    expect(client.upo(receipt).xml).to include("upo-v4-3")
+    root = Nokogiri::XML(client.upo(receipt).xml).root
+
+    expect(root.name).to eq("Potwierdzenie")
+    expect(root.namespace.href).to eq(Ksef::UPO::NAMESPACE)
+  end
+
+  # §14.7, and only a real UPO can show it: the document is XAdES-signed, while upstream's own
+  # UPO schema declares no `ds:Signature`. None of the six published examples is signed, so
+  # nothing offline could have revealed it — the live run of 2026-08-24 found it, and this is
+  # what keeps it found.
+  it "is signed, which upstream's own schema does not allow for" do
+    receipt = client.send_invoice(invoice, encryptor: encryptor)
+    wait_for(receipt)
+
+    document = Nokogiri::XML(client.upo(receipt).xml)
+
+    expect(document.xpath("//ds:Signature", "ds" => Ksef::UPO::Validator::SIGNATURE_NAMESPACE))
+      .not_to be_empty
+    expect(Ksef::UPO::Validator.validate(client.upo(receipt).xml)).to be_valid
   end
 end
