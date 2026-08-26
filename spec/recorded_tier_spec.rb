@@ -24,7 +24,14 @@ RSpec.describe "the recorded test tier" do
   # them and committed is a credential leak `git` remembers. Asserting the *list* rather than
   # the behaviour, because there is nothing recorded to scrub yet.
   it "scrubs every secret the hygiene spec scans for" do
-    expect(RecordedTier::SECRET_ENV).to include("KSEF_TEST_TOKEN", "KSEF_TEST_NIP")
+    expect(RecordedTier::SECRET_ENV).to include("KSEF_TEST_TOKEN")
+  end
+
+  # Not an oversight: a NIP is public, it is printed on every invoice, and the KSeF number
+  # embeds it — `KsefNumber::FORMAT` opens with `(\d{10})`. Scrubbing it corrupts both the
+  # number and the UPO, costing the two assertions only a real response can support.
+  it "does not scrub the NIP, which is an identifier rather than a credential" do
+    expect(RecordedTier::SECRET_ENV).not_to include("KSEF_TEST_NIP")
   end
 
   # §9.1, obstacle 1. Encrypted request bodies differ on every run by construction, so a body

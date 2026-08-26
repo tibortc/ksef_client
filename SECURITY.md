@@ -40,7 +40,11 @@ Enforced by:
 
 - A redacting `#inspect` on configuration and authentication objects.
 - `spec/cassette_hygiene_spec.rb`, which scans every committed VCR cassette for `Bearer `
-  headers and for any value this machine holds in `KSEF_TEST_TOKEN` / `KSEF_TEST_NIP`. It
+  headers and for any value this machine holds in `KSEF_TEST_TOKEN`. **Not the NIP**: a tax
+  identifier is printed on every invoice and is embedded in the KSeF number itself, so
+  redacting it corrupts the very documents a cassette exists to hold — and costs the two
+  checks only a real response can support, the KSeF number's checksum and KSeF's own
+  integrity header. The token is the credential. It
   finds cassettes by content, not by path, so one saved somewhere unconventional is still
   scanned. **No cassette exists yet** — the harness landed on 2026-08-26 but nothing has been
   recorded — so the check still passes vacuously. The scrubbing hooks it depends on are in

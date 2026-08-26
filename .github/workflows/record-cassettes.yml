@@ -60,11 +60,14 @@ jobs:
           KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
 
       - name: Scan the recordings for credentials
-        # The scrub happens on write; this proves it worked, with the same secrets in the
-        # environment that the scan compares against.
+        # The scrub happens on write; this proves it worked, with the real token in the
+        # environment so the scan compares against the value that was actually used.
+        #
+        # The NIP is deliberately absent: it is not scrubbed and not scanned for. A tax
+        # identifier is printed on every invoice and is embedded in the KSeF number, so
+        # redacting it corrupts the documents the cassette exists to hold (DESIGN.md §9.1).
         run: bundle exec rspec spec/cassette_hygiene_spec.rb
         env:
-          KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
           KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
 
       - name: Replay them with no credentials at all

@@ -163,7 +163,7 @@ Development: `rspec`, `webmock`, `vcr`, `rubocop` (+plugins), `simplecov` (>= 1.
 
 - Never log or `inspect`-leak: KSeF tokens, JWTs, symmetric keys, IVs, or full invoice payloads at default log level. Provide a redacting `#inspect` on config/auth objects.
 - TLS verification always on; no code path may set `VERIFY_NONE`. Minimum TLS 1.2.
-- VCR cassettes must scrub tokens/JWTs/keys via filter hooks; add a spec that scans committed cassettes for `Bearer ` and known secret env values.
+- VCR cassettes must scrub tokens/JWTs/keys via filter hooks; add a spec that scans committed cassettes for `Bearer ` and for `KSEF_TEST_TOKEN`. **Not the NIP** — a tax identifier is public, is printed on every invoice and is embedded in the KSeF number (`KsefNumber::FORMAT` opens with `(\d{10})`), so scrubbing it corrupts the documents a cassette holds; see §9.1.
 - Integration tests read credentials only from env vars (`KSEF_TEST_NIP`, `KSEF_TEST_TOKEN`, `KSEF_ENV=test`); hard-fail if `KSEF_ENV=prod`.
 
 ---
@@ -602,6 +602,29 @@ come from the environment with a fallback that exists only so a replay can const
   makes every *re*-recording a `440`. Replay does not care, because bodies are never matched.
 - **The poll interval.** `Sessions::Status#poll` takes an injectable sleeper; a replay passes a
   no-op, or it waits out a recorded backoff for nothing.
+
+#### Scrub the token, not the NIP
+
+The third recording succeeded and then failed its own replay, with `KsefNumber.parse`
+refusing a malformed number and `UPO::Document#verify!` raising `IntegrityError`. One cause:
+`KsefNumber::FORMAT` opens with `(\d{10})` — **the KSeF number embeds the NIP** — and the UPO
+carries that number too. Scrubbing `KSEF_TEST_NIP` therefore rewrote the middle of both
+artifacts, so the number would not parse and the body no longer matched the `x-ms-meta-hash`
+KSeF had sent.
+
+Those two checks are the ones only a real response can support: our CRC-8 meeting a number
+KSeF generated, and KSeF's own hash over its own bytes. Scrubbing the NIP cost exactly what the
+tier exists for.
+
+So the NIP is not scrubbed. It is a public company identifier, printed on every invoice; §4.1
+classes the **token** as the confidential thing and says nothing about the NIP. Decided by the
+maintainer 2026-08-26, and `SECURITY.md` and §4.5 say so rather than leaving the spec and the
+policy disagreeing.
+
+**The tempting fix is worse than the problem.** A `before_record` hook could rewrite the NIP
+consistently and recompute `x-ms-meta-hash` over the scrubbed body — after which the integrity
+assertion checks a hash this gem just computed, not KSeF's. That is a check that cannot fail,
+which is the shape of defect three audit rounds kept finding.
 
 And one thing that differs from neither, but was asserted wrongly anyway: `upo-v4-3` is the
 `X-KSeF-Feature` **header** value, while the document's namespace is `…/KSeF/v4-3`. Assert

@@ -17,7 +17,13 @@ RSpec.describe "committed VCR cassettes" do
   # Values that must never appear in a committed fixture. Read from the environment because
   # that is where the real ones live (DESIGN.md §4.5) — on a developer machine with no
   # credentials set, only the generic pattern applies.
-  let(:secret_env_keys) { %w[KSEF_TEST_TOKEN KSEF_TEST_NIP] }
+  # **The token only.** `KSEF_TEST_NIP` was on this list until 2026-08-26, when a recording
+  # showed what scrubbing it costs: a NIP is a public company identifier, it is printed on
+  # every invoice, and `Ksef::KsefNumber::FORMAT` opens with `(\d{10})` — the KSeF number
+  # embeds it. Redacting it rewrote every KSeF number into something `KsefNumber.parse`
+  # refuses, and changed the UPO's bytes so they stopped matching KSeF's own `x-ms-meta-hash`.
+  # `docs/REFERENCE.md` §4.1 treats the token as the credential; the NIP is an identifier.
+  let(:secret_env_keys) { %w[KSEF_TEST_TOKEN] }
 
   # `Bearer ` followed by anything other than an obvious placeholder.
   let(:bearer_with_value) { /Bearer\s+(?!<|\[|REDACTED|DUMMY|xxx)\S{8,}/i }
