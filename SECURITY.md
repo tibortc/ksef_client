@@ -44,7 +44,12 @@ Enforced by:
   identifier is printed on every invoice and is embedded in the KSeF number itself, so
   redacting it corrupts the very documents a cassette exists to hold — and costs the two
   checks only a real response can support, the KSeF number's checksum and KSeF's own
-  integrity header. The token is the credential. It
+  integrity header. The token is the credential.
+
+  It also scans for anything shaped like a **JSON Web Token**, added 2026-08-26 after a
+  recording carried a live refresh token past both of the other checks: it was in a JSON
+  response body, so it was neither a `Bearer ` header nor a value this machine held in its
+  environment. Scanning for the shape of a credential catches the ones you did not predict. It
   finds cassettes by content, not by path, so one saved somewhere unconventional is still
   scanned. **No cassette exists yet** — the harness landed on 2026-08-26 but nothing has been
   recorded — so the check still passes vacuously. The scrubbing hooks it depends on are in
