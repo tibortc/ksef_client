@@ -34,6 +34,34 @@ RSpec.describe "the recorded test tier" do
     expect(RecordedTier::SECRET_ENV).not_to include("KSEF_TEST_NIP")
   end
 
+  # Proved against the shape that actually leaked: a redeem response carrying two tokens, where
+  # a `filter_sensitive_data` block captured the first and left the second.
+  describe "redaction" do
+    let(:two_tokens) do
+      '{"accessToken":{"token":"eyJhbGciOiJIUzI1NiJ9.eyJ0eXAiOiJBY2Nlc3MifQ.sig1"},' \
+        '"refreshToken":{"token":"eyJhbGciOiJIUzI1NiJ9.eyJ0eXAiOiJSZWZyZXNoIn0.sig2"}}'
+    end
+
+    it "redacts every token in a body, not merely the first" do
+      redacted = RecordedTier.redact(two_tokens)
+
+      expect(redacted).not_to include("sig1", "sig2", "eyJ")
+      expect(redacted.scan("<REDACTED>").size).to eq(2)
+    end
+
+    it "leaves XML alone, so a UPO still matches the hash KSeF sent" do
+      upo = '<?xml version="1.0"?><Potwierdzenie><NumerKSeFDokumentu>1234567890-20260826-AB-CD-EF' \
+            "</NumerKSeFDokumentu></Potwierdzenie>"
+
+      expect(RecordedTier.redact(upo)).to eq(upo)
+    end
+
+    it "handles an absent body" do
+      expect(RecordedTier.redact(nil)).to be_nil
+      expect(RecordedTier.redact("")).to eq("")
+    end
+  end
+
   # §9.1, obstacle 1. Encrypted request bodies differ on every run by construction, so a body
   # matcher cannot work — and would present as a flaky test rather than an impossible one.
   it "never matches requests on the body" do

@@ -48,6 +48,23 @@ RSpec.describe "committed VCR cassettes" do
                          "Add a VCR filter_sensitive_data hook (DESIGN.md §4.5)."
   end
 
+  # **The check that was missing, and it is the one that mattered.** The two examples above
+  # scan for a `Bearer ` header and for values this machine holds in its environment. KSeF's
+  # redeem response carries an access token *and* a refresh token in the JSON body — neither is
+  # a header, and neither is an env value on a machine that recorded rather than stored them.
+  # So the first successful recording carried a live refresh token, valid for about a week,
+  # past both checks. Caught by reading the file; nothing reached git.
+  #
+  # A JWT is unmistakable — `eyJ` is base64 for `{"` — so the shape is worth scanning for
+  # wherever it appears, not only where a token is expected to appear.
+  it "does not contain anything shaped like a JSON Web Token" do
+    offenders = cassettes.select { |path| /eyJ[A-Za-z0-9_-]{8,}\./.match?(File.read(path, encoding: "UTF-8")) }
+
+    expect(offenders).to be_empty,
+                         "an unscrubbed JWT is in: #{offenders.join(", ")}. " \
+                         "Check RecordedTier.redact covers the field it came from."
+  end
+
   it "does not contain any value this machine holds as a secret" do
     secrets = secret_env_keys.filter_map { |key| ENV.fetch(key, nil) }.reject(&:empty?)
     offenders = cassettes.select do |path|

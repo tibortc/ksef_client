@@ -603,6 +603,28 @@ come from the environment with a fallback that exists only so a replay can const
 - **The poll interval.** `Sessions::Status#poll` takes an injectable sleeper; a replay passes a
   no-op, or it waits out a recorded backoff for nothing.
 
+#### Redact every match, not the first — and scan for the *shape* of a secret
+
+The first successful recording carried a **live refresh token** into the working tree. It was
+caught by reading the file before committing; nothing reached git. Two independent failures let
+it through, and both are worth stating because neither is obvious.
+
+**A `filter_sensitive_data` block returns one string per interaction.** VCR then replaces every
+occurrence of *that* string — but a block using a regex captures only the first match. KSeF's
+redeem response carries an access token **and** a refresh token, so the access token was
+scrubbed and the refresh token was not. `RecordedTier.redact` now rewrites every match, from a
+`before_record` hook, in both directions and at any nesting depth.
+
+**And the hygiene spec could not see it.** It scanned for a `Bearer ` header and for values held
+in this machine's environment. A token in a JSON *body* is neither — least of all on a machine
+that recorded a token rather than storing one. It now also scans for anything shaped like a
+JWT, because `eyJ` is base64 for `{"` and is unmistakable wherever it appears. Scanning for the
+*shape* of a credential catches the ones you did not predict; scanning for known values only
+catches the ones you did.
+
+XML bodies are exempt from redaction, for the §9.1 reason the NIP taught: the UPO's bytes must
+still match the `x-ms-meta-hash` KSeF sent. No KSeF XML document carries a bearer token.
+
 #### One cassette per example
 
 Each example here runs a *whole* flow — open a session, send, poll, close, fetch the UPO — so a

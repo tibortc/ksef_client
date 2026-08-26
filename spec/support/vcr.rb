@@ -38,6 +38,36 @@ module RecordedTier
 
   # @return [Boolean] whether anything has been recorded yet
   def self.recorded? = Dir.glob(File.join(DIR, "**", "*.yml")).any?
+
+  # Anything shaped like a JSON Web Token. KSeF's auth responses carry two — an access token
+  # and a refresh token — and the refresh token is a live credential that mints new access
+  # tokens until it expires.
+  JWT = /eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+){0,2}/
+
+  # Every field that has ever carried key material, at any nesting depth.
+  SECRET_FIELD = /("(?:token|accessToken|refreshToken|authenticationToken|encryptedToken|
+                     encryptedSymmetricKey|initializationVector)"\s*:\s*")([^"]+)(")/x
+
+  # **Why this exists, and why `filter_sensitive_data` was not enough.**
+  #
+  # A `filter_sensitive_data` block returns *one* string per interaction, and VCR replaces
+  # every occurrence of that one string. KSeF's redeem response carries **two** tokens, so a
+  # regex capturing the first match scrubbed the access token and left the refresh token — a
+  # live credential — sitting in the cassette. Found by inspecting the first successful
+  # recording, before it was committed; nothing reached git.
+  #
+  # This rewrites *every* match instead of the first, which is the property that was missing.
+  #
+  # **XML bodies are never touched.** The UPO is XML and its bytes must match the
+  # `x-ms-meta-hash` KSeF sent — rewriting them would break the integrity check exactly as
+  # scrubbing the NIP did (§9.1). No KSeF XML document carries a bearer token; the credentials
+  # are all in JSON envelopes and headers.
+  def self.redact(body)
+    return body if body.nil? || body.empty? || body.lstrip.start_with?("<")
+
+    body.gsub(SECRET_FIELD) { "#{Regexp.last_match(1)}<REDACTED>#{Regexp.last_match(3)}" }
+        .gsub(JWT, "<REDACTED-JWT>")
+  end
 end
 
 VCR.configure do |config|
@@ -75,20 +105,11 @@ VCR.configure do |config|
     interaction.request.headers["Authorization"]&.first
   end
 
-  # The response bodies that carry credentials. Matched on the JSON field rather than the whole
-  # body so the rest of the interaction stays readable — a cassette nobody can read is a cassette
-  # nobody checks.
-  %w[accessToken refreshToken authenticationToken token].each do |field|
-    config.filter_sensitive_data("<#{field}>") do |interaction|
-      interaction.response.body[/"#{field}"\s*:\s*"([^"]+)"/, 1]
-    end
-  end
-
-  # The symmetric key and IV a session opens with, and the pre-signed storage URL.
-  %w[encryptedSymmetricKey initializationVector].each do |field|
-    config.filter_sensitive_data("<#{field}>") do |interaction|
-      interaction.request.body[/"#{field}"\s*:\s*"([^"]+)"/, 1]
-    end
+  # Every token-bearing field and every JWT, in both directions, at any depth — see
+  # {RecordedTier.redact} for why a `filter_sensitive_data` block could not do this.
+  config.before_record do |interaction|
+    interaction.request.body = RecordedTier.redact(interaction.request.body)
+    interaction.response.body = RecordedTier.redact(interaction.response.body)
   end
 end
 
