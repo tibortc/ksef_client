@@ -143,6 +143,8 @@ gem version for which API state".
   scrubbing half did not. All four hygiene checks passed over it, because a SAS `sig` is neither
   `Bearer`-prefixed, nor JWT-shaped, nor a value the scanning machine holds. The query is now
   stripped on record, the committed cassettes are scrubbed, and the scanner has a fifth check.
+  History was deliberately not rewritten: the capability is read-only, scoped to one synthetic
+  TEST document, and expires 2026-08-29 by itself (DESIGN.md §9.1).
 
 - **Command injection in the one workflow holding a live credential.** `${{ inputs.target }}` was
   interpolated into a `run:` script that also exports `KSEF_TEST_TOKEN` — as was

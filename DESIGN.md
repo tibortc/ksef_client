@@ -779,6 +779,15 @@ for it, and a spec should fail if nothing does.
 
 Blast radius here was small: TEST data, read-only, self-expiring. The mechanism was not.
 
+**History was deliberately not rewritten** (maintainer decision, 2026-08-26). The capability is
+read-only, scoped to one synthetic TEST UPO, and expires 2026-08-29T12:38Z on its own — so a
+rewrite would trade a real cost (every clone and fork invalidated, the audit trail of this fix
+broken) against a window measured in days. Recorded rather than left implicit, because the next
+occurrence may not have those properties, and "we did not rewrite last time" is not the
+precedent. **The test is whether the credential can still be used after it is noticed**, not
+whether it is embarrassing: a token that can be revoked should be revoked, one that cannot
+should be weighed. This one could not be revoked — KSeF mints them — and expires by itself.
+
 #### Never interpolate a dispatch input into a `run:` script
 
 Found in the same audit, in `record-cassettes.yml` — introduced the day before, by the change
