@@ -531,9 +531,27 @@ Gate status, precisely:
 
 **Phase 2's three gates are met and its build scope is done, as of 2026-08-26.** Validator tier 3 landed that day (§7.7, advisory) and `docs/field_mapping.md` with it (§7.2, generated).
 
-**Three scope-list items remain, and none is a gate.** The scope above asks for the session flow "recorded + live", and the recorded half has no cassette — §9's own table says "planned, not yet built". And `download` and `refresh` are implemented but have **never run live**, so of the transport surface only auth, crypto and the online session have been exercised against TEST. And **§7.4's `Zalacznik` clause is unmet**: it asks for the attachment node "at build/parse
-level", and the model does not carry it — two Ministry samples do. Close all three before 0.1.0;
-audits on 2026-08-26 caught this first being described as "complete", then as two items.
+**One scope-list item remains, and it is not a gate: there is no VCR cassette.** The scope above
+asks for the session flow "recorded + live", and §9's own testing table says the recorded half is
+"planned, not yet built".
+
+**Two further gaps exist and belong to Phase 3, not here** — recorded because they were twice
+mis-assigned to Phase 2 before this was checked against the scope list word by word:
+
+- **`Zalacznik` is not carried.** §7.4 asks for the attachment node "at build/parse level" and
+  puts only *operational* submission constraints out of 0.1 scope, so build/parse support is a
+  0.1.0 requirement. Phase 2 cites §7.4 for the **implementation order of invoice types** and
+  nothing else, so this was never Phase 2's. Two Ministry samples carry one.
+- **`download` and `refresh` have never run against TEST.** Neither is a stated requirement of
+  any phase: the scope above lists `download` as a *feature* and it is implemented, `refresh`
+  is not named at all, and Phase 3's bar is "nightly integration green ≥ 3 consecutive nights",
+  which the current nightly meets without exercising either. So this is a judgement about
+  confidence, not an unmet commitment — worth closing before 0.1.0, and worth not dressing up
+  as scope.
+
+The lesson, since it has now recurred three times in one day: **read the scope list before
+saying what is left.** "Complete" was wrong, "two items" was wrong, and both were assertions
+about a sentence nobody had re-read.
 
 The sentence here read "validator tier 3, and only that" until 2026-08-26, and that was an inconsistency introduced in the same commit that created the other half of it: §7.2's deferral of the field mapping carried an explicit trigger — *"it lands once the models cover all seven types"* — and Phase 1's note above records it as "required before 0.1.0 and tracked in Phase 2". The seventh type landed that day, so the trigger fired and the deferral ended.
 
