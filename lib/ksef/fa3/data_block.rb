@@ -35,12 +35,19 @@ module Ksef
       # @raise [Ksef::ValidationError] if it states no metadata, or too many paragraphs
       def initialize(metadata:, heading: nil, paragraphs: [], tables: [])
         entries = self.class.entries(metadata)
-        text = Correction.wrap(paragraphs).map { |p| Formatting.text(p) }.compact
+        text = self.class.paragraphs_from(paragraphs)
         raise ValidationError, NEEDS_METADATA if entries.empty?
         raise ValidationError, TOO_MANY_PARAGRAPHS if text.size > MAX_PARAGRAPHS
 
-        super(metadata: entries.freeze, heading: Formatting.text(heading),
-              paragraphs: text.freeze, tables: Correction.wrap(tables).dup.freeze)
+        super(metadata: entries.dup.freeze, heading: Formatting.text(heading),
+              paragraphs: text, tables: Correction.wrap(tables).dup.freeze)
+      end
+
+      # `compact`, because a nil paragraph is nothing rather than an empty one — unlike a table
+      # cell, where nil becomes `""` to keep the row's width. Paragraphs have no positional
+      # pairing to preserve, so dropping one loses nothing.
+      def self.paragraphs_from(paragraphs)
+        Correction.wrap(paragraphs).map { |paragraph| Formatting.text(paragraph) }.compact.freeze
       end
 
       # Accepts the ergonomic form and the faithful one. A Hash cannot express a repeated key,

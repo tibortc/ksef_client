@@ -75,6 +75,8 @@ module Ksef
         include SummaryChecks
         # `Zamowienie` and `FakturaZaliczkowa`, for `ZAL` and `ROZ`.
         include AdvanceChecks
+        # `Zalacznik`, which nothing looked at until an audit found `#errors` raising on it.
+        include AttachmentChecks
 
         # @param invoice [Invoice]
         # @return [Array<Issue>] empty when the model is sound
@@ -86,6 +88,7 @@ module Ksef
             *annotation_errors(invoice.annotations),
             *summary_errors(invoice),
             *type_specific_errors(invoice),
+            *attachment_errors(invoice),
             *invoice.lines.each_with_index.flat_map do |line, index|
               line_errors(line, index, derived: invoice.totals.nil?)
             end

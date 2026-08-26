@@ -324,6 +324,7 @@ module Fa3FieldMapping
     },
     {
       model: "Ksef::FA3::Attachment",
+      base: "Faktura/Zalacznik",
       title: "Attachment — the invoice attachment",
       intro: "`Zalacznik`, a **sibling of `Fa`** rather than one of its children, so it takes " \
              "part in no summary and no arithmetic. FA(3) carries no bytes and no MIME type: " \
@@ -336,6 +337,7 @@ module Fa3FieldMapping
     },
     {
       model: "Ksef::FA3::DataBlock",
+      base: "Faktura/Zalacznik/BlokDanych",
       title: "DataBlock — one block of an attachment",
       intro: "`BlokDanych`. `MetaDane` is the one child the schema requires, which is why a " \
              "block describing itself only with a heading or a table is refused at " \
@@ -349,6 +351,7 @@ module Fa3FieldMapping
     },
     {
       model: "Ksef::FA3::MetaEntry",
+      base: "Faktura/Zalacznik/BlokDanych/MetaDane",
       title: "MetaEntry — one key/value pair",
       intro: "`MetaDane` on a block and `TMetaDane` on a table are the same shape under " \
              "different names, so one class serves both. Mapped against the block's names; " \
@@ -360,20 +363,24 @@ module Fa3FieldMapping
     },
     {
       model: "Ksef::FA3::AttachmentTable",
+      base: "Faktura/Zalacznik/BlokDanych/Tabela",
       title: "AttachmentTable — a table inside a block",
       intro: "`Tabela`. **Rows are ragged**: `Kol` and `WKom` each repeat 1..20 and the schema " \
              "ties them together nowhere, so a row need not carry one cell per column — both " \
-             "Ministry samples have one-cell rows heading a group of nine-cell ones.",
+             "Ministry samples alternate one-cell label rows with full-width ones.",
       fields: [
         %w[metadata Faktura/Zalacznik/BlokDanych/Tabela/TMetaDane],
         %w[caption Faktura/Zalacznik/BlokDanych/Tabela/Opis],
         %w[columns Faktura/Zalacznik/BlokDanych/Tabela/TNaglowek/Kol],
-        %w[rows Faktura/Zalacznik/BlokDanych/Tabela/Wiersz/WKom],
+        ["rows", "Faktura/Zalacznik/BlokDanych/Tabela/Wiersz",
+         "An Array of rows, each an Array of `WKom` cells (1–20, and **ragged** — a row need " \
+         "not carry one per column)."],
         %w[totals Faktura/Zalacznik/BlokDanych/Tabela/Suma/SKom]
       ]
     },
     {
       model: "Ksef::FA3::TableColumn",
+      base: "Faktura/Zalacznik/BlokDanych/Tabela/TNaglowek/Kol",
       title: "TableColumn — one column heading",
       intro: "`Kol`. Its `Typ` attribute is FA(3)'s **only** inline attribute enumeration, and " \
              "the six permitted values are read from the generated metadata rather than " \
@@ -437,9 +444,16 @@ module Fa3FieldMapping
 
     # @return [Hash] `{name:, type:, occurs:, documentation:}` for the element the path names
     # @raise [RuntimeError] if any segment does not exist, which is the drift guard
-    def field(path)
-      node = node_for(path)
-      { name: node["name"], type: node["type"], occurs: occurs(node), documentation: annotation(node) }
+    # @param base [String, nil] the model's own element path. Cardinality is reported **relative
+    #   to it** — "given a `Tabela`, is there a `Suma`?" — which is what a reader of that
+    #   model's section is asking. Without a base only the element's own wrappers count, which
+    #   is how the pre-existing sections have always rendered and is left unchanged for them.
+    def field(path, base: nil)
+      ancestry = ancestry_for(path)
+      node = ancestry.last
+      between = base.nil? ? [] : ancestry[base.split("/").length...-1].to_a
+      { name: node["name"], type: node["type"], occurs: occurs(node, between + [node]),
+        documentation: annotation(node) }
     end
 
     # Every element the type declares, **including those nested in inner sequences and
@@ -462,12 +476,21 @@ module Fa3FieldMapping
 
     private
 
-    def node_for(path)
-      segments = path.split("/")
-      node = @document.at_xpath("//xsd:element[@name='#{segments.first}']", XSD_NS)
-      raise "#{path}: no root element #{segments.first.inspect}" if node.nil?
+    def node_for(path) = ancestry_for(path).last
 
-      segments[1..].inject(node) { |parent, name| child(parent, name, path) }
+    # Every element on the path, root first. The **ancestors matter**: an element is optional
+    # when any element above it on the path is, and until 2026-08-26 only the wrappers inside
+    # its own complexType were considered. No declared path crossed an optional element until
+    # the attachment's did, so `docs/field_mapping.md` printed `paragraphs` as "yes, 1–10" and
+    # `totals` as "yes, 1–20" — both live inside optional parents (`Tekst`, `Suma`), and the
+    # file's own rule says Required? is *effective* cardinality. Same family as §8.2a: a wrong
+    # Required? in a table an auditor reads.
+    def ancestry_for(path)
+      segments = path.split("/")
+      root = @document.at_xpath("//xsd:element[@name='#{segments.first}']", XSD_NS)
+      raise "#{path}: no root element #{segments.first.inspect}" if root.nil?
+
+      segments[1..].inject([root]) { |chain, name| chain << child(chain.last, name, path) }
     end
 
     def child(parent, name, path)
@@ -498,10 +521,21 @@ module Fa3FieldMapping
     # `xsd:sequence` or `xsd:choice` between it and its complexType. An element inside an
     # optional sequence is optional however it declares itself, and a branch of a choice is
     # never required on its own even when the choice is.
-    def occurs(element)
+    def occurs(element, ancestry = [element])
       wrappers = wrappers_of(element)
       choice = wrappers.any? { |wrapper| wrapper.name == "choice" }
-      { min: effective_min(element, wrappers, choice), max: effective_max(element, wrappers), choice: choice }
+      optional_parent = ancestry[..-2].any? { |ancestor| optional?(ancestor) }
+      {
+        min: optional_parent ? 0 : effective_min(element, wrappers, choice),
+        max: effective_max(element, wrappers),
+        choice: choice
+      }
+    end
+
+    # An element is optional if it says so, or if a wrapper inside its own type does.
+    def optional?(element)
+      element["minOccurs"] == "0" ||
+        wrappers_of(element).any? { |wrapper| wrapper["minOccurs"] == "0" || wrapper.name == "choice" }
     end
 
     def effective_min(element, wrappers, choice)
@@ -515,10 +549,13 @@ module Fa3FieldMapping
     end
 
     # Every `xsd:sequence` / `xsd:choice` between the element and its complexType.
+    # Stops at the enclosing `complexType` — or at `schema`, for a top-level element such as
+    # `Faktura`, which has no enclosing type at all. Without that second stop the walk ran off
+    # the top of the tree into the Document, which has no `#parent`.
     def wrappers_of(element)
       found = []
       node = element.parent
-      while node && node.name != "complexType"
+      while node.respond_to?(:name) && !%w[complexType schema].include?(node.name)
         found << node
         node = node.parent
       end
@@ -573,7 +610,7 @@ module Fa3FieldMapping
     def section(model)
       verify_members!(Object.const_get(model[:model]), model)
       prefix = model[:key] || model[:model].split("::").last
-      rows = model[:fields].map { |attribute, path, note| row(prefix, attribute, path, note) }
+      rows = model[:fields].map { |attribute, path, note| row(prefix, attribute, path, note, model[:base]) }
       table("## #{model[:title]}", "`#{model[:model]}` — #{model[:intro]}",
             "Attribute | FA(3) element | Type | Required? | #{OPIS} | Notes", rows)
     end
@@ -588,10 +625,10 @@ module Fa3FieldMapping
       raise "#{model[:model]}: member(s) neither mapped nor in UNMAPPED: #{unaccounted.inspect}" if unaccounted.any?
     end
 
-    def row(key_prefix, attribute, path, note = nil)
+    def row(key_prefix, attribute, path, note = nil, base = nil)
       return unmapped_row(key_prefix, attribute) if path.nil?
 
-      field = @schema.field(path)
+      field = @schema.field(path, base: base)
       "| `#{attribute}` | `#{field[:name]}` | #{type_of(field)} | #{required(field[:occurs])} | " \
         "#{field[:documentation] || "—"} | #{note || "—"} |"
     end

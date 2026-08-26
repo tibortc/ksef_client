@@ -23,10 +23,13 @@ module Ksef
       NAMESPACE = "http://crd.gov.pl/wzor/2025/06/25/13775/"
       ROOT = "Faktura"
 
-      # An element that carries attributes as well as text. `KodFormularza` is the only one
-      # this serializer writes, and both of its attributes are fixed by the schema. (FA(3) has
-      # one other — `Zalacznik/BlokDanych/Tabela/…/Kol`, with a required, non-fixed `Typ` — but
-      # this model does not carry `Zalacznik`, so it never comes up.)
+      # An element that carries attributes, and optionally nested elements of its own.
+      #
+      # FA(3) has exactly two: `KodFormularza`, whose two attributes are fixed by the schema and
+      # which holds text; and `Zalacznik/…/Kol`, whose `Typ` is required but not fixed and which
+      # holds a nested `NKom`. The second is why `children` exists — this comment used to say
+      # the model did not carry `Zalacznik`, which stopped being true in the commit that added
+      # the member three lines below.
       Element = Data.define(:text, :attributes, :children) do
         # `children` arrived with the attachment: `Kol` carries a required `Typ` attribute *and*
         # a nested `NKom`, which nothing before it needed. They are written through
@@ -80,8 +83,6 @@ module Ksef
       end
 
       def write_children(document, parent, type_key, values)
-        return if values.nil?
-
         # Keys are normalised to Strings first, because the two checks below disagreed
         # otherwise: {#reject_unknown_keys} compares `keys.map(&:to_s)`, so a symbol key
         # `:P_16` looked known, while the write loop asks `values.key?("P_16")` and found

@@ -7,9 +7,11 @@ module Ksef
     # ## Rows are ragged, and that is the document's doing
     #
     # `Kol` repeats 1..20 and `WKom` repeats 1..20, and **the schema ties them together
-    # nowhere**. Both of the Ministry's attachment samples exercise the gap: every table has a
-    # one-cell row heading a group — *"Licznik rozliczeniowy energii czynnej nr 99999999"* —
-    # followed by rows carrying the full nine. Measured widths are `[1, 9]` and `[1, 6]`.
+    # nowhere** — no `xsd:key`, `keyref` or `unique` in any of the four schemas. Both of the
+    # Ministry's attachment samples exercise the gap: a one-cell row labels what follows —
+    # *"Licznik rozliczeniowy energii czynnej nr 99999999"* — with full-width rows after it.
+    # Measured widths are `[1, 9]`, `[1, 6]` and `[1, 9, 1, 9, ...]`: the one-cell rows
+    # alternate rather than heading a block, and one of the three tables is six columns wide.
     #
     # So a row is an Array of cells and nothing pads it. Storing rows as a rectangle would have
     # to either invent cells the document does not have or drop the ones it does, and both are
@@ -50,7 +52,7 @@ module Ksef
           columns: columns.dup.freeze,
           rows: rows.map { |row| cells(row) }.freeze,
           caption: Formatting.text(caption),
-          metadata: DataBlock.entries(metadata).freeze,
+          metadata: DataBlock.entries(metadata).dup.freeze,
           totals: totals.nil? ? nil : cells(totals)
         }
       end
@@ -74,9 +76,12 @@ module Ksef
         list.first.is_a?(Array) ? list : [list]
       end
 
-      # `to_s`, not `Formatting.text`'s nil: a cell that is absent and a cell that is empty are
-      # the same thing to `TZnakowy2`, and a nil in the middle of a row would serialise as a
-      # missing element and shorten it.
+      # `to_s`, not `Formatting.text`'s nil. A cell that is absent and one that is empty are the
+      # same thing to `TZnakowy2`, so nil is normalised on the way in — and it has to be,
+      # because a nil that survives breaks §7.6: it serialises as an empty `WKom` (through
+      # `nil.to_s`) and parses back as `""`, so the invoice stops equalling itself. An earlier
+      # version of this comment said a nil cell "would shorten the row"; measured 2026-08-26,
+      # that is not what happens.
       def self.cells(row) = Array(row).map { |cell| Formatting.text(cell).to_s }.freeze
 
       def to_fa3

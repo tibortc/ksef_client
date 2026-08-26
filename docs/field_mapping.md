@@ -171,7 +171,7 @@ Section references such as (§8.4) are to `docs/REFERENCE.md`, which ships with 
 |---|---|---|---|---|---|
 | `heading` | `ZNaglowek` | `TZnakowy512` | optional | Nagłówek bloku danych | — |
 | `metadata` | `MetaDane` | *(inline)* | yes, 1–1000 | Dane opisowe | — |
-| `paragraphs` | `Akapit` | `TZnakowy512` | yes, 1–10 | Opis | — |
+| `paragraphs` | `Akapit` | `TZnakowy512` | optional, up to 10 | Opis | — |
 | `tables` | `Tabela` | *(inline)* | optional, up to 1000 | Tabele | — |
 
 
@@ -187,15 +187,15 @@ Section references such as (§8.4) are to `docs/REFERENCE.md`, which ships with 
 
 ## AttachmentTable — a table inside a block
 
-`Ksef::FA3::AttachmentTable` — `Tabela`. **Rows are ragged**: `Kol` and `WKom` each repeat 1..20 and the schema ties them together nowhere, so a row need not carry one cell per column — both Ministry samples have one-cell rows heading a group of nine-cell ones.
+`Ksef::FA3::AttachmentTable` — `Tabela`. **Rows are ragged**: `Kol` and `WKom` each repeat 1..20 and the schema ties them together nowhere, so a row need not carry one cell per column — both Ministry samples alternate one-cell label rows with full-width ones.
 
 | Attribute | FA(3) element | Type | Required? | The Ministry's description (Polish, verbatim) | Notes |
 |---|---|---|---|---|---|
 | `metadata` | `TMetaDane` | *(inline)* | optional, up to 1000 | Dane opisowe dotyczące tabeli | — |
 | `caption` | `Opis` | `TZnakowy512` | optional | Opis | — |
 | `columns` | `Kol` | *(inline)* | yes, 1–20 | — | — |
-| `rows` | `WKom` | `TZnakowy2` | yes, 1–20 | Zawartość pola | — |
-| `totals` | `SKom` | `TZnakowy2` | yes, 1–20 | Zawartość pola | — |
+| `rows` | `Wiersz` | *(inline)* | yes, 1–1000 | Wiersze tabeli | An Array of rows, each an Array of `WKom` cells (1–20, and **ragged** — a row need not carry one per column). |
+| `totals` | `SKom` | `TZnakowy2` | optional, up to 20 | Zawartość pola | — |
 
 
 ## TableColumn — one column heading
@@ -375,8 +375,8 @@ The reverse direction: an element from a Polish invoice, and the attribute that 
 | `TMetaDane` | `AttachmentTable#metadata` |
 | `Tabela` | `DataBlock#tables` |
 | `TypKorekty` | `Correction#effect` |
-| `WKom` | `AttachmentTable#rows` |
 | `WartoscZamowienia` | `Order#total` |
+| `Wiersz` | `AttachmentTable#rows` |
 | `ZKlucz` | `MetaEntry#key` |
 | `ZNaglowek` | `DataBlock#heading` |
 | `ZWartosc` | `MetaEntry#value` |

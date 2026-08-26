@@ -1850,6 +1850,53 @@ reported by `#unmapped_elements` as whole elements, so nothing is silently lost 
 
 ---
 
+### 8.7 `Zalacznik`, the attachment — measured 2026-08-26
+
+FA(3)'s attachment is **not a file**. There is no MIME type, no encoding, no bytes: `Zalacznik`
+is a structured document of headings, key/value metadata, paragraphs and tables, sitting as a
+**sibling of `Fa`** rather than one of its children. That placement is the first thing worth
+knowing — it takes part in no summary and no arithmetic, so modelling it could not affect a
+single tax figure.
+
+Two of the Ministry's samples carry one (Przykład 24 and 25, both energy bills): one block, eight
+metadata pairs, three tables.
+
+**Four facts the schema states that a naive model would get wrong:**
+
+| Fact | Where | Consequence |
+|---|---|---|
+| `MetaDane` is mandatory (`minOccurs` defaults to 1; the schema writes only `maxOccurs="1000"`) | inside `BlokDanych` | It is the *only* mandatory child. A block with a heading and a table but no metadata is schema-invalid, so {DataBlock} refuses one at construction |
+| `Kol` and `WKom` each repeat 1..20, **related nowhere** — no `xsd:key`, `keyref` or `unique` in any of the four schemas | `TNaglowek` / `Wiersz` | **Rows are ragged.** Measured widths across the corpus: `[1, 9]`, `[1, 6]` and `[1, 9, 1, 9, …]` — one-cell rows label what follows, alternating rather than heading a block of them, and one of the three tables is six columns wide. Storing rows as a rectangle would invent cells or drop them |
+| `TZnakowy2` has `minLength="0"` | `NKom`, `WKom`, `SKom` | An **empty cell is legal**, and distinct from an absent one. `Formatting.text("")` returns `""` rather than nil precisely so it survives; a dropped cell shifts every cell after it |
+| `Kol/@Typ` is `use="required"` with six inline values | `Kol` | FA(3)'s only inline *attribute* enumeration — `date`, `datetime`, `dec`, `int`, `time`, `txt`. {TableColumn} reads them from the generated metadata, which is why §18.2's codegen fix came first |
+
+`Suma` is `minOccurs="0"`, so a table with no summary row must not re-serialise with an empty one
+— {AttachmentTable#totals} is nil rather than `[]` for that reason.
+
+**One defect no tier catches, and it is undecidable rather than unimplemented.** A column
+declared `dec` whose cells hold `"nie liczba"` is XSD-clean, silent to `#errors`, `#warnings`
+and `#unmapped_elements` alike — every cell is `TZnakowy2` whatever its column says. It is not
+checked because **a cell cannot be reliably associated with a column at all**: rows are ragged,
+so a one-cell label row belongs to no column and the association has no general answer. Recorded
+so it is not mistaken for an oversight.
+
+**The reader refuses eight structurally-invalid shapes** rather than reading them — no
+`BlokDanych`, no `MetaDane`, a half-empty `MetaDane`, no `TNaglowek`, no `Wiersz`, an empty
+`Wiersz`, a missing or illegal `Kol/@Typ`. That is consistent with the parser refusing a
+nameless seller, and the cost is that a malformed attachment makes the invoice's *tax* figures
+unreadable. `AttachmentReader`'s own comment weighs it and names the alternative.
+
+**Operational constraints are out of 0.1 scope and stay there** (DESIGN.md §7.4). Sending an
+invoice that carries an attachment needs prior opt-in in `e-Urząd Skarbowy` and, per **§15.5**,
+a batch session — with the exception that section records, an offline *technical correction* may
+use an interactive one. The size ceiling rises from 1 MB to 3 MB (**§6.2**), and both are
+**defaults rather than ceilings of the format**: `limity.md` heads them *"Wartość domyślna"* and
+`GET /limits/context` reports the live values. None of that is modelled here: this is the
+document, not the submission — but the size figure does reach code, because tier 1b must not
+refuse a document the format permits ({DocumentValidator::MAX_BYTES_WITH_ATTACHMENT}).
+
+An earlier version of this paragraph cited "§16", which says nothing about attachments.
+
 ## 9. Still unverified
 
 Carried forward; must be resolved before the code that depends on them is written
@@ -3281,34 +3328,6 @@ One more, latent: `Renderer::KEY_ORDER` did not list `use` or `fixed`, and `sort
 every unlisted key to one shared rank. `sort_by` is not stable, so those two tied on every
 rendered attribute — the same determinism trap that reached CI from `tasks/field_mapping.rb`.
 Adding `values` would have made three. Every key a rendered Hash can hold is now listed.
-
-### 8.7 `Zalacznik`, the attachment — measured 2026-08-26
-
-FA(3)'s attachment is **not a file**. There is no MIME type, no encoding, no bytes: `Zalacznik`
-is a structured document of headings, key/value metadata, paragraphs and tables, sitting as a
-**sibling of `Fa`** rather than one of its children. That placement is the first thing worth
-knowing — it takes part in no summary and no arithmetic, so modelling it could not affect a
-single tax figure.
-
-Two of the Ministry's samples carry one (Przykład 24 and 25, both energy bills): one block, eight
-metadata pairs, three tables.
-
-**Four facts the schema states that a naive model would get wrong:**
-
-| Fact | Where | Consequence |
-|---|---|---|
-| `MetaDane` is `minOccurs="1"` | inside `BlokDanych` | It is the *only* mandatory child. A block with a heading and a table but no metadata is schema-invalid, so {DataBlock} refuses one at construction |
-| `Kol` and `WKom` each repeat 1..20, **related nowhere** | `TNaglowek` / `Wiersz` | **Rows are ragged.** Measured widths in the corpus are `[1, 9]` and `[1, 6]` — a one-cell row heads a group of nine-cell ones. Storing rows as a rectangle would invent cells or drop them |
-| `TZnakowy2` has `minLength="0"` | `NKom`, `WKom`, `SKom` | An **empty cell is legal**, and distinct from an absent one. `Formatting.text("")` returns `""` rather than nil precisely so it survives; a dropped cell shifts every cell after it |
-| `Kol/@Typ` is `use="required"` with six inline values | `Kol` | FA(3)'s only inline *attribute* enumeration — `date`, `datetime`, `dec`, `int`, `time`, `txt`. {TableColumn} reads them from the generated metadata, which is why §18.2's codegen fix came first |
-
-`Suma` is `minOccurs="0"`, so a table with no summary row must not re-serialise with an empty one
-— {AttachmentTable#totals} is nil rather than `[]` for that reason.
-
-**Operational constraints are out of 0.1 scope and stay there** (DESIGN.md §7.4). Sending an
-invoice that carries an attachment needs prior opt-in in `e-Urząd Skarbowy` and, per §16, a batch
-session; the size ceiling rises from 1 MB to 3 MB. None of that is modelled: this is the
-document, not the submission.
 
 ## 19. Defects the 2026-08-26 audit round found
 

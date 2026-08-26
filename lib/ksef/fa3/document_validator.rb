@@ -57,8 +57,14 @@ module Ksef
       ].freeze
 
       # 1 000 000 bytes, and upstream means the decimal million rather than 2^20 — it writes
-      # "1 MB * (1 000 000 bajtów)" (§15.5). Attachments raise it to 3 MB and are batch-only,
-      # so 0.1 has no reason to carry the larger figure.
+      # "1 MB * (1 000 000 bajtów)" (docs/REFERENCE.md §6.2, §15.5).
+      #
+      # **An invoice carrying an attachment gets {MAX_BYTES_WITH_ATTACHMENT} instead.** This
+      # comment used to say attachments "are batch-only, so 0.1 has no reason to carry the
+      # larger figure", which was true exactly as long as the model could not carry one. Once
+      # `Zalacznik` landed, a legal 2.5 MB attachment invoice was refused by tier 1b with a
+      # message asserting the document had no attachment — the "refuses legal invoices" failure
+      # §15.6 and §14.3 exist to prevent, introduced by the change that made it reachable.
       # It is a **default, not a ceiling of the format.** Upstream marks the figure with an
       # asterisk — *"Jeżeli w scenariuszach biznesowych organizacji dostępne limity są
       # niewystarczające, prosimy o kontakt z działem wsparcia KSeF"* — and `limity.md` heads the
@@ -66,6 +72,16 @@ module Ksef
       # for a context. So an organisation that has negotiated a higher limit passes its own via
       # `max_bytes:`; hard-coding this as absolute rejected invoices KSeF would have accepted.
       MAX_BYTES = 1_000_000
+
+      # 3 MB, per the same table. Attachments are documented as batch-only (§15.5, with an
+      # offline technical-correction exception), and this gem has no batch layer — but the size
+      # a document is *allowed* to be is not the transport's business, and tier 1b must not
+      # refuse a document the format permits.
+      MAX_BYTES_WITH_ATTACHMENT = 3_000_000
+
+      # @param attachment [Boolean] whether the invoice carries a `Zalacznik`
+      # @return [Integer] the default ceiling for such a document
+      def self.default_max_bytes(attachment:) = attachment ? MAX_BYTES_WITH_ATTACHMENT : MAX_BYTES
 
       # {DISCOURAGED} compiled into one character class.
       DISCOURAGED_PATTERN = Regexp.new(

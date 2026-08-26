@@ -11,8 +11,9 @@ module Ksef
     #
     # **Operational constraints are out of 0.1 scope on purpose** (DESIGN.md §7.4). Sending an
     # invoice that carries one requires prior opt-in in `e-Urząd Skarbowy` and, per
-    # `docs/REFERENCE.md` §16, a batch session — and the size ceiling rises from 1 MB to 3 MB.
-    # None of that is modelled here; this is the document, not the submission.
+    # `docs/REFERENCE.md` §15.5, a batch session — and the size ceiling rises from 1 MB to 3 MB
+    # (§6.2), which tier 1b does honour ({DocumentValidator::MAX_BYTES_WITH_ATTACHMENT}).
+    # Nothing else about sending is modelled here; this is the document, not the submission.
     Attachment = Data.define(:blocks)
 
     # Construction, invariants and serialisation for {Ksef::FA3::Attachment}.

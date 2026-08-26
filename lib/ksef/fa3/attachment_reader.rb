@@ -7,10 +7,30 @@ module Ksef
     # Split out for the same reason {RowReader} and {AdvanceReader} are: the attachment is a
     # small tree of its own, and none of it interacts with the invoice's arithmetic.
     #
-    # **Nothing here refuses a document.** The parser's contract is that reading a document to
-    # find out why KSeF rejected it must work (§7.6), so a block with no `MetaDane` — which the
-    # schema forbids — is read as one with none, and {ModelValidator} is what reports it. The
-    # models refuse it at construction, so the reader builds them only from what it found.
+    # ## This reader **does** refuse some documents, and that was mis-described
+    #
+    # An earlier version of this comment claimed "nothing here refuses a document" and named
+    # {ModelValidator} as the reporter. Both were false: the models refuse at construction, so
+    # eight structurally-invalid attachment shapes raised out of `Ksef::FA3.parse` — taking the
+    # whole invoice with them — and tier 1a did not look at the attachment at all. An audit
+    # found it on 2026-08-26; the reporter now exists ({AttachmentChecks}) and this says what
+    # the code does.
+    #
+    # **What refuses:** an attachment with no `BlokDanych`, a block with no `MetaDane`, a
+    # `MetaDane` missing either half, a table with no `TNaglowek` or no `Wiersz`, a `Wiersz`
+    # with no `WKom`, a `Kol` with no `Typ` or a `Typ` outside the enumeration. Each is a
+    # document the XSD rejects, and each is a shape the model cannot represent.
+    #
+    # **Why that is the choice, and what the alternative was.** The parser already refuses a
+    # nameless seller and a missing `P_1`, so refusing structurally-impossible input is
+    # consistent rather than novel. The alternative — relax the model's invariants so any
+    # readable document parses, and let tier 1a report — is coherent and is what
+    # {Line#net} did for an unpriced row (§8.6). It was not taken here because the attachment's
+    # invariants are cardinality rules the XSD states, not amounts the model would silently
+    # alter, so representing them wrongly buys nothing. **The cost is real and worth knowing:**
+    # a malformed attachment makes the invoice's tax figures unreadable, and the attachment is
+    # the one node with no tax meaning. If that bites someone, relaxing the invariants is the
+    # fix, not a rescue here.
     module AttachmentReader
       class << self
         include NodeReader

@@ -24,6 +24,15 @@ gem version for which API state".
 > yet, so it is absent rather than stubbed.
 
 ### Added
+
+- **A golden file for the attachment** (`spec/fixtures/fa3/golden/vat_attachment.xml`), carrying
+  two blocks. A mutation audit found eight of thirty-eight mutations surviving a suite with
+  100% line, branch and method coverage of this code — coverage was measuring reachability, not
+  constraint. Two facts had nothing pinning them: attribute-versus-child write order and
+  `<WKom/>` versus `<WKom></WKom>` are invisible to the XSD *and* to the round-trip law, because
+  parsing collapses both; and every corpus sample has exactly one `BlokDanych`, so taking
+  `blocks.first` anywhere dropped the rest in silence.
+
 - **`Zalacznik`, the FA(3) attachment**, at build and parse level — the last implementation item
   in Phase 3's scope (DESIGN.md §7.4). `Ksef::FA3::Attachment`, `DataBlock`, `MetaEntry`,
   `AttachmentTable` and `TableColumn`, read by `AttachmentReader` and built through
@@ -149,6 +158,47 @@ gem version for which API state".
   the document will carry it, rounded per bucket.
 
 ### Fixed
+
+- **`#errors` raised instead of reporting for two attachment shapes.** `Invoice#attachment` was
+  a public constructor field tier 1a never inspected, so a value that was not an `Attachment`
+  gave `NoMethodError`, and a U+0000 in any of the attachment's nine text fields gave a bare
+  `ArgumentError` from libxml2 — outside this gem's error hierarchy, which the docs tell callers
+  to rescue. `FieldChecks` had the guard and predicted this exact failure in its own comments;
+  the attachment never reached it. `AttachmentChecks` now walks the node and reports with a
+  field path like `attachment.blocks[0].tables[0].rows[1][0]`, and `Attachment.wrap` moved into
+  the constructor so `Invoice.new` and `#with` cannot walk around it.
+
+- **A legal attachment invoice over 1 MB was refused.** `DocumentValidator` hard-coded the
+  no-attachment ceiling with a comment saying attachments "are batch-only, so 0.1 has no reason
+  to carry the larger figure" — true exactly as long as the model could not carry one. The
+  ceiling now follows the document (3 MB with an attachment, `docs/REFERENCE.md` §6.2). This is
+  the "refuses legal invoices" failure §15.6 and §14.3 exist to prevent, introduced by the
+  change that made it reachable.
+
+- **`DataBlock` and `AttachmentTable` froze the caller's array in place**, so building two
+  blocks from one accumulator raised `FrozenError` far from its cause. The `dup` that
+  `Correction` documents three files away was missing from two of five sites.
+
+- **`docs/field_mapping.md` printed `paragraphs` and `totals` as required**, contradicting §8.7
+  in the same commit: both sit inside optional parents (`Tekst`, `Suma`). The cardinality walker
+  only considered wrappers inside an element's own complexType, and no declared path had crossed
+  an optional *element* before. It now reports cardinality relative to each model's own element
+  — "given a `Tabela`, is there a `Suma`?" — which is the question that section's reader is
+  asking. `rows` also showed `WKom`'s 1–20 where the attribute holds rows (1–1000).
+
+- **`AttachmentReader`'s documented contract was the opposite of its behaviour**, claiming
+  nothing refuses a document and naming a reporter that did not exist. Eight structurally
+  invalid shapes raise; the comment now says which, why that is consistent with the rest of the
+  parser, and what the alternative would cost.
+
+- Corrections found by the same audit: `docs/REFERENCE.md` §8.7 was physically inside chapter 18
+  — the mistake chapter 19's own introduction describes being repaired the same day — and cited
+  "§16" for a rule that is in §15.5; `serializer.rb` still said the model does not carry
+  `Zalacznik` three lines above the member added for it; the ragged-row description said
+  "heading a group of nine-cell ones" where the corpus alternates and one table is six wide; and
+  `CLAUDE.md`'s verification line carried the old branch figure in the sentence telling you to
+  keep it current.
+
 
 - **A live pre-signed URL was committed in two cassettes.** KSeF hands out the UPO as an Azure
   user-delegation SAS, where the query string *is* the authorisation — and both session cassettes

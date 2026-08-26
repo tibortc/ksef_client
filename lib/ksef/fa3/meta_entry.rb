@@ -12,8 +12,9 @@ module Ksef
     # **Kept as an ordered list of pairs rather than a Hash**, wherever these are held. The
     # schema permits `MetaDane` to repeat up to a thousand times and says nothing about the keys
     # being distinct, so a Hash would silently drop a repeated key and reorder the rest — and an
-    # attachment is a document a human reads, where order is the presentation. {DataBlock#to_h}
-    # exists for callers who want the convenient view and can accept its losses.
+    # attachment is a document a human reads, where order is the presentation. {DataBlock#to_h_metadata}
+    # exists for callers who want the convenient view and can accept its losses — not `#to_h`,
+    # which is `Data`'s and returns the block's four members.
     MetaEntry = Data.define(:key, :value)
 
     # Construction, invariants and serialisation for {Ksef::FA3::MetaEntry}.
