@@ -58,8 +58,9 @@ module Ksef
     # @param invoice [#to_xml, String] an FA(3) document
     # @param validate [Boolean] run the FA(3) validator first
     # @return [Receipt]
-    def send_invoice(invoice, validate: true)
-      session { |batch| batch.send_invoice(invoice, validate: validate) }
+    # @param encryptor [Crypto::Encryptor, nil] see {#session}; for the recorded tier only
+    def send_invoice(invoice, validate: true, encryptor: nil)
+      session(encryptor: encryptor) { |batch| batch.send_invoice(invoice, validate: validate) }
     end
 
     # Opens one session, yields a handle, and closes it however the block ends.
@@ -68,8 +69,19 @@ module Ksef
     # happens — hence a block rather than a returned session.
     #
     # @yieldparam batch [Session]
+    # @param encryptor [Crypto::Encryptor, nil] the session's symmetric key. Generated fresh
+    #   when omitted, which is what every caller should do — a key is per-session by design
+    #   (docs/REFERENCE.md §11.2a) and reusing one across sessions is a step towards reusing
+    #   it across *documents*, which is what the per-session binding exists to prevent.
+    #
+    #   It is injectable for exactly one reason: **the recorded test tier** (DESIGN.md §9.1).
+    #   `Encryptor.generate` draws a random key and IV, and RSA-OAEP padding is randomised on
+    #   top, so a recorded request body can never be reproduced — a replayed run has to supply
+    #   the key the recording used. Without this seam the recorded tier would have to drive
+    #   {Sessions::Online} directly and would stop testing the facade a user actually calls.
     # @return the block's value
-    def session(form_code: Sessions::DEFAULT_FORM_CODE, upo_version: Sessions::UPO_VERSION)
+    def session(form_code: Sessions::DEFAULT_FORM_CODE, upo_version: Sessions::UPO_VERSION,
+                encryptor: nil)
       # Wrapped in the §10.2 remediation: certificates are cached for an hour, so an
       # emergency key rotation inside that window makes the cached `publicKeyId` unknown and
       # the open fails with `21470`. `with_key_rotation` re-fetches and re-selects, and the
@@ -79,7 +91,7 @@ module Ksef
       # request was declined outright, so there is no session to duplicate.
       opened = public_keys.with_key_rotation do
         sessions.open(
-          encryptor: Crypto::Encryptor.generate,
+          encryptor: encryptor || Crypto::Encryptor.generate,
           certificate: public_keys.symmetric_key_encryption,
           form_code: form_code,
           upo_version: upo_version
