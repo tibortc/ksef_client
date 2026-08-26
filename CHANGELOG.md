@@ -25,6 +25,26 @@ gem version for which API state".
 
 ### Added
 
+- **The recorded test tier's harness** (`spec/support/vcr.rb`, `rake vcr:record`) — VCR wired to
+  the same WebMock the rest of the suite uses, scrubbing for every secret
+  `spec/cassette_hygiene_spec.rb` scans for, and a `:recorded` tag excluded until a cassette
+  exists. **No cassette is recorded yet**: recording needs TEST credentials, creates a permanent
+  TEST invoice and burns rate-limited quota, so it is a deliberate human-run step rather than
+  part of `rake`. A `:release_check` gate refuses 0.1.0 while `spec/cassettes/` is empty, so the
+  gap cannot be forgotten. (DESIGN.md §9.1.)
+
+  Two decisions bind. **Requests are never matched on the body** — `Encryptor.generate` draws a
+  random key and IV and RSA-OAEP padding is randomised, so a recorded body cannot be reproduced
+  and a body matcher would present as a flaky test rather than an impossible one. And
+  **`record: :none` unless `KSEF_VCR_RECORD=1`**, so a deleted cassette fails loudly instead of
+  silently reaching TEST and recording a fresh invoice.
+
+- **`Ksef::Client#session(encryptor:)` and `#send_invoice(encryptor:)`** — a seam for the
+  recorded tier alone. A session's symmetric key is per-session by design
+  (`docs/REFERENCE.md` §11.2a) and callers should keep letting it be generated; a replay has to
+  supply the key its recording used, and without this the tier would bypass the facade and stop
+  testing the path users call.
+
 - **`docs/field_mapping.md`** — the English↔Polish field table, listing every attribute this
   model carries against the FA(3) element it reads and writes, with the element's XSD type,
   **effective** cardinality and the Ministry's own description in full. **Generated** by `rake fa3:field_mapping`

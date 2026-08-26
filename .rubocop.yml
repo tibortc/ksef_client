@@ -89,6 +89,10 @@ RSpec/DescribeClass:
   Exclude:
     - "spec/artifacts_spec.rb"
     - "spec/cassette_hygiene_spec.rb"  # scans committed fixtures, not a class
+    # The recorded tier: one asserts the tier's own state, the other replays a multi-step flow
+    # through the facade. Neither is about a class (DESIGN.md §9.1).
+    - "spec/recorded_tier_spec.rb"
+    - "spec/recorded/**/*_spec.rb"
     - "spec/openapi_contract_spec.rb"  # asserts facts about a pinned artifact, not a class
     # A law over the pinned FA(3) corpus (DESIGN.md §7.6), holding across the parser, the
     # serializer and the validator together — no single class owns it.

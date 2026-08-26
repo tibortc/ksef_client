@@ -75,7 +75,7 @@ declaration, never the output. `rake fa3:verify` fails if the committed file is 
 
 | Tier | Runs |
 |---|---|
-| Unit (WebMock stubs; VCR planned, no cassette yet) | every push, full Ruby matrix |
+| Unit (WebMock stubs; VCR harness built, no cassette recorded — `rake vcr:record`) | every push, full Ruby matrix |
 | Golden files, round-trip, crypto vectors | every push |
 | Live TEST integration | nightly and pre-release only, never per-PR |
 

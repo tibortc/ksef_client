@@ -116,6 +116,10 @@ require "webmock/rspec"
 # No spec may reach the network. Live integration specs opt back in explicitly.
 WebMock.disable_net_connect!(allow_localhost: false)
 
+# The recorded tier hooks the same WebMock, so it must be configured after that call and
+# before any example runs (DESIGN.md §9.1).
+require_relative "support/vcr"
+
 RSpec.configure do |config|
   config.expect_with(:rspec) { |c| c.syntax = :expect }
   config.mock_with(:rspec) { |c| c.verify_partial_doubles = true }
