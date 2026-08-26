@@ -603,6 +603,10 @@ come from the environment with a fallback that exists only so a replay can const
 - **The poll interval.** `Sessions::Status#poll` takes an injectable sleeper; a replay passes a
   no-op, or it waits out a recorded backoff for nothing.
 
+And one thing that differs from neither, but was asserted wrongly anyway: `upo-v4-3` is the
+`X-KSeF-Feature` **header** value, while the document's namespace is `…/KSeF/v4-3`. Assert
+against `Ksef::UPO::NAMESPACE` rather than a literal, or a correct UPO fails the check.
+
 #### What not to do
 
 - **Do not hand-write a cassette.** A recorded response this gem has never actually received is
