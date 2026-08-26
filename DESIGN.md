@@ -516,7 +516,14 @@ Gate status, precisely:
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
 | All seven types build, validate, round-trip | **met**, 2026-08-26 — all seven, round-trip and **validator tier 1** included. Twenty-two of the twenty-six Ministry samples go through end to end; the other four are refused for a *construct* (gross pricing, non-NIP buyer), not a type. Tier 3 remains |
 
-Remaining for Phase 2: **validator tier 3, and only that.** All seven invoice types landed by 2026-08-26 (`docs/REFERENCE.md` §8.4, §8.5, §8.6). **Tier 1 landed 2026-08-24**, split into the model and document halves §7.7 now describes; **`KOR` landed the same day**, built against the Ministry's five worked corrections (`docs/REFERENCE.md` §8.4) — the only examples of a non-`VAT` type in existence.
+Remaining for Phase 2: **validator tier 3 and `docs/field_mapping.md`.**
+
+This said "tier 3, and only that" until 2026-08-26, and that was an inconsistency introduced in
+the same commit that created the other half of it. §7.2's deferral of `docs/field_mapping.md`
+carried an explicit trigger — *"it lands once the models cover all seven types"* — and Phase 1's
+note above records it as "required before 0.1.0 and tracked in Phase 2". The seventh type landed
+that day, so the trigger fired and the deferral ended; the sentence claiming tier 3 was the only
+thing left was written a few paragraphs from the one marking the mapping due. All seven invoice types landed by 2026-08-26 (`docs/REFERENCE.md` §8.4, §8.5, §8.6). **Tier 1 landed 2026-08-24**, split into the model and document halves §7.7 now describes; **`KOR` landed the same day**, built against the Ministry's five worked corrections (`docs/REFERENCE.md` §8.4) — the only examples of a non-`VAT` type in existence.
 
 **The parser landed 2026-08-24**, with the sample corpus §7.6 assumed and did not have
 (`docs/REFERENCE.md` §1.4). Two findings changed the plan around it, both ledgered:
