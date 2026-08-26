@@ -39,9 +39,27 @@ module Ksef
     #   authenticate with, or an already-redeemed access token
     # @param options [Hash] passed to {Ksef::Configuration} — `logger:`, `timeout:`,
     #   `adapter:`, `proxy:`, `retry_policy:`
-    def initialize(env: :test, auth: nil, **)
+    # @param clock [#call] returns the current {Time}; the same injection {Sessions::Status}
+    #   and {Crypto::PublicKeys} already take. It reaches {Auth::AccessToken}, which decides
+    #   staleness against the `validUntil` KSeF returned.
+    #
+    #   **This is what makes a recorded cassette replayable.** A recorded access token is
+    #   valid for fifteen minutes and {Auth::AccessToken} refreshes at 80% of that, so about
+    #   twelve minutes after recording a replay against the real clock reads it as stale and
+    #   issues a `POST /auth/token/refresh` that the cassette has no interaction for. Pinning
+    #   the clock to the moment of recording replays the flow as it happened, rather than
+    #   rewriting what KSeF said (`spec/recorded/session_flow_spec.rb`).
+    # @param sleeper [#call] receives a number of seconds; used between polls of the
+    #   authentication operation, which is asynchronous ({Auth::Client#wait_until_complete}).
+    #   {Sessions::Status#poll} has taken one since it was written and {#wait_until_accepted}
+    #   exposes it; this is the same seam for the one poll the facade performs on its own.
+    #   A replay wants a no-op — the recorded tier spent eight of its nine seconds asleep
+    #   between status calls whose answers were already on disk.
+    def initialize(env: :test, auth: nil, clock: -> { Time.now }, sleeper: method(:sleep), **)
       @config = Configuration.new(env: env, auth: auth, **)
       @mutex = Mutex.new
+      @clock = clock
+      @sleeper = sleeper
       @credential = auth.is_a?(Auth::AccessToken) ? auth : nil
     end
 
@@ -221,9 +239,12 @@ module Ksef
     # The KSeF-token flow of §4.5, end to end: submit, poll, redeem. Callers hold the mutex.
     def authenticate!
       initiated = auth.submit_ksef_token(token_request)
-      auth.authenticate!(initiated.reference_number, token: initiated.authentication_token)
+      auth.authenticate!(initiated.reference_number, token: initiated.authentication_token,
+                                                     sleeper: @sleeper)
 
-      Auth::AccessToken.new(auth.redeem(token: initiated.authentication_token), client: auth)
+      Auth::AccessToken.new(
+        auth.redeem(token: initiated.authentication_token), client: auth, clock: @clock
+      )
     end
 
     # A fresh challenge and the key that wraps the token. Both are fetched here rather than

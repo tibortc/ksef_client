@@ -52,7 +52,7 @@ RSpec.describe Ksef::FA3::Generated do
 
   describe Ksef::FA3::Generated::Types do
     it "covers the named types plus every anonymous one reachable from the root" do
-      expect(described_class::ALL.size).to eq(59)
+      expect(described_class::ALL.size).to eq(60)
     end
 
     # This ordering is the whole point of the codegen: KSeF rejects documents whose
@@ -70,12 +70,43 @@ RSpec.describe Ksef::FA3::Generated do
       expect(naglowek).to include(min: 1, max: 1, type: "tns:TNaglowek")
     end
 
+    # Keyed on `KodFormularza`, not on `TNaglowek`, because that is where the XSD declares
+    # them — on the `xsd:extension` inside its anonymous simpleContent type. Anonymous types
+    # nested in a *named* one are rooted at the type name.
     it "captures the fixed header attributes from REFERENCE.md §8" do
-      attrs = described_class::ALL.fetch("TNaglowek")[:attributes]
+      attrs = described_class::ALL.fetch("TNaglowek/KodFormularza")[:attributes]
       expect(attrs).to contain_exactly(
         { name: "kodSystemowy", type: "xsd:string", use: "required", fixed: "FA (3)" },
         { name: "wersjaSchemy", type: "xsd:string", use: "required", fixed: "1-0E" }
       )
+    end
+
+    # Regression guard for a bug that survived because it produced a *correct document*:
+    # the extractor read attributes down a descendant axis, so every ancestor inherited
+    # them and `DocumentMapping#header` found these two on `TNaglowek`, one level above
+    # where the schema puts them. Seven types claimed attributes; two declare any.
+    it "attributes an attribute only to the type that declares it" do
+      carrying = described_class::ALL.reject { |_, meta| meta[:attributes].empty? }.keys
+      expect(carrying).to contain_exactly(
+        "TNaglowek/KodFormularza",
+        "Faktura/Zalacznik/BlokDanych/Tabela/TNaglowek/Kol"
+      )
+    end
+
+    # `Kol/@Typ` restricts an *inline* anonymous simpleType, so `Enums` — which keys on
+    # `xsd:simpleType[@name]` — cannot see it. Without this the six column types could only
+    # be enforced by restating them in Ruby, which DESIGN.md §7.1 forbids.
+    it "captures enumerations declared inline on an attribute" do
+      kol = described_class::ALL.fetch("Faktura/Zalacznik/BlokDanych/Tabela/TNaglowek/Kol")
+      expect(kol[:attributes].first)
+        .to eq(name: "Typ", use: "required", values: %w[date datetime dec int time txt])
+    end
+
+    # nil, not [], and the `compact` in the extractor is what makes it so: an empty Array
+    # would read as "enumerated, with nothing permitted".
+    it "omits the values key for an attribute with no inline restriction" do
+      attrs = described_class::ALL.fetch("TNaglowek/KodFormularza")[:attributes]
+      expect(attrs.map(&:keys).flatten.uniq).not_to include(:values)
     end
 
     it "keys anonymous types by path, since leaf names collide" do

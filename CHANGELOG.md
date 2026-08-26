@@ -25,6 +25,36 @@ gem version for which API state".
 
 ### Added
 
+- **`POST /auth/token/refresh` has now run against live TEST**, closing the last of §4.2's six
+  auth calls to have never been exercised — and settling three assumptions the implementation
+  was making. The response carries `accessToken` **and nothing else**, so reading
+  `body["accessToken"]` is right and `renew!` is right to keep the refresh token. A renewed
+  token gets a **full fresh fifteen minutes**, not the remainder of the old one, so a long
+  session renews indefinitely within the refresh token's seven days — which are exactly seven
+  days on TEST, to the second. (`docs/REFERENCE.md` §4.2a.)
+
+- **A recorded cassette for `POST /auth/token/refresh`** — the one auth call whose real response
+  had never been seen (`docs/REFERENCE.md` §4.2: the 2026-08-23 live run covered five of six).
+  `Auth::Client#refresh` reads `body["accessToken"]` on the OpenAPI contract's word alone, and a
+  wrong envelope would not raise — it yields a credential holding no token. The example advances
+  its clock to 90% of the token's observed lifetime, past the 80% refresh threshold and short of
+  expiry, so it exercises the *proactive* renewal rather than an expiry. It costs an
+  authentication and no invoice. (DESIGN.md §9.1.)
+
+- **`rake vcr:record` takes an optional target**, and so does the dispatch workflow:
+  `rake 'vcr:record[spec/recorded/auth_refresh_spec.rb]'`. `record: :all` re-records everything
+  it runs and each session-flow example submits an unwithdrawable invoice, so recording one new
+  flow used to cost two permanent TEST invoices for flows that had not changed. The replay step
+  still runs the whole tier, because a recording that replays only what it wrote cannot see what
+  it broke.
+
+- **Attribute enumerations declared inline are now captured by the codegen** as `values:` on the
+  attribute. FA(3) has exactly one — `Kol/@Typ`, the six column types of an attachment table
+  (`date`, `datetime`, `dec`, `int`, `time`, `txt`) — and `Generated::Enums` cannot see it,
+  because it keys on named `xsd:simpleType`. Without this the only way to enforce the six is to
+  restate them in Ruby, which DESIGN.md §7.1 forbids. Groundwork for `Zalacznik`.
+  (`docs/REFERENCE.md` §18.2.)
+
 - **The recorded test tier** — two VCR cassettes covering the full session flow, replaying in
   about two seconds with **no credentials present**: authenticate, open a session, encrypt and
   submit an invoice, poll to acceptance, fetch the UPO. They pin two things no stub can give —
@@ -34,10 +64,10 @@ gem version for which API state".
 - **Its harness** (`spec/support/vcr.rb`, `rake vcr:record`) — VCR wired to
   the same WebMock the rest of the suite uses, scrubbing for every secret
   `spec/cassette_hygiene_spec.rb` scans for, and a `:recorded` tag excluded until a cassette
-  exists. **No cassette is recorded yet**: recording needs TEST credentials, creates a permanent
-  TEST invoice and burns rate-limited quota, so it is a deliberate human-run step rather than
-  part of `rake`. A `:release_check` gate refuses 0.1.0 while `spec/cassettes/` is empty, so the
-  gap cannot be forgotten. (DESIGN.md §9.1.)
+  exists. **Recording stays a deliberate human-run step** rather than part of `rake`: it needs
+  TEST credentials, creates a permanent TEST invoice and burns rate-limited quota. A
+  `:release_check` gate refuses 0.1.0 while `spec/cassettes/` is empty, so an emptied tier
+  cannot be forgotten. (DESIGN.md §9.1.)
 
   Two decisions bind. **Requests are never matched on the body** — `Encryptor.generate` draws a
   random key and IV and RSA-OAEP padding is randomised, so a recorded body cannot be reproduced
@@ -87,6 +117,47 @@ gem version for which API state".
 
 ### Fixed
 
+- **The cassette hygiene scan read the file, and a cassette is not entirely text.** Psych stores
+  a body it cannot write as a plain scalar as `!binary`, and one non-ASCII byte is enough — five
+  of the tier's bodies are stored that way. A JWT inside one matches no regex over the file, and
+  `include?` of a known secret fails too. Since `Łódź` in a seller name is routine in Polish
+  e-invoicing, and the redeem response — the one that has actually leaked — carries both tokens
+  in a JSON body, this was the guard added after that leak being blind to the same leak. It now
+  decodes every body and header first, with a planted-secret example proving it.
+  (DESIGN.md §9.1.)
+
+- **The recorded tier spent eight of its nine seconds asleep.** Authentication is asynchronous,
+  so `Auth::Client#wait_until_complete` sleeps between status polls — including on replay, where
+  every answer is already on disk. `Ksef::Client.new` now takes `sleeper:`, the same seam
+  `Sessions::Status#poll` has always had, and the tier replays in 1.6 s again.
+
+- **`SimpleCov.add_filter` is deprecated in SimpleCov 1.1** and printed two lines on every run,
+  including inside `rake`, where a real coverage failure has to be spotted among them. Replaced
+  with `skip`.
+
+- **The recorded cassettes stopped replaying about twelve minutes after they were recorded.**
+  A KSeF access token is valid for fifteen minutes and `Auth::AccessToken` refreshes at 80% of
+  that, so a replay against the real clock found the recorded credential stale and issued a
+  `POST /auth/token/refresh` the cassette has no interaction for. The suite went red overnight
+  with nothing changed; the verification that declared the tier green had run inside the window.
+  `Ksef::Client.new` now takes `clock:`, and the recorded specs pin it to the cassette's own
+  `recorded_at` — the response is never rewritten, because the tier's claim is that these are
+  the bytes KSeF sent. (DESIGN.md §9.1.)
+
+- **The codegen attributed an XML attribute to every type above the one declaring it.** The
+  extractor used a descendant axis, so seven complexTypes claimed an attribute where only two
+  declare one. It survived because it produced a *correct document*: `DocumentMapping#header`
+  found `kodSystemowy`/`wersjaSchemy` on `TNaglowek`, one level above where the XSD puts them,
+  and a second defect made that the only lookup available — anonymous types nested inside a
+  **named** type were never collected, so `TNaglowek/KodFormularza` did not exist. Both fixed,
+  and `Generated::Types` gained one entry. (`docs/REFERENCE.md` §18.2.)
+
+- **`Renderer::KEY_ORDER` omitted two keys it renders**, and `sorted_keys` gives every unlisted
+  key the same rank while `sort_by` is unstable — so `use` and `fixed` tied on every rendered
+  attribute. The same trap produced a macOS/Linux difference in `tasks/field_mapping.rb`. Every
+  key a rendered Hash can hold is now listed. (§18.2.)
+
+
 - **A `VAT` invoice derived `P_15` instead of reading it**, so re-serialising the Ministry's
   Przykład 1 produced an invoice a grosz cheaper — 2050.99 against a stated 2051 — with tier 2
   clean, `#errors` empty and `#unmapped_elements` silent, because `P_15` is present either way
@@ -119,19 +190,19 @@ gem version for which API state".
   over `#to_xml` — bytes this gem had just produced, well-formed by construction — so it could
   not see the input at all, while libxml2's recovery made the parsed tree look fine.
   `Invoice#source_errors` now reports what libxml2 said about the document it was given, and
-  `#errors` reports it first. (`docs/REFERENCE.md` §17.5.)
+  `#errors` reports it first. (`docs/REFERENCE.md` §19.2.)
 
 - **Text that is validly encoded but is not UTF-8 crashed the tier meant to report it.**
   `String#valid_encoding?` answers true for `Windows-1250` and `ISO-8859-2` — what a Polish ERP
   emits — so such a name passed every guard and then raised `Encoding::CompatibilityError` out
   of `#errors`, `#to_xml` and `Ksef::Client#send_invoice`. It is now reported, naming the
   encoding. Bytes tagged `ASCII-8BIT` are accepted when they *are* UTF-8, which is what
-  `File.binread` produces. (§17.6.)
+  `File.binread` produces. (§19.3.)
 
 - **`net_by_rate` and `vat_by_rate` summed a correction's before-state into its after-state.**
   On the Ministry's Przykład 2 that gave 3089.42 against a `net_total` of −162.60 — a per-rate
   VAT report nineteen times the truth, with no error and a passing `#valid?`. Rows marked
-  `StanPrzed` are now skipped. (§17.4.)
+  `StanPrzed` are now skipped. (§19.1.)
 
 - **`NaN` and `Infinity` passed the money gate.** `BigDecimal("NaN")` succeeds where
   `BigDecimal("abc")` raises, so a document stating `<P_11>NaN</P_11>` reached the model and

@@ -518,6 +518,46 @@ The full flow, verified end to end from `uwierzytelnianie.md` (retrieved 2026-08
 Note the header at steps 4–5 is the *temporary* `authenticationToken`, not an
 `accessToken`. Conflating them is the obvious implementation error here.
 
+#### 4.2a Step 6 measured — `/auth/token/refresh`, recorded 2026-08-26
+
+The last of the six to be exercised against the live service, and the only one whose response
+had never been seen. Recorded into `spec/cassettes/the_token_refresh_flow_recorded/`, so these
+are observations rather than readings of the contract.
+
+**The response carries `accessToken` and nothing else:**
+
+```json
+{ "accessToken": { "token": "…", "validUntil": "2026-08-26T13:45:24.2432483+00:00" } }
+```
+
+Three things follow, each of which the implementation had assumed:
+
+| Assumption | Now |
+|---|---|
+| `Auth::Client#refresh` reads `body["accessToken"]` | **confirmed.** The envelope matches the redeem response's `accessToken` member, not a bare `TokenInfo` |
+| `AccessToken#renew!` replaces the access token and keeps the refresh token | **confirmed.** No `refreshToken` is returned, so there is nothing to replace it with. A client that expected a rotated refresh token would have to re-authenticate every renewal |
+| The refresh token's life is "up to 7 days" | **exactly 7 days on TEST**, to the second: redeemed `13:30:06.5720816`, valid until `2026-09-02T13:30:06.5720816` |
+
+**A renewed access token gets a full fresh lifetime, not the remainder of the old one.** The
+redeemed token was valid until `13:45:06`; refreshing eighteen seconds later returned one valid
+until `13:45:24` — fifteen minutes from the refresh, not from the original issue. So a
+long-running session renews indefinitely without re-authenticating, bounded only by the refresh
+token's seven days.
+
+**Fifteen minutes is what "kilkanaście minut" means here.** Four measurements across the tier's
+three cassettes, as `validUntil` minus the moment the response was received: **900.2, 898.7,
+890.6, 900.2** seconds.
+
+The spread is ours, not KSeF's. The 890.6 figure is a redeem whose authentication took ten
+seconds to poll to completion — KSeF dates the grant from when it minted the token, and we can
+only measure from when we took delivery. Which is exactly why {Ksef::Auth::AccessToken} records
+`@acquired_at` rather than trusting a constant: measuring from delivery can only *under*-estimate
+the remaining life, so it refreshes slightly early rather than slightly late. The refresh
+response, arriving immediately, measures the full 900.2.
+
+Nothing here is hard-coded. This is a TEST observation, not a documented guarantee, so the
+threshold stays a proportion of the observed lifetime.
+
 **Step 4 must poll without a deadline on DEMO and PROD.** Those environments verify the
 signing certificate's status with the issuer over OCSP/CRL, and the operation legitimately
 reports "in progress" until the issuer answers — the docs state the duration depends on the
@@ -1091,7 +1131,9 @@ that no amount of offline testing could:
 - **The §4.2 steps the bootstrap exercises work as ledgered** — challenge, submission,
   polling on `StatusInfo.code`, and single-use redemption. Scoped deliberately (corrected
   2026-08-23): `POST /auth/token/refresh` is *not* among them, so nothing here vouches for
-  refresh, and `POST /auth/ksef-token` did not exist at the time.
+  refresh, and `POST /auth/ksef-token` did not exist at the time. **Refresh was closed
+  separately on 2026-08-26** by the recorded tier — see §4.2a, which is what makes all six
+  steps of §4.2 observed rather than five.
 
 Two failures on the way there, both bugs on this side rather than upstream: a local OpenSSL
 trust store with no CA bundle (see §6a.5), and the PESEL structure above.
@@ -3137,10 +3179,11 @@ rule added to `RULES` needs a ledger entry saying what grounds it.
 
 ---
 
-## 18. Two schema shapes the field mapping measured
+## 18. Schema shapes the codegen relies on
 
-Recorded 2026-08-26, while generating `docs/field_mapping.md` (DESIGN.md §7.2). Both are
-properties of the pinned FA(3) XSD that the generator relies on, so they belong here rather
+Recorded 2026-08-26. The first two were measured while generating `docs/field_mapping.md`
+(DESIGN.md §7.2); §18.2 was found while extending the extractor for `Zalacznik`. All are
+properties of the pinned FA(3) XSD that a generator relies on, so they belong here rather
 than only in its comments.
 
 **FA(3) declares no unbounded element.** `maxOccurs="unbounded"` appears **zero** times; every
@@ -3176,7 +3219,47 @@ document any issuer can produce.
 a table aimed at auditors is the same error in a new medium. Anything that needs *effective*
 cardinality must walk the XSD; `Generated::Types` answers a different question.
 
-### 17.4 `StanPrzed` rows are not summed
+### 18.2 An attribute belongs to the type that declares it, and the extractor said otherwise
+
+The extractor read attributes down a **descendant** axis, `.//xsd:attribute[@name]`, so every
+complexType inherited the attributes of everything nested beneath it. Seven types claimed an
+attribute; two declare one. `TNaglowek` and `KodFormularza` each claimed `kodSystemowy` and
+`wersjaSchemy`; `Faktura`, `Zalacznik`, `BlokDanych`, `Tabela` and the attachment's own
+`TNaglowek` each claimed `Kol`'s `Typ`.
+
+**It survived because it produced a correct document.** `DocumentMapping#header` reads the two
+fixed attributes and writes them onto `KodFormularza` — the right element, found at the wrong
+level, because the leak surfaced them one step up. Nothing downstream could tell: generated
+metadata that reads plausibly and is wrong is worse than metadata that is missing.
+
+A second defect hid the first. Anonymous complexTypes were collected only by descending from
+the `Faktura` element, and that descent stops at any element declared with a named `type`. FA(3)
+has exactly one anonymous type nested inside a named one — `KodFormularza`, inside `TNaglowek` —
+so the correct key did not exist, and reading `TNaglowek` was the only lookup available. Both are
+fixed: anonymous types nested in a named type are keyed from the type name
+(`"TNaglowek/KodFormularza"`), and attributes are read from the type's own children plus its
+`xsd:simpleContent`/`xsd:complexContent` extension, which are wrappers around its own definition
+rather than a descent.
+
+**Attributes may also carry an inline enumeration, and `Enums` cannot see it.** `Enums` keys on
+`xsd:simpleType[@name]`; `Kol/@Typ` restricts an anonymous one. It is FA(3)'s only such
+attribute, and its six values — `date`, `datetime`, `dec`, `int`, `time`, `txt` — are the column
+types of an attachment table. They are now carried as `values:` on the attribute, because the
+alternative is to restate them in Ruby, which DESIGN.md §7.1 forbids.
+
+One more, latent: `Renderer::KEY_ORDER` did not list `use` or `fixed`, and `sorted_keys` maps
+every unlisted key to one shared rank. `sort_by` is not stable, so those two tied on every
+rendered attribute — the same determinism trap that reached CI from `tasks/field_mapping.rb`.
+Adding `values` would have made three. Every key a rendered Hash can hold is now listed.
+
+## 19. Defects the 2026-08-26 audit round found
+
+Numbered as their own chapter because they were appended to §17 while it was being written and
+ended up as a **second** `§17.4`, `§17.5` and `§17.6` — sitting inside chapter 18, and colliding
+with the tier-3 sections of the same numbers that DESIGN.md and CLAUDE.md both cite. Renumbered
+2026-08-26; `CHANGELOG.md` and `spec/ksef/fa3/correction_spec.rb` point here now.
+
+### 19.1 `StanPrzed` rows are not summed
 
 Recorded 2026-08-26. `Summaries#net_by_rate` and `#vat_by_rate` skip a line marked
 `state_before`, and that is a correctness fix rather than a tidy.
@@ -3202,7 +3285,7 @@ Note what the fix does *not* claim. `net_by_rate` now answers the **after** stat
 delta — the delta is what `Totals` states and what `#net_total` returns. Two different
 questions, and §8.4 is why: a correction's buckets are deltas that its rows need not determine.
 
-### 17.5 The parser's own document was never consulted
+### 19.2 The parser's own document was never consulted
 
 `Invoice#errors` runs tier 2 over `#to_xml` — bytes this gem has just produced, well-formed by
 construction — so **tier 2 is structurally incapable of seeing the input**. libxml2 recovers
@@ -3222,7 +3305,7 @@ The last is §8.6's `P_9A` class at a different element. Catching those needs th
 against the schema rather than the output — *"validate the bytes you were given, not the bytes
 you would write"* — which is a larger change than this one and is not made here.
 
-### 17.6 Two encodings, one predicate
+### 19.3 Two encodings, one predicate
 
 `String#valid_encoding?` answers **true** for a string that is validly encoded in something that
 is not UTF-8. Every guard in this gem tested it, so a `Windows-1250` or `ISO-8859-2` name — what

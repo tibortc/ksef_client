@@ -22,6 +22,14 @@ on:
         description: 'Type "record" to confirm this will create a permanent TEST invoice'
         required: true
         default: ""
+      target:
+        # `record: :all` re-records every cassette it runs, and each example of
+        # session_flow_spec.rb submits an invoice that cannot be withdrawn. Narrowing to the
+        # one flow that changed is therefore the difference between one authentication and
+        # two permanent TEST invoices.
+        description: "Which recorded specs to run (default: all of spec/recorded)"
+        required: false
+        default: "spec/recorded"
 
 jobs:
   record:
@@ -53,7 +61,7 @@ jobs:
           KSEF_ENV: test
 
       - name: Record
-        run: bundle exec rake vcr:record
+        run: bundle exec rake "vcr:record[${{ inputs.target }}]"
         env:
           KSEF_ENV: test
           KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
@@ -73,6 +81,11 @@ jobs:
       - name: Replay them with no credentials at all
         # The point of the tier. If this fails, the cassettes depend on something the replay
         # cannot supply — a live token, a fresh timestamp — and are not yet usable.
+        #
+        # **Always the whole tier, never `inputs.target`.** A recording that only replays what
+        # it just wrote cannot see that it broke a cassette it did not touch. And this step is
+        # the one that would have caught the fifteen-minute credential expiry, had it run more
+        # than a few minutes after the recording (DESIGN.md §9.1).
         run: bundle exec rspec spec/recorded
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

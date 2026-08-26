@@ -69,22 +69,32 @@ namespace :fa3 do
 end
 
 namespace :vcr do
-  desc "Record the VCR cassettes for the recorded test tier (TEST only, needs credentials)"
-  task :record do
-    # **One-time, human-run, and it changes the world.** Recording drives the real TEST
-    # service: it opens a session, submits an invoice that cannot be withdrawn, and consumes
-    # rate-limited quota (DESIGN.md §6, §9.1). It is not part of `rake`.
+  desc "Record the VCR cassettes for the recorded test tier (TEST only, needs credentials). " \
+       "Optionally narrow to one file: rake 'vcr:record[spec/recorded/auth_refresh_spec.rb]'"
+  task :record, [:target] do |_task, args|
+    # **Human-run, and it changes the world.** Recording drives the real TEST service: it opens
+    # a session, submits an invoice that cannot be withdrawn, and consumes rate-limited quota
+    # (DESIGN.md §6, §9.1). It is not part of `rake`.
     env = (ENV["KSEF_ENV"] || "test").to_sym
     abort "Refusing to record against #{env}. This task is TEST-only (a hard rule)." unless env == :test
 
     missing = %w[KSEF_TEST_NIP KSEF_TEST_TOKEN].reject { |key| ENV[key].to_s.empty? == false }
     abort "Set #{missing.join(" and ")} first — recording needs a real TEST credential." if missing.any?
 
-    puts "Recording against TEST. This creates a permanent TEST invoice."
+    # **Narrowing is the point of the argument, not a convenience.** `record: :all` re-records
+    # every cassette it runs, and `session_flow_spec.rb` submits a real invoice per example —
+    # so re-recording the whole tier to add one cassette creates permanent TEST invoices for
+    # flows that had not changed. Adding `auth_refresh_spec.rb` costs one authentication and
+    # no invoice when it is named; two invoices when it is not.
+    target = args[:target].to_s.empty? ? "spec/recorded" : args[:target]
+    abort "Refusing to record outside spec/recorded (got #{target})." unless target.start_with?("spec/recorded")
+
+    puts "Recording #{target} against TEST."
+    puts "`spec/recorded/session_flow_spec.rb` creates a permanent TEST invoice per example."
     puts "Cassettes are scrubbed on write; `bundle exec rspec spec/cassette_hygiene_spec.rb`"
     puts "verifies that afterwards, and it is not optional."
     sh({ "KSEF_INTEGRATION" => "1", "KSEF_ENV" => "test", "KSEF_VCR_RECORD" => "1" },
-       "bundle exec rspec spec/recorded --tag recorded")
+       "bundle exec rspec #{target} --tag recorded")
   end
 end
 

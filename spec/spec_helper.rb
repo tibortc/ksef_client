@@ -33,9 +33,13 @@ SimpleCov.formatters = SimpleCov::Formatter::MultiFormatter.new(
 )
 
 SimpleCov.start do
-  add_filter "/spec/"
+  # `skip`, not `add_filter`: SimpleCov 1.1 deprecates the older name and prints a line per
+  # call on every run — including inside `rake`, where a real coverage failure has to be
+  # noticed among them. Same arguments and same behaviour, and the Gemfile pins `~> 1.1`, so
+  # the whole permitted range has it.
+  skip "/spec/"
   # Codegen output is excluded from the coverage gate (DESIGN.md §9).
-  add_filter "lib/ksef/fa3/generated/"
+  skip "lib/ksef/fa3/generated/"
 
   enable_coverage :line
   # Line coverage alone was 99% while branch coverage was 83% — conditional paths were
@@ -119,6 +123,7 @@ WebMock.disable_net_connect!(allow_localhost: false)
 # The recorded tier hooks the same WebMock, so it must be configured after that call and
 # before any example runs (DESIGN.md §9.1).
 require_relative "support/vcr"
+require_relative "support/recorded_flow"
 
 RSpec.configure do |config|
   config.expect_with(:rspec) { |c| c.syntax = :expect }

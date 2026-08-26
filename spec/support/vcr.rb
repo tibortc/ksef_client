@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require "vcr"
+require "yaml"
+require "json"
+require "time"
 
 # The recorded test tier (DESIGN.md §9.1).
 #
@@ -38,6 +41,32 @@ module RecordedTier
 
   # @return [Boolean] whether anything has been recorded yet
   def self.recorded? = Dir.glob(File.join(DIR, "**", "*.yml")).any?
+
+  # How long each recorded access token was valid for, in seconds — `validUntil` measured from
+  # the `recorded_at` of the interaction that carried it.
+  #
+  # Exists so `spec/recorded_tier_spec.rb` can assert the fact that forces a pinned clock on
+  # replay, rather than that fact living only in a comment. See {Ksef::Client#initialize}.
+  #
+  # @return [Array<Float>]
+  def self.access_token_lifetimes
+    # `Dir.glob` sorts as of Ruby 3.0 and the floor is 3.2, so no `.sort` is needed.
+    Dir.glob(File.join(DIR, "**", "*.yml")).flat_map do |file|
+      interactions = YAML.safe_load_file(file)["http_interactions"] || []
+      interactions.filter_map { |interaction| access_token_lifetime(interaction) }
+    end
+  end
+
+  # nil unless this interaction's response carries an access token — most do not.
+  def self.access_token_lifetime(interaction)
+    body = interaction.dig("response", "body", "string").to_s
+    return nil unless body.include?("accessToken")
+
+    valid_until = JSON.parse(body).dig("accessToken", "validUntil")
+    return nil if valid_until.nil?
+
+    Time.iso8601(valid_until) - Time.httpdate(interaction.fetch("recorded_at"))
+  end
 
   # Anything shaped like a JSON Web Token. KSeF's auth responses carry two — an access token
   # and a refresh token — and the refresh token is a live credential that mints new access

@@ -72,6 +72,25 @@ RSpec.describe "the recorded test tier" do
     expect(VCR.configuration.default_cassette_options[:record]).to eq(:none)
   end
 
+  # **Why `spec/recorded/session_flow_spec.rb` pins a clock**, asserted against the cassettes
+  # rather than left as a comment someone can delete.
+  #
+  # A recorded credential is not a fixture — it decays. KSeF issues an access token good for
+  # about fifteen minutes, {Ksef::Auth::AccessToken} refreshes at 80% of that, and a replay
+  # against the real clock therefore starts requesting a refresh the cassette cannot answer
+  # roughly twelve minutes after recording. The first recording passed its verification for
+  # exactly that reason and went red overnight with nothing changed.
+  #
+  # This states the durable half — the lifetime is far shorter than the interval between a
+  # recording and the next reader — so removing the clock injection leaves a spec that
+  # explains what broke.
+  it "records credentials that expire far sooner than the cassettes are replayed" do
+    lifetimes = RecordedTier.access_token_lifetimes
+
+    expect(lifetimes).not_to be_empty
+    expect(lifetimes).to all(be < 3600)
+  end
+
   # DESIGN.md §11 Phase 3 publishes 0.1.0. The recorded tier is Phase 2 scope, so it must not
   # still be empty by then — and this is the gate that will say so, rather than a reader
   # noticing. Runs only under KSEF_RELEASE_CHECK=1, like the other release gates.
