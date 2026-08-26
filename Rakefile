@@ -47,20 +47,24 @@ namespace :fa3 do
     puts "Done. `git diff` should be empty unless the schema changed."
   end
 
-  desc "Fail if the committed generated/ differs from a fresh run (DESIGN.md §11)"
-  task :verify do
-    require_relative "tasks/fa3_generator"
-    before = Dir["#{Fa3Codegen::OUT_DIR}/*.rb"].to_h { |f| [f, File.read(f, encoding: "UTF-8")] }
-    Fa3Codegen::Generator.new.generate!
-    after = Dir["#{Fa3Codegen::OUT_DIR}/*.rb"].to_h { |f| [f, File.read(f, encoding: "UTF-8")] }
+  desc "Regenerate docs/field_mapping.md from the declared mapping and the pinned XSD"
+  task :field_mapping do
+    require "ksef"
+    require_relative "tasks/field_mapping"
+    Fa3FieldMapping.generate!
+  end
 
-    drifted = after.reject { |path, body| before[path] == body }
-    if drifted.empty?
-      puts "Codegen is reproducible: #{after.size} file(s) byte-identical."
-    else
-      drifted.each_key { |p| warn "  #{p} differs from the committed version" }
-      abort "\nCodegen is not reproducible, or generated/ is stale. Commit the regenerated files."
-    end
+  desc "Fail if the committed generated/ or field_mapping.md differs from a fresh run (DESIGN.md §11)"
+  task :verify do
+    require "ksef"
+    require_relative "tasks/fa3_generator"
+    require_relative "tasks/field_mapping"
+
+    drifted, generated = Fa3Codegen.drifted_files
+    drifted << Fa3FieldMapping::OUT if Fa3FieldMapping.stale?
+    abort "Stale or not reproducible: #{drifted.join(", ")}. Regenerate and commit." if drifted.any?
+
+    puts "Codegen is reproducible: #{generated + 1} file(s) byte-identical."
   end
 end
 

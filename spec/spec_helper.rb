@@ -92,9 +92,13 @@ SimpleCov.start do
   # `serializer.rb`'s `return if values.nil?` and two in `tasks/ksef_bootstrap.rb` — so the
   # earlier wording "the same ten `&.` guards, outside the FA(3) model" was wrong twice over.
   #
-  # Re-measured 2026-08-26 after validator tier 3: line 100%, branch 98.57% (691/701), method
-  # 100%. The denominator keeps moving — 675 -> 689 -> 701 in one day — which is the drift the
-  # paragraph above warns about; the ten remain ten.
+  # **Ratcheted to branch 98 at the Phase 2 boundary (2026-08-26), which is what the paragraph
+  # above asks for and what the previous two measurements did not do.** Measured after the
+  # field mapping: line 100%, branch 98.66% (741/751), method 100%. The denominator moved
+  # 675 -> 689 -> 701 -> 751 in a single day, and an unchanged floor of 97 would have permitted
+  # 22 uncovered branches against the ten that exist — the slack a percentage grants really
+  # does drift upward. 98 leaves five branches of margin, which is deliberate rather than a
+  # knife edge: refactors move the denominator without changing test quality.
   #
   # Previously, after all seven invoice types: line 100%, branch 98.51% (665/675),
   # method 100%. **The ten are still those ten.** They briefly became eleven: the type work
@@ -103,7 +107,7 @@ SimpleCov.start do
   # *can* occur, unlike the other ten, and dropping it left the suite green. An audit found it
   # and it now has a test. Worth the note because the count is easy to read as noise: a new
   # uncovered branch in new code is a missing test, and only the ten are the deliberate kind.
-  minimum_coverage line: 99, branch: 97, method: 100
+  minimum_coverage line: 99, branch: 98, method: 100
 end
 
 require "ksef_client"

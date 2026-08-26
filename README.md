@@ -391,6 +391,20 @@ T.ordered_elements("Faktura").map { |e| e[:name] }
 Note VAT rate codes are **strings**, not numbers: half of the fourteen are codes like
 `"0 WDT"`, `"zw"` and `"np I"`.
 
+### Which English name is which Polish element
+
+[`docs/field_mapping.md`](docs/field_mapping.md) is the table: every attribute this model
+carries, the FA(3) element it reads and writes, its XSD type and cardinality, and the
+Ministry's own description of it.
+
+It is **generated** — from a declared mapping plus the pinned XSD — and `rake fa3:verify`
+fails if it is stale, so it cannot quietly fall behind either the code or the schema. Adding a
+field to a model without saying where it goes fails the build.
+
+The model does not carry all of FA(3), and the table says which attributes reach no element at
+all. For a specific document, `parse(xml).unmapped_elements` reports exactly what `#to_xml`
+would drop.
+
 ## Environments
 
 | Env | Base URL |
@@ -412,7 +426,7 @@ integrators.
 - **MRI >= 3.2**, with **no upper bound, ever.** `required_ruby_version` resolves at
   install time, so an upper bound strands users on each new Ruby release.
 - CI covers 3.2, 3.3, 3.4, 4.0 and `head`, and the full suite is run locally on 3.2 at every
-  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1369
+  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1428
   examples green.
 - **The 3.2 floor is a commitment, not a default.** Ruby 3.2 is EOL upstream, and this gem
   still supports it deliberately: Polish tax-compliance software upgrades slowly, and 3.2

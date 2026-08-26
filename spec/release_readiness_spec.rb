@@ -72,5 +72,19 @@ RSpec.describe "release readiness", :release_check do
     it "does not ship development fixtures" do
       expect(gemspec.files.grep(%r{^spec/})).to be_empty
     end
+
+    # The codegen and the field-mapping generator both live in `tasks/`, outside `lib/`,
+    # precisely so they are never packaged — CLAUDE.md states it as a rule. Until 2026-08-26
+    # nothing enforced it: the rule held only because `spec.files`' globs happen not to reach
+    # there, which is incidental rather than intended.
+    it "does not ship the generators" do
+      expect(gemspec.files.grep(%r{^tasks/})).to be_empty
+    end
+
+    # It is the answer to "is my field supported", so it belongs in the installed gem rather
+    # than only in the repository.
+    it "ships the field mapping, which is for the gem's users" do
+      expect(gemspec.files).to include("docs/field_mapping.md")
+    end
   end
 end

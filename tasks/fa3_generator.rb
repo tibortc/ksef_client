@@ -21,6 +21,16 @@ require "fileutils"
 # turns that data into Ruby source. Keeping them apart means the rendering can be tested
 # against hand-built data, with no schema in the picture.
 module Fa3Codegen
+  # Regenerates, then names the files whose committed content differs — a file the generator
+  # emits that the checkout lacks included, which is why the comparison is globbed *after*
+  # generating. Comparing over the pre-run glob silently stops checking exactly those.
+  def self.drifted_files
+    before = Dir["#{OUT_DIR}/*.rb"].to_h { |file| [file, File.read(file, encoding: "UTF-8")] }
+    Generator.new.generate!
+    after = Dir["#{OUT_DIR}/*.rb"].to_h { |file| [file, File.read(file, encoding: "UTF-8")] }
+    [after.reject { |path, body| before[path] == body }.keys, after.size]
+  end
+
   XS = { "xsd" => "http://www.w3.org/2001/XMLSchema" }.freeze
   SCHEMA_DIR = "lib/ksef/fa3/schema"
   MAIN_SCHEMA = "#{SCHEMA_DIR}/schemat_FA(3)_v1-0E.xsd".freeze
