@@ -176,6 +176,16 @@ gem version for which API state".
 
 ### Fixed
 
+- **The VCR record hooks raised on any body VCR delivered as `ASCII-8BIT`.** A UTF-8 pattern
+  matched against a binary string raises as soon as it holds a non-ASCII byte, and KSeF's bodies
+  are full of Polish. The first three cassettes never hit it because their bodies arrived tagged
+  UTF-8; the first `application/xml` responses did not, and a real recording died after creating
+  a permanent TEST invoice. `before_record` does not run on replay, so no local check exercised
+  it. Every pattern now matches in binary — all of them are pure ASCII, as is everything they
+  match — with the body's encoding restored afterwards, and `spec/recorded_tier_spec.rb` calls
+  the hooks with bodies encoded as VCR delivers them.
+
+
 - **`#errors` raised instead of reporting for two attachment shapes.** `Invoice#attachment` was
   a public constructor field tier 1a never inspected, so a value that was not an `Attachment`
   gave `NoMethodError`, and a U+0000 in any of the attachment's nine text fields gave a bare

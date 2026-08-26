@@ -126,9 +126,14 @@ module RecordedTier
   # Anything shaped like a SAS parameter, wherever it appears.
   SIGNED_QUERY = /([?&](?:sig|skoid|sks)=)(?!<)[^&\s"]+/
 
+  # The same pattern, over bytes. See {.redact} for why every match here happens in binary.
+  def self.binary(pattern) = Regexp.new(pattern.source.b, pattern.options)
+
   # **A request URI is scrubbed too.** Redaction started life on bodies, and the storage leg
   # puts the signature in the request line instead — where nothing was looking.
-  def self.redact_url(uri) = uri.to_s.gsub(SIGNED_QUERY) { "#{Regexp.last_match(1)}<REDACTED>" }
+  def self.redact_url(uri)
+    uri.to_s.b.gsub(binary(SIGNED_QUERY)) { "#{Regexp.last_match(1)}<REDACTED>" }.force_encoding("UTF-8")
+  end
 
   # Redacts what a header may carry and removes what none of them should.
   def self.clean_headers!(message)
@@ -142,9 +147,10 @@ module RecordedTier
   # Header values are not JSON, so {redact} nearly always no-ops on them; the JWT and
   # signed-URL shapes are what actually appear.
   def self.redact_header(value)
-    value.to_s
-         .gsub(JWT, "<REDACTED-JWT>")
-         .gsub(SIGNED_QUERY) { "#{Regexp.last_match(1)}#{SIGNED_URL_PLACEHOLDER}" }
+    value.to_s.b
+         .gsub(BINARY_JWT, "<REDACTED-JWT>")
+         .gsub(binary(SIGNED_QUERY)) { "#{Regexp.last_match(1)}#{SIGNED_URL_PLACEHOLDER}" }
+         .force_encoding(value.to_s.encoding)
   end
 
   # **Why this exists, and why `filter_sensitive_data` was not enough.**
@@ -161,14 +167,36 @@ module RecordedTier
   # `x-ms-meta-hash` KSeF sent — rewriting them would break the integrity check exactly as
   # scrubbing the NIP did (§9.1). No KSeF XML document carries a bearer token; the credentials
   # are all in JSON envelopes and headers.
+  # ## Everything here works on bytes, and that is not a detail
+  #
+  # **VCR hands `before_record` an `ASCII-8BIT` body.** A UTF-8 pattern matched against a binary
+  # string raises `Encoding::CompatibilityError` the moment the string holds a non-ASCII byte —
+  # and KSeF's bodies are full of Polish. The first three cassettes never hit it because their
+  # bodies arrived tagged UTF-8; the first `application/xml` response (the UPO from storage, and
+  # a downloaded invoice) did not, and the recording died *after* creating a TEST invoice and
+  # before writing the cassette.
+  #
+  # Nothing in this file matched on replay, either, because `before_record` does not run then —
+  # so no local check could have caught it. That is the second time a recording-only path has
+  # failed this way (§9.1).
+  #
+  # Every pattern here is pure ASCII, and so is everything it matches — tokens, base64,
+  # signatures, URLs — so matching in binary loses nothing and cannot raise. The body's original
+  # encoding is put back so the cassette serialises as it would have.
+  BINARY_SECRET_FIELD = binary(SECRET_FIELD)
+  BINARY_SIGNED_URL_FIELD = binary(SIGNED_URL_FIELD)
+  BINARY_JWT = binary(JWT)
+
   def self.redact(body)
     return body if body.nil? || body.empty? || xml?(body)
 
-    body.gsub(SECRET_FIELD) { "#{Regexp.last_match(1)}<REDACTED>#{Regexp.last_match(3)}" }
-        .gsub(SIGNED_URL_FIELD) do
+    body.b
+        .gsub(BINARY_SECRET_FIELD) { "#{Regexp.last_match(1)}<REDACTED>#{Regexp.last_match(3)}" }
+        .gsub(BINARY_SIGNED_URL_FIELD) do
           "#{Regexp.last_match(1)}#{Regexp.last_match(2)}?#{SIGNED_URL_PLACEHOLDER}#{Regexp.last_match(3)}"
         end
-        .gsub(JWT, "<REDACTED-JWT>")
+        .gsub(BINARY_JWT, "<REDACTED-JWT>")
+        .force_encoding(body.encoding)
   end
 
   # **The XML exemption tests the document, not the first byte.**
@@ -183,9 +211,21 @@ module RecordedTier
   # Deciding on a declaration or a root element keeps the UPO exempt for the reason it should
   # be — it is a signed document whose bytes are load-bearing — without exempting a body merely
   # because of how it starts.
+  # The UTF-8 byte-order mark, as bytes. Written out rather than as `"\uFEFF"` so it can be
+  # compared against a binary body without a regexp.
+  BOM = "\xEF\xBB\xBF".b
+
+  # First bytes an XML name may begin with, per the production. Compared as byte values so this
+  # never builds a pattern against a string whose encoding it does not control.
+  NAME_START_BYTES = [*"a".ord.."z".ord, *"A".ord.."Z".ord, "_".ord].freeze
+
   def self.xml?(body)
-    stripped = body.sub(/\A\uFEFF/, "").lstrip
-    stripped.start_with?("<?xml") || stripped.match?(/\A<[A-Za-z_]/)
+    bytes = body.b
+    bytes = bytes.byteslice(BOM.bytesize..) if bytes.start_with?(BOM)
+    stripped = bytes.lstrip
+    return true if stripped.start_with?("<?xml")
+
+    stripped.start_with?("<") && NAME_START_BYTES.include?(stripped.getbyte(1))
   end
 end
 

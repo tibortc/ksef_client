@@ -832,6 +832,35 @@ general, since a far enough origin puts the pinned clock before the token was mi
 
 Removed 2026-08-26. When re-recording, check the interaction list belongs to one flow.
 
+#### The record hooks run on bytes, and only during a recording
+
+Found 2026-08-26 by a real recording that died **after** creating a permanent TEST invoice and
+before writing the cassette:
+
+```
+Encoding::CompatibilityError:
+  incompatible encoding regexp match (UTF-8 regexp with BINARY (ASCII-8BIT) string)
+```
+
+VCR hands `before_record` an `ASCII-8BIT` body. A UTF-8 pattern matched against one raises as
+soon as the string holds a non-ASCII byte — and KSeF's bodies are full of Polish. The first three
+cassettes never hit it because their bodies arrived tagged UTF-8; the first `application/xml`
+responses (a UPO from storage, and a downloaded invoice) did not.
+
+**Nothing local could have caught it**, because `before_record` does not run on replay. That is
+the same shape as the fifteen-minute credential and the injected dispatch input: code that only
+executes in a credentialed run, where the cost of a mistake is a TEST invoice rather than a red
+build. Every pattern in `spec/support/vcr.rb` now matches in binary — they are all pure ASCII, as
+is everything they match — and the body's original encoding is restored afterwards.
+`spec/recorded_tier_spec.rb` calls the hooks with bodies encoded the way VCR delivers them, which
+is the check that was missing.
+
+**Before spending a recording, dry-run the hooks.** Build a synthetic cassette of the shapes the
+new flow will produce and run `RecordedTier.redact` and `.redact_url` over every interaction with
+its body forced to `ASCII-8BIT`. That, and replaying the flow against the synthetic cassette,
+found three defects here before any of them cost an invoice — including that `#collective_upo`
+reads the session state a *second* time, which a one-read cassette cannot satisfy.
+
 #### What not to do
 
 - **Do not hand-write a cassette.** A recorded response this gem has never actually received is
