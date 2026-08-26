@@ -487,7 +487,9 @@ A threaded smoke spec for §5.2. A spec asserting no committed cassette contains
 **Built and recorded 2026-08-26**, closing the last Phase 2 scope item. Two cassettes, 23
 interactions, replaying in about two seconds with no credentials present.
 
-Getting there took six attempts, and every failure but one was in this file's own assumptions
+A seventh defect surfaced the next morning and is written up below: a cassette recorded against
+a fifteen-minute credential stops replaying about twelve minutes later unless the clock is
+pinned. Getting there took six attempts, and every failure but one was in this file's own assumptions
 rather than in the gem. They are written up below because each is invisible to a local `rake` —
 the code only runs during a credentialed recording — and the next person here will be recording,
 not replaying.
@@ -665,6 +667,65 @@ which is the shape of defect three audit rounds kept finding.
 And one thing that differs from neither, but was asserted wrongly anyway: `upo-v4-3` is the
 `X-KSeF-Feature` **header** value, while the document's namespace is `…/KSeF/v4-3`. Assert
 against `Ksef::UPO::NAMESPACE` rather than a literal, or a correct UPO fails the check.
+
+#### A recorded credential decays — pin the clock, do not rewrite the response
+
+Found 2026-08-26, the morning after recording, with nothing changed: `rake` went red on both
+recorded examples with `VCR::Errors::UnhandledHTTPRequestError` naming
+`POST /v2/auth/token/refresh`.
+
+KSeF issues an access token valid for **exactly fifteen minutes** — measured, both cassettes —
+and `Auth::AccessToken` refreshes at 80% of the observed lifetime. `@acquired_at` is the real
+`Time.now` at replay, so about twelve minutes after recording the credential reads as stale and
+the client does the correct thing: it requests a refresh the cassette has no interaction for.
+
+**The verification that declared the tier green ran inside that window.** The claim was true
+when made and false minutes later, which is the same shape as the coverage gate `rake` skipped
+while claiming to mirror CI: a check that passes for a reason unrelated to what it asserts.
+
+Obstacle 2 above already said *"`AccessToken` takes `clock:` … Replay should inject fixed values
+through these rather than freeze global time"*, and the recording did not use it. So this is not
+a missing seam; it is a documented seam left unused, and nothing failed at the time.
+
+The fix pins "now" to the `recorded_at` of the cassette's first interaction, plumbed through
+`Ksef::Client.new(clock:)`. The alternative — rewriting `validUntil` on playback — was rejected:
+KSeF really did answer with that value, and a tier whose whole claim is "these are the bytes the
+service sent" must not edit them. What a replay has to reproduce is *our* now, not its answer.
+
+`spec/recorded_tier_spec.rb` asserts the durable half — that every recorded access token's
+lifetime is far shorter than the interval between recording and replay — so deleting the clock
+injection leaves a spec that explains what broke rather than a mystery ten minutes later.
+
+#### Record the flow that changed, not the whole tier
+
+`record: :all` re-records every cassette the run touches, and each example of
+`session_flow_spec.rb` submits an invoice that cannot be withdrawn. So adding one flow by
+re-recording everything costs two permanent TEST invoices for flows that had not changed.
+
+`rake vcr:record` therefore takes an optional target —
+`rake 'vcr:record[spec/recorded/auth_refresh_spec.rb]'` — and the dispatch workflow takes the
+same as an input. It refuses anything outside `spec/recorded`.
+
+**The replay step always runs the whole tier regardless.** A recording that only replays what it
+just wrote cannot notice that it broke a cassette it did not touch.
+
+#### The refresh flow is worth its own recording
+
+`POST /auth/token/refresh` is the one auth call whose real response nobody had seen: the
+2026-08-23 live run covered five of the six (§4.2), and `Auth::Client#refresh` reads
+`body["accessToken"]` on the strength of the OpenAPI contract alone. A wrong envelope does not
+raise — `TokenInfo.from(nil)` yields a credential holding no token, which surfaces much later
+and somewhere else. It is also the only way to learn whether a refresh re-issues the refresh
+token, which `renew!` assumes it does not.
+
+It costs an authentication and **no invoice**, which makes it the cheapest cassette in the tier.
+
+Pinning the replay clock left the tier with no path through `renew!` at all, so this closes a
+hole the fix opened. The example advances its clock to 90% of the observed lifetime — past the
+80% refresh threshold, short of expiry — so what it exercises is the *proactive* renewal §6.3
+promises, against a `validUntil` KSeF really sent. The figure is derived from the token rather
+than hardcoded: a constant taken from one recording is an assumption, and this one would fail by
+silently not refreshing.
 
 #### What not to do
 

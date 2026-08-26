@@ -83,12 +83,7 @@ module Ksef
                 }
               ]
             },
-            :attributes => [
-              {
-                :name => "Typ",
-                :use => "required"
-              }
-            ]
+            :attributes => []
           },
           "Faktura/Fa" => {
             :content => {
@@ -2620,12 +2615,7 @@ module Ksef
                 }
               ]
             },
-            :attributes => [
-              {
-                :name => "Typ",
-                :use => "required"
-              }
-            ]
+            :attributes => []
           },
           "Faktura/Zalacznik/BlokDanych" => {
             :content => {
@@ -2667,12 +2657,7 @@ module Ksef
                 }
               ]
             },
-            :attributes => [
-              {
-                :name => "Typ",
-                :use => "required"
-              }
-            ]
+            :attributes => []
           },
           "Faktura/Zalacznik/BlokDanych/MetaDane" => {
             :content => {
@@ -2737,12 +2722,7 @@ module Ksef
                 }
               ]
             },
-            :attributes => [
-              {
-                :name => "Typ",
-                :use => "required"
-              }
-            ]
+            :attributes => []
           },
           "Faktura/Zalacznik/BlokDanych/Tabela/Suma" => {
             :content => {
@@ -2799,12 +2779,7 @@ module Ksef
                 }
               ]
             },
-            :attributes => [
-              {
-                :name => "Typ",
-                :use => "required"
-              }
-            ]
+            :attributes => []
           },
           "Faktura/Zalacznik/BlokDanych/Tabela/TNaglowek/Kol" => {
             :content => {
@@ -2823,7 +2798,15 @@ module Ksef
             :attributes => [
               {
                 :name => "Typ",
-                :use => "required"
+                :use => "required",
+                :values => [
+                  "date",
+                  "datetime",
+                  "dec",
+                  "int",
+                  "time",
+                  "txt"
+                ]
               }
             ]
           },
@@ -2969,6 +2952,10 @@ module Ksef
                 }
               ]
             },
+            :attributes => []
+          },
+          "TNaglowek/KodFormularza" => {
+            :content => nil,
             :attributes => [
               {
                 :name => "kodSystemowy",

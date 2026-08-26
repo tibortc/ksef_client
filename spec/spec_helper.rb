@@ -119,6 +119,7 @@ WebMock.disable_net_connect!(allow_localhost: false)
 # The recorded tier hooks the same WebMock, so it must be configured after that call and
 # before any example runs (DESIGN.md §9.1).
 require_relative "support/vcr"
+require_relative "support/recorded_flow"
 
 RSpec.configure do |config|
   config.expect_with(:rspec) { |c| c.syntax = :expect }

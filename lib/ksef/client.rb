@@ -39,9 +39,20 @@ module Ksef
     #   authenticate with, or an already-redeemed access token
     # @param options [Hash] passed to {Ksef::Configuration} — `logger:`, `timeout:`,
     #   `adapter:`, `proxy:`, `retry_policy:`
-    def initialize(env: :test, auth: nil, **)
+    # @param clock [#call] returns the current {Time}; the same injection {Sessions::Status}
+    #   and {Crypto::PublicKeys} already take. It reaches {Auth::AccessToken}, which decides
+    #   staleness against the `validUntil` KSeF returned.
+    #
+    #   **This is what makes a recorded cassette replayable.** A recorded access token is
+    #   valid for fifteen minutes and {Auth::AccessToken} refreshes at 80% of that, so about
+    #   twelve minutes after recording a replay against the real clock reads it as stale and
+    #   issues a `POST /auth/token/refresh` that the cassette has no interaction for. Pinning
+    #   the clock to the moment of recording replays the flow as it happened, rather than
+    #   rewriting what KSeF said (`spec/recorded/session_flow_spec.rb`).
+    def initialize(env: :test, auth: nil, clock: -> { Time.now }, **)
       @config = Configuration.new(env: env, auth: auth, **)
       @mutex = Mutex.new
+      @clock = clock
       @credential = auth.is_a?(Auth::AccessToken) ? auth : nil
     end
 
@@ -223,7 +234,9 @@ module Ksef
       initiated = auth.submit_ksef_token(token_request)
       auth.authenticate!(initiated.reference_number, token: initiated.authentication_token)
 
-      Auth::AccessToken.new(auth.redeem(token: initiated.authentication_token), client: auth)
+      Auth::AccessToken.new(
+        auth.redeem(token: initiated.authentication_token), client: auth, clock: @clock
+      )
     end
 
     # A fresh challenge and the key that wraps the token. Both are fetched here rather than

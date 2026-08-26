@@ -44,18 +44,9 @@ require "spec_helper"
 # **each example is one real invoice in TEST**, permanent and unwithdrawable. Two examples cost
 # two invoices per recording; four cost four.
 RSpec.describe "the session flow, recorded", :recorded, :vcr do
-  def recording? = ENV["KSEF_VCR_RECORD"] == "1"
-
-  # The real context when recording; a format-valid stand-in when replaying. The stand-in is
-  # never sent anywhere — requests are matched on method and URI — but `Subject` and
-  # `Auth::Token` both validate what they are handed, so it has to be a plausible NIP.
-  def context_nip = ENV.fetch("KSEF_TEST_NIP", "9999999999")
-
-  # Scrubbed out of the cassette on write (`spec/support/vcr.rb`).
-  def access_token = ENV.fetch("KSEF_TEST_TOKEN", "<KSEF_TEST_TOKEN>")
-
-  let(:credential) { Ksef::Auth::Token.new(context_nip: context_nip, token: access_token) }
-  let(:client) { Ksef::Client.new(env: :test, auth: credential) }
+  # `client`, `credential`, `context_nip`, `access_token` and the pinned {RecordedClock}. The
+  # clock is what makes a cassette replayable at all — see `spec/support/recorded_flow.rb`.
+  include_context "with a recorded KSeF flow"
 
   # Fixed key and IV rather than a fresh pair: `Encryptor.new` is public beside `.generate`
   # exactly so a replay can supply the ones its recording used (§9.1, obstacle 1).

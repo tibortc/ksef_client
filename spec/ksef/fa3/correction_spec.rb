@@ -698,7 +698,7 @@ RSpec.describe "FA(3) corrections" do
 
       # What the derived summary says, and why it still has to be stopped. It used to add the
       # two states together and declare a 20.00 refund as a 221.40 charge; since `StanPrzed`
-      # rows stopped being summed (docs/REFERENCE.md §17.4) it declares the **after** state,
+      # rows stopped being summed (docs/REFERENCE.md §19.1) it declares the **after** state,
       # 98.40 — no longer absurd, and still wrong, because a correction's summary is the
       # *delta*. Either way the XSD accepts the document, which is the whole point of the
       # tier-1 rule above.

@@ -34,10 +34,19 @@ module Ksef
 
       private
 
+      # The one element in FA(3) that declares attributes, and they are declared on
+      # `KodFormularza` itself — on the `xsd:extension` inside its anonymous simpleContent
+      # type, keyed "TNaglowek/KodFormularza".
+      #
+      # This read `Generated::Types["TNaglowek"]` until 2026-08-26, and got the right answer
+      # from the wrong place: the generator's attribute lookup used a descendant axis, so
+      # `TNaglowek` inherited the attributes of everything beneath it and these two surfaced
+      # one level too high. Both halves are fixed, and this is the only caller either half
+      # had. Nothing about the emitted document changes.
       def header
         # Every value here is fixed by the schema except the generation timestamp, and the
         # fixed ones are read from the generated metadata rather than restated.
-        attributes = Generated::Types["TNaglowek"][:attributes]
+        attributes = Generated::Types["TNaglowek/KodFormularza"][:attributes]
                      .select { |a| a[:fixed] }
                      .to_h { |a| [a[:name], a[:fixed]] }
 

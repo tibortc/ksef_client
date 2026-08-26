@@ -39,6 +39,15 @@ module Fa3Codegen
 
   # Reads the pinned XSDs into plain Ruby data.
   class Extractor
+    # Where a complexType may declare an attribute. Never a descendant axis — see
+    # {#attributes_of} for what that cost. Above `private` because a constant is not
+    # scoped by it either way.
+    ATTRIBUTE_PATHS = [
+      "./xsd:attribute[@name]",
+      "./xsd:simpleContent/xsd:extension/xsd:attribute[@name]",
+      "./xsd:complexContent/xsd:extension/xsd:attribute[@name]"
+    ].freeze
+
     def initialize(schema_dir: SCHEMA_DIR, main: MAIN_SCHEMA)
       @schema_dir = schema_dir
       @main = main
@@ -73,11 +82,24 @@ module Fa3Codegen
     #
     # Paths rather than leaf names because leaf names collide — DaneKontaktowe appears
     # under all four subject elements — and a path stays stable if upstream adds another.
+    #
+    # An anonymous type nested inside a *named* one is rooted at the type name rather than
+    # at `Faktura`, so `KodFormularza` is keyed "TNaglowek/KodFormularza". A named type may
+    # be referenced from more than one place, so its own name is the stable root; an element
+    # path through one of its references would not be.
+    #
+    # **Descending into named types was missing entirely until 2026-08-26**, which is how
+    # `KodFormularza` — the one element in FA(3) that carries fixed attributes, and the only
+    # one this serializer writes attributes for — came to have no entry at all. What made
+    # that survive is {#attributes_of}'s own bug: the descendant axis leaked the attributes
+    # up to `TNaglowek`, so the caller found them one level too high and emitted a correct
+    # document from an incorrect lookup. Two defects, each hiding the other.
     def types
       acc = {}
 
       @doc.xpath("/xsd:schema/xsd:complexType[@name]", XS).each do |ct|
         acc[ct["name"]] = describe(ct)
+        collect_nested(ct, [ct["name"]], acc)
       end
 
       root = @doc.at_xpath("/xsd:schema/xsd:element[@name=\"#{ROOT_ELEMENT}\"]", XS) ||
@@ -97,7 +119,13 @@ module Fa3Codegen
       return unless complex_type
 
       acc[path.join("/")] = describe(complex_type)
+      collect_nested(complex_type, path, acc)
+    end
 
+    # The anonymous complexTypes declared on this type's own elements. Split out of
+    # {#collect_anonymous} so a named type can be descended into without first being
+    # described under a path-shaped key it does not have.
+    def collect_nested(complex_type, path, acc)
       immediate_elements(complex_type).each do |el|
         nested = el.at_xpath("./xsd:complexType", XS)
         collect_anonymous(nested, path + [el["name"]], acc) if nested
@@ -178,11 +206,45 @@ module Fa3Codegen
       end
     end
 
+    # Attributes this type **declares**, which is not the same as attributes reachable
+    # beneath it.
+    #
+    # The axis here used to be `.//`, and that is a bug of the same family as everything
+    # else in this file: it descends through nested anonymous complexTypes, so a type
+    # inherited every attribute of every element under it. Seven types were affected —
+    # `TNaglowek` and `KodFormularza` each claimed `kodSystemowy`/`wersjaSchemy`, and
+    # `Faktura`, `Zalacznik`, `BlokDanych`, `Tabela` and the attachment's own `TNaglowek`
+    # each claimed `Kol`'s `Typ`. Generated metadata that reads plausibly and is wrong is
+    # worse than metadata that is missing, because nothing downstream can tell.
+    #
+    # An attribute is declared either directly or on an extension, so both are read and
+    # neither is a descent: `xsd:simpleContent`/`xsd:complexContent` are a wrapper around
+    # *this* type's own definition, not a child type.
     def attributes_of(complex_type)
-      attrs = complex_type.xpath(".//xsd:attribute[@name]", XS).map do |attr|
-        { name: attr["name"], type: attr["type"], use: attr["use"] || "optional", fixed: attr["fixed"] }.compact
+      attrs = complex_type.xpath(ATTRIBUTE_PATHS.join("|"), XS).map do |attr|
+        {
+          name: attr["name"], type: attr["type"], use: attr["use"] || "optional",
+          fixed: attr["fixed"], values: inline_values(attr)
+        }.compact
       end
+      # Names are unique within a type, so this sort has no ties to order and is total.
       attrs.sort_by { |a| a[:name] }
+    end
+
+    # The permitted values of an attribute restricted by an *inline* simpleType.
+    #
+    # {#enums} keys on `xsd:simpleType[@name]`, so an anonymous restriction hanging off an
+    # attribute is invisible to it. FA(3) has exactly one — `Kol/@Typ`'s six column types —
+    # and without this the only way to enforce it is to type the six values into a Ruby
+    # constant, which DESIGN.md §7.1 forbids: hand-written models consume schema metadata
+    # and must never restate it.
+    #
+    # nil rather than [] when there is no restriction, so {#attributes_of}'s `compact` keeps
+    # the key out of the rendered Hash entirely — an empty Array would read as "enumerated,
+    # with nothing permitted".
+    def inline_values(attr)
+      values = attr.xpath("./xsd:simpleType/xsd:restriction/xsd:enumeration", XS).map { |e| e["value"] }
+      values.empty? ? nil : values
     end
 
     # `unbounded` becomes nil, meaning "no upper limit" — easier to reason about than a
@@ -200,7 +262,14 @@ module Fa3Codegen
   class Renderer
     # Fixed explicitly rather than relying on insertion order, so output cannot drift
     # with refactoring.
-    KEY_ORDER = %i[kind name type base min max particles content attributes].freeze
+    #
+    # **Every key any rendered Hash can hold must appear here.** {#sorted_keys} maps an
+    # unlisted key to one shared rank, and `sort_by` is not stable — so two unlisted keys
+    # tie and their order is whatever the sort happens to do, which is exactly how a
+    # determinism bug reached CI from `tasks/field_mapping.rb`. `use` and `fixed` were
+    # unlisted and had been tying since attributes were first rendered; `values` would have
+    # made three.
+    KEY_ORDER = %i[kind name type base use fixed values min max particles content attributes].freeze
 
     def initialize(extractor)
       @extractor = extractor

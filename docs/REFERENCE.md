@@ -3137,10 +3137,11 @@ rule added to `RULES` needs a ledger entry saying what grounds it.
 
 ---
 
-## 18. Two schema shapes the field mapping measured
+## 18. Schema shapes the codegen relies on
 
-Recorded 2026-08-26, while generating `docs/field_mapping.md` (DESIGN.md §7.2). Both are
-properties of the pinned FA(3) XSD that the generator relies on, so they belong here rather
+Recorded 2026-08-26. The first two were measured while generating `docs/field_mapping.md`
+(DESIGN.md §7.2); §18.2 was found while extending the extractor for `Zalacznik`. All are
+properties of the pinned FA(3) XSD that a generator relies on, so they belong here rather
 than only in its comments.
 
 **FA(3) declares no unbounded element.** `maxOccurs="unbounded"` appears **zero** times; every
@@ -3176,7 +3177,47 @@ document any issuer can produce.
 a table aimed at auditors is the same error in a new medium. Anything that needs *effective*
 cardinality must walk the XSD; `Generated::Types` answers a different question.
 
-### 17.4 `StanPrzed` rows are not summed
+### 18.2 An attribute belongs to the type that declares it, and the extractor said otherwise
+
+The extractor read attributes down a **descendant** axis, `.//xsd:attribute[@name]`, so every
+complexType inherited the attributes of everything nested beneath it. Seven types claimed an
+attribute; two declare one. `TNaglowek` and `KodFormularza` each claimed `kodSystemowy` and
+`wersjaSchemy`; `Faktura`, `Zalacznik`, `BlokDanych`, `Tabela` and the attachment's own
+`TNaglowek` each claimed `Kol`'s `Typ`.
+
+**It survived because it produced a correct document.** `DocumentMapping#header` reads the two
+fixed attributes and writes them onto `KodFormularza` — the right element, found at the wrong
+level, because the leak surfaced them one step up. Nothing downstream could tell: generated
+metadata that reads plausibly and is wrong is worse than metadata that is missing.
+
+A second defect hid the first. Anonymous complexTypes were collected only by descending from
+the `Faktura` element, and that descent stops at any element declared with a named `type`. FA(3)
+has exactly one anonymous type nested inside a named one — `KodFormularza`, inside `TNaglowek` —
+so the correct key did not exist, and reading `TNaglowek` was the only lookup available. Both are
+fixed: anonymous types nested in a named type are keyed from the type name
+(`"TNaglowek/KodFormularza"`), and attributes are read from the type's own children plus its
+`xsd:simpleContent`/`xsd:complexContent` extension, which are wrappers around its own definition
+rather than a descent.
+
+**Attributes may also carry an inline enumeration, and `Enums` cannot see it.** `Enums` keys on
+`xsd:simpleType[@name]`; `Kol/@Typ` restricts an anonymous one. It is FA(3)'s only such
+attribute, and its six values — `date`, `datetime`, `dec`, `int`, `time`, `txt` — are the column
+types of an attachment table. They are now carried as `values:` on the attribute, because the
+alternative is to restate them in Ruby, which DESIGN.md §7.1 forbids.
+
+One more, latent: `Renderer::KEY_ORDER` did not list `use` or `fixed`, and `sorted_keys` maps
+every unlisted key to one shared rank. `sort_by` is not stable, so those two tied on every
+rendered attribute — the same determinism trap that reached CI from `tasks/field_mapping.rb`.
+Adding `values` would have made three. Every key a rendered Hash can hold is now listed.
+
+## 19. Defects the 2026-08-26 audit round found
+
+Numbered as their own chapter because they were appended to §17 while it was being written and
+ended up as a **second** `§17.4`, `§17.5` and `§17.6` — sitting inside chapter 18, and colliding
+with the tier-3 sections of the same numbers that DESIGN.md and CLAUDE.md both cite. Renumbered
+2026-08-26; `CHANGELOG.md` and `spec/ksef/fa3/correction_spec.rb` point here now.
+
+### 19.1 `StanPrzed` rows are not summed
 
 Recorded 2026-08-26. `Summaries#net_by_rate` and `#vat_by_rate` skip a line marked
 `state_before`, and that is a correctness fix rather than a tidy.
@@ -3202,7 +3243,7 @@ Note what the fix does *not* claim. `net_by_rate` now answers the **after** stat
 delta — the delta is what `Totals` states and what `#net_total` returns. Two different
 questions, and §8.4 is why: a correction's buckets are deltas that its rows need not determine.
 
-### 17.5 The parser's own document was never consulted
+### 19.2 The parser's own document was never consulted
 
 `Invoice#errors` runs tier 2 over `#to_xml` — bytes this gem has just produced, well-formed by
 construction — so **tier 2 is structurally incapable of seeing the input**. libxml2 recovers
@@ -3222,7 +3263,7 @@ The last is §8.6's `P_9A` class at a different element. Catching those needs th
 against the schema rather than the output — *"validate the bytes you were given, not the bytes
 you would write"* — which is a larger change than this one and is not made here.
 
-### 17.6 Two encodings, one predicate
+### 19.3 Two encodings, one predicate
 
 `String#valid_encoding?` answers **true** for a string that is validly encoded in something that
 is not UTF-8. Every guard in this gem tested it, so a `Windows-1250` or `ISO-8859-2` name — what
