@@ -145,11 +145,52 @@ module Fa3Codegen
     # would have no idea they were alternatives.
     #
     # nil for simpleContent types, which have attributes and text but no element children.
+    #
+    # **A `complexContent` extension carries its model somewhere else**, and reading only direct
+    # children reported `content: nil` for it — "this element takes text", about a type that
+    # takes four children. FA(3) has exactly one, `Faktura/Podmiot1/AdresKoresp`
+    # (`<xsd:extension base="tns:TAdres"/>`), and the serializer turned that into a refusal
+    # naming an **empty** list of permitted elements: a false statement about the schema,
+    # sourced from metadata (found by audit 2026-08-26). Latent only because no model carries
+    # `AdresKoresp` yet.
     def content_model(complex_type)
+      extension = extension_of(complex_type)
+      return extended_content(extension) if extension
+
       compositor = compositor_of(complex_type)
       return unless compositor
 
       compositor_particle(compositor)
+    end
+
+    # An extension's own particles come *after* the base's, which is what `complexContent`
+    # means. FA(3)'s single case extends with nothing at all, so this reduces to the base — but
+    # writing only that case would leave the next one silently wrong, which is the whole
+    # complaint against the version this replaces.
+    def extended_content(extension)
+      base = named_type(extension["base"])
+      base_particle = base && content_model(base)
+      own = compositor_of(extension)
+      own_particle = own && compositor_particle(own)
+
+      return base_particle if own_particle.nil?
+      return own_particle if base_particle.nil?
+
+      { kind: :sequence, min: 1, max: 1, particles: [base_particle, own_particle] }
+    end
+
+    # `xsd:complexContent/xsd:restriction` does not occur in FA(3) — measured — so only
+    # extension is resolved. A restriction would need its *own* model rather than the base's,
+    # and guessing at one nobody has seen would be inventing schema facts.
+    def extension_of(node) = node.at_xpath("./xsd:complexContent/xsd:extension", XS)
+
+    # @return [Nokogiri::XML::Node, nil] the named complexType a `base` attribute refers to.
+    #   nil for a simple base or a type from an imported schema — FA(3) references no
+    #   complexType outside its own namespace.
+    def named_type(qname)
+      return nil if qname.nil?
+
+      @doc.at_xpath("/xsd:schema/xsd:complexType[@name=\"#{qname.split(":").last}\"]", XS)
     end
 
     def compositor_of(node)
@@ -174,6 +215,15 @@ module Fa3Codegen
       end
     end
 
+    # `fixed` and inline enumerations are carried for elements for the same reason they are for
+    # attributes: without them a hand-written model must restate a schema fact, which DESIGN.md
+    # §7.1 forbids. `DocumentMapping#header` was writing `"WariantFormularza" => 3` six lines
+    # below a comment claiming the fixed values come from this metadata — they did not, because
+    # this method dropped them.
+    #
+    # Measured in FA(3): three elements carry an inline enumeration (`WariantFormularza`, `JST`,
+    # `GV`) and one carries `fixed` (`PrefiksPodatnika`, `fixed="PL"` in one of its two
+    # declarations — which until now rendered identically to the other).
     def element_particle(element)
       particle = {
         kind: :element,
@@ -182,18 +232,35 @@ module Fa3Codegen
         max: occurs(element, "maxOccurs")
       }
       particle[:type] = element["type"] if element["type"]
+      particle[:fixed] = element["fixed"] if element["fixed"]
 
       inline_base = element.at_xpath("./xsd:simpleType/xsd:restriction", XS)&.[]("base")
       particle[:base] = inline_base if inline_base
+
+      values = inline_values(element)
+      particle[:values] = values if values
 
       particle
     end
 
     # Elements directly inside this complexType, through compositor nesting but never
     # through a nested complexType.
+    # Through compositor nesting and through a `complexContent` extension, but never through a
+    # nested complexType. Missing the extension arm also lost every anonymous type declared
+    # beneath one.
     def immediate_elements(complex_type)
+      extension = extension_of(complex_type)
+      return extension_elements(extension) if extension
+
       compositor = compositor_of(complex_type)
       compositor ? flatten_elements(compositor) : []
+    end
+
+    def extension_elements(extension)
+      base = named_type(extension["base"])
+      own = compositor_of(extension)
+
+      (base ? immediate_elements(base) : []) + (own ? flatten_elements(own) : [])
     end
 
     def flatten_elements(compositor)
@@ -211,11 +278,12 @@ module Fa3Codegen
     #
     # The axis here used to be `.//`, and that is a bug of the same family as everything
     # else in this file: it descends through nested anonymous complexTypes, so a type
-    # inherited every attribute of every element under it. Seven types were affected —
-    # `TNaglowek` and `KodFormularza` each claimed `kodSystemowy`/`wersjaSchemy`, and
-    # `Faktura`, `Zalacznik`, `BlokDanych`, `Tabela` and the attachment's own `TNaglowek`
-    # each claimed `Kol`'s `Typ`. Generated metadata that reads plausibly and is wrong is
-    # worse than metadata that is missing, because nothing downstream can tell.
+    # inherited every attribute of every element under it. Seven types reported an attribute where
+    # two declare one: `TNaglowek` reported `kodSystemowy`/`wersjaSchemy`, which
+    # `KodFormularza` declares, and `Faktura`, `Zalacznik`, `BlokDanych`, `Tabela`, the
+    # attachment's own `TNaglowek` and `Kol` itself all reported `Kol`'s `Typ`. Generated
+    # metadata that reads plausibly and is wrong is worse than metadata that is missing,
+    # because nothing downstream can tell.
     #
     # An attribute is declared either directly or on an extension, so both are read and
     # neither is a descent: `xsd:simpleContent`/`xsd:complexContent` are a wrapper around
@@ -231,7 +299,7 @@ module Fa3Codegen
       attrs.sort_by { |a| a[:name] }
     end
 
-    # The permitted values of an attribute restricted by an *inline* simpleType.
+    # The permitted values of an element or attribute restricted by an *inline* simpleType.
     #
     # {#enums} keys on `xsd:simpleType[@name]`, so an anonymous restriction hanging off an
     # attribute is invisible to it. FA(3) has exactly one — `Kol/@Typ`'s six column types —
@@ -242,8 +310,8 @@ module Fa3Codegen
     # nil rather than [] when there is no restriction, so {#attributes_of}'s `compact` keeps
     # the key out of the rendered Hash entirely — an empty Array would read as "enumerated,
     # with nothing permitted".
-    def inline_values(attr)
-      values = attr.xpath("./xsd:simpleType/xsd:restriction/xsd:enumeration", XS).map { |e| e["value"] }
+    def inline_values(node)
+      values = node.xpath("./xsd:simpleType/xsd:restriction/xsd:enumeration", XS).map { |e| e["value"] }
       values.empty? ? nil : values
     end
 

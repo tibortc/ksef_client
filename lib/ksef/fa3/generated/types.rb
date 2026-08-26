@@ -2154,6 +2154,7 @@ module Ksef
                   :kind => :element,
                   :name => "PrefiksPodatnika",
                   :type => "tns:TKodyKrajowUE",
+                  :fixed => "PL",
                   :min => 0,
                   :max => 1
                 },
@@ -2202,7 +2203,41 @@ module Ksef
             :attributes => []
           },
           "Faktura/Podmiot1/AdresKoresp" => {
-            :content => nil,
+            :content => {
+              :kind => :sequence,
+              :min => 1,
+              :max => 1,
+              :particles => [
+                {
+                  :kind => :element,
+                  :name => "KodKraju",
+                  :type => "etd:TKodKraju",
+                  :min => 1,
+                  :max => 1
+                },
+                {
+                  :kind => :element,
+                  :name => "AdresL1",
+                  :type => "tns:TZnakowy512",
+                  :min => 1,
+                  :max => 1
+                },
+                {
+                  :kind => :element,
+                  :name => "AdresL2",
+                  :type => "tns:TZnakowy512",
+                  :min => 0,
+                  :max => 1
+                },
+                {
+                  :kind => :element,
+                  :name => "GLN",
+                  :type => "tns:TGLN",
+                  :min => 0,
+                  :max => 1
+                }
+              ]
+            },
             :attributes => []
           },
           "Faktura/Podmiot1/DaneKontaktowe" => {
@@ -2287,6 +2322,10 @@ module Ksef
                   :kind => :element,
                   :name => "JST",
                   :base => "xsd:integer",
+                  :values => [
+                    "1",
+                    "2"
+                  ],
                   :min => 1,
                   :max => 1
                 },
@@ -2294,6 +2333,10 @@ module Ksef
                   :kind => :element,
                   :name => "GV",
                   :base => "xsd:integer",
+                  :values => [
+                    "1",
+                    "2"
+                  ],
                   :min => 1,
                   :max => 1
                 }
@@ -2933,6 +2976,9 @@ module Ksef
                   :kind => :element,
                   :name => "WariantFormularza",
                   :base => "xsd:byte",
+                  :values => [
+                    "3"
+                  ],
                   :min => 1,
                   :max => 1
                 },

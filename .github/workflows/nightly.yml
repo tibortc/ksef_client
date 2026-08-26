@@ -19,6 +19,11 @@ on:
     - cron: "30 2 * * *"
   workflow_dispatch:
 
+# Least privilege, matching `test.yml` and `release.yml`. This job holds a live KSeF credential
+# and needs only to read the repository.
+permissions:
+  contents: read
+
 jobs:
   integration:
     runs-on: ubuntu-latest

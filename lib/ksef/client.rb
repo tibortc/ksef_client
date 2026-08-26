@@ -40,8 +40,13 @@ module Ksef
     # @param options [Hash] passed to {Ksef::Configuration} — `logger:`, `timeout:`,
     #   `adapter:`, `proxy:`, `retry_policy:`
     # @param clock [#call] returns the current {Time}; the same injection {Sessions::Status}
-    #   and {Crypto::PublicKeys} already take. It reaches {Auth::AccessToken}, which decides
-    #   staleness against the `validUntil` KSeF returned.
+    #   and {Crypto::PublicKeys} already take. It reaches {Crypto::PublicKeys}, which decides
+    #   whether a published certificate is currently valid, and the {Auth::AccessToken} this
+    #   client builds, which decides staleness against the `validUntil` KSeF returned.
+    #
+    #   **It does not reach an `Auth::AccessToken` passed in as `auth:`** — that one is already
+    #   constructed and carries whatever clock it was built with. Build it with the same clock
+    #   if you need both pinned.
     #
     #   **This is what makes a recorded cassette replayable.** A recorded access token is
     #   valid for fifteen minutes and {Auth::AccessToken} refreshes at 80% of that, so about
@@ -217,8 +222,13 @@ module Ksef
     # @return [Ksef::Invoices::Client]
     def invoices = @invoices ||= Invoices::Client.new(connection, credential)
 
+    # The clock goes here too, and that is not symmetry for its own sake: `#for_usage` filters
+    # published certificates on `valid_at?`, so a replay running after they expire finds none
+    # and raises. The cassettes' certificates run to 2027-09-29 — pinning only
+    # {Auth::AccessToken} would have left the tier a time bomb with a longer fuse.
+    #
     # @return [Ksef::Crypto::PublicKeys]
-    def public_keys = @public_keys ||= Crypto::PublicKeys.new(connection)
+    def public_keys = @public_keys ||= Crypto::PublicKeys.new(connection, clock: @clock)
 
     # @return [Ksef::Auth::Client]
     def auth = @auth ||= Auth::Client.new(connection)

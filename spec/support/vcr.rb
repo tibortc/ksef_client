@@ -57,6 +57,16 @@ module RecordedTier
     end
   end
 
+  # How many interactions in each cassette are a request to `path`.
+  #
+  # @return [Hash{String => Integer}] cassette basename => count
+  def self.request_counts(path_fragment)
+    Dir.glob(File.join(DIR, "**", "*.yml")).to_h do |file|
+      interactions = YAML.safe_load_file(file)["http_interactions"] || []
+      [File.basename(file, ".yml"), interactions.count { |i| i.dig("request", "uri").to_s.include?(path_fragment) }]
+    end
+  end
+
   # nil unless this interaction's response carries an access token — most do not.
   def self.access_token_lifetime(interaction)
     body = interaction.dig("response", "body", "string").to_s
@@ -77,6 +87,48 @@ module RecordedTier
   SECRET_FIELD = /("(?:token|accessToken|refreshToken|authenticationToken|encryptedToken|
                      encryptedSymmetricKey|initializationVector)"\s*:\s*")([^"]+)(")/x
 
+  # **A pre-signed URL is a credential, and it is not shaped like one.**
+  #
+  # KSeF hands out the UPO as an Azure user-delegation SAS: the path is public, and the query
+  # string *is* the authorisation — `sig` is an HMAC over the rest, and anyone holding it can
+  # fetch the document unauthenticated until `se`. DESIGN.md §9.1 lists it among the things that
+  # must be scrubbed, `Sessions::InvoiceState#inspect` already redacts it from log lines, and the
+  # URI matcher below already strips its parameters. The scrubber was the one place that did not,
+  # so two cassettes went into git carrying a live three-day capability (found 2026-08-26).
+  #
+  # It matched no existing rule and no scanner: a SAS `sig` is not a JWT, not `Bearer`-prefixed,
+  # and not a value any machine holds in its environment.
+  #
+  # The path is kept and the query dropped. Nothing needs the query — the matcher ignores those
+  # parameters, and no cassette follows the link (`Client#upo` uses the metered API route) — while
+  # the path keeps the field a recognisable URL for anything that parses it.
+  SIGNED_URL_FIELD = /("(?:upoDownloadUrl|downloadUrl)"\s*:\s*")([^"?]+)\?[^"]*(")/
+
+  # What a stripped one looks like, so the scanner can tell "scrubbed" from "never had a query".
+  SIGNED_URL_PLACEHOLDER = "<REDACTED-SIGNATURE>"
+
+  # Headers carrying session state that no replay needs. Dropped outright: this client has no
+  # cookie jar — `grep -rn cookie lib/` is empty — so a recorded cookie is dead weight that
+  # happens to be a session identifier.
+  DROPPED_HEADERS = %w[Set-Cookie Cookie].freeze
+
+  # Redacts what a header may carry and removes what none of them should.
+  def self.clean_headers!(message)
+    headers = message.headers
+    return if headers.nil?
+
+    DROPPED_HEADERS.each { |name| headers.delete(name) }
+    headers.each_value { |values| values.map! { |value| redact_header(value) } }
+  end
+
+  # Header values are not JSON, so {redact} nearly always no-ops on them; the JWT and
+  # signed-URL shapes are what actually appear.
+  def self.redact_header(value)
+    value.to_s
+         .gsub(JWT, "<REDACTED-JWT>")
+         .gsub(/([?&](?:sig|skoid|sks)=)(?!<)[^&\s]+/) { "#{Regexp.last_match(1)}#{SIGNED_URL_PLACEHOLDER}" }
+  end
+
   # **Why this exists, and why `filter_sensitive_data` was not enough.**
   #
   # A `filter_sensitive_data` block returns *one* string per interaction, and VCR replaces
@@ -92,10 +144,30 @@ module RecordedTier
   # scrubbing the NIP did (§9.1). No KSeF XML document carries a bearer token; the credentials
   # are all in JSON envelopes and headers.
   def self.redact(body)
-    return body if body.nil? || body.empty? || body.lstrip.start_with?("<")
+    return body if body.nil? || body.empty? || xml?(body)
 
     body.gsub(SECRET_FIELD) { "#{Regexp.last_match(1)}<REDACTED>#{Regexp.last_match(3)}" }
+        .gsub(SIGNED_URL_FIELD) do
+          "#{Regexp.last_match(1)}#{Regexp.last_match(2)}?#{SIGNED_URL_PLACEHOLDER}#{Regexp.last_match(3)}"
+        end
         .gsub(JWT, "<REDACTED-JWT>")
+  end
+
+  # **The XML exemption tests the document, not the first byte.**
+  #
+  # It was `lstrip.start_with?("<")`, which is wrong in both directions. A UPO served with a
+  # byte-order mark is not exempted — `lstrip` does not strip `\uFEFF` — so redaction would
+  # rewrite the bytes whose hash KSeF published, which is the exact breakage the exemption
+  # exists to prevent. And *any* body beginning with `<` is exempted, so an XML request body
+  # carrying a credential passes through untouched. `Auth::Client` POSTs a signed
+  # `AuthTokenRequest`, which is XML and is a replayable authentication assertion.
+  #
+  # Deciding on a declaration or a root element keeps the UPO exempt for the reason it should
+  # be — it is a signed document whose bytes are load-bearing — without exempting a body merely
+  # because of how it starts.
+  def self.xml?(body)
+    stripped = body.sub(/\A\uFEFF/, "").lstrip
+    stripped.start_with?("<?xml") || stripped.match?(/\A<[A-Za-z_]/)
   end
 end
 
@@ -136,9 +208,17 @@ VCR.configure do |config|
 
   # Every token-bearing field and every JWT, in both directions, at any depth — see
   # {RecordedTier.redact} for why a `filter_sensitive_data` block could not do this.
+  #
+  # Headers are covered too. `filter_sensitive_data` above handles the *request*
+  # `Authorization` and nothing else, so every response header was recorded verbatim — which
+  # put the WAF's `Set-Cookie` session identifiers into all three cassettes. Nothing in `lib/`
+  # reads a cookie (this client keeps no jar), so they are dropped rather than redacted: a
+  # value no replay needs should not be in the file at all.
   config.before_record do |interaction|
     interaction.request.body = RecordedTier.redact(interaction.request.body)
     interaction.response.body = RecordedTier.redact(interaction.response.body)
+    RecordedTier.clean_headers!(interaction.request)
+    RecordedTier.clean_headers!(interaction.response)
   end
 end
 

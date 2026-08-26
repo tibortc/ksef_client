@@ -32,12 +32,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=BMwLDhZQ9moRijhI7YB6CSnejmoAAAAAZ0cn/wuoRo7Dm9fhgHQTUw==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:50:03 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -78,12 +72,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=OLvmHjvftXgRijhI7YB6CSnejmoAAAAA9zqwZJL1xSNlk24jx8PQQQ==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:50:32 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -127,12 +115,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=yMqADQZMWRQRijhI7YB6CSnejmoAAAAAzEnQPtnRnaH4oEQOqPfdyg==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:50:32 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -175,12 +157,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=07Shbqr+4XgRijhI7YB6CSnejmoAAAAAzVO9NGtUqnzchMGYbrB2og==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:50:33 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -224,12 +200,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=SGgvGx80yEARijhI7YB6CSvejmoAAAAA8tvel3Ei/W5LAKmE5xN3Hg==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:46:03 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -275,12 +245,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=rUMfKqaH7gMRijhI7YB6CSvejmoAAAAAtnVo2LyOtySx1VFTVMdTaw==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:50:32 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -327,12 +291,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=a9K/STeJunIRijhI7YB6CSvejmoAAAAAyd3EZlV3gtW8MvJvjxVlmQ==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:46:03 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -377,12 +335,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=pNtPHk8OzkIRijhI7YB6CSzejmoAAAAAu5WOmhvHYS0Glp95ZLxixA==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:50:32 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -423,12 +375,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=GPYhDgKUaDYRijhI7YB6CSzejmoAAAAAkakHa2x0+aWt3zLCu06TJQ==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:49:03 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -471,12 +417,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=S5DzBJbJQxERijhI7YB6CSzejmoAAAAAprO0o1DxuWtsUWim4dsedg==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:47:56 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -520,12 +460,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=a8BqSbSQfH0RijhI7YB6CS3ejmoAAAAAtBnv/EmfrT+L9q1cA3HnKQ==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=R5PiS52bSYK6825khbwRGybejmoAAAAAQUIPAAAAAABgJ6/l8ZXgBI8wlDNwPn/g;
-        expires=Wed, 25 Aug 2027 22:50:32 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -534,6 +468,6 @@ http_interactions:
       - 61-31782484-31747492 PNYN RT(1787747885452 462) q(0 0 0 0) r(0 0) U16
     body:
       encoding: ASCII-8BIT
-      string: '{"ordinalNumber":1,"invoiceNumber":"REC/20260826123801","ksefNumber":"2621394686-20260826-66E67C800000-49","referenceNumber":"20260826-EE-2B608D5000-97F24520C9-0A","invoiceHash":"AqyoW3yWZm4TMMyjuPfA6k4NzEw2J/eo0dfB5KiQm4c=","acquisitionDate":"2026-08-26T12:38:04.3369673+00:00","invoicingDate":"2026-08-26T12:38:04.2458241+00:00","upoDownloadUrl":"https://api-test.ksef.mf.gov.pl/storage/00/20260826-so-2b60835000-97fe5ce46a-57/invoice-upo/upo_2621394686-20260826-66E67C800000-49.xml?skoid=9464004d-bce5-4c74-8a9f-364c6530069e&sktid=647754c7-3974-4442-a425-c61341b61c69&skt=2026-08-26T12%3A14%3A38Z&ske=2026-09-02T12%3A14%3A38Z&sks=b&skv=2025-01-05&sv=2025-01-05&st=2026-08-26T12%3A33%3A05Z&se=2026-08-29T12%3A38%3A05Z&sr=b&sp=r&sig=65cmdOLPAaejBmHiVoa%2Bahgpl8kIn%2BUGW6ZNALc1VgU%3D","upoDownloadUrlExpirationDate":"2026-08-29T12:38:05.9400328+00:00","invoicingMode":"Online","status":{"code":200,"description":"Sukces"}}'
+      string: '{"ordinalNumber":1,"invoiceNumber":"REC/20260826123801","ksefNumber":"2621394686-20260826-66E67C800000-49","referenceNumber":"20260826-EE-2B608D5000-97F24520C9-0A","invoiceHash":"AqyoW3yWZm4TMMyjuPfA6k4NzEw2J/eo0dfB5KiQm4c=","acquisitionDate":"2026-08-26T12:38:04.3369673+00:00","invoicingDate":"2026-08-26T12:38:04.2458241+00:00","upoDownloadUrl":"https://api-test.ksef.mf.gov.pl/storage/00/20260826-so-2b60835000-97fe5ce46a-57/invoice-upo/upo_2621394686-20260826-66E67C800000-49.xml?<REDACTED-SIGNATURE>","upoDownloadUrlExpirationDate":"2026-08-29T12:38:05.9400328+00:00","invoicingMode":"Online","status":{"code":200,"description":"Sukces"}}'
   recorded_at: Wed, 26 Aug 2026 12:38:05 GMT
 recorded_with: VCR 6.4.0

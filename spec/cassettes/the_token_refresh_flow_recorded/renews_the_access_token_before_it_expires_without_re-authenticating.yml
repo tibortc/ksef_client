@@ -32,12 +32,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=/bWqennUJjU+0G9I7YB6CV3qjmoAAAAADXQqOoXlN+TXPp17HAJ/og==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=649BC9EEQbu6hNjNndlASl3qjmoAAAAAQUIPAAAAAAANeKBzrAAGpNOc3i3OpBE6;
-        expires=Wed, 25 Aug 2027 22:49:03 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -78,12 +72,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=AP3hWetXbFI+0G9I7YB6CV7qjmoAAAAAb7dN98Dx+4/6n+WGZQPgGg==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=649BC9EEQbu6hNjNndlASl3qjmoAAAAAQUIPAAAAAAANeKBzrAAGpNOc3i3OpBE6;
-        expires=Wed, 25 Aug 2027 22:50:33 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -126,12 +114,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=vfCvHz431Sc+0G9I7YB6CV/qjmoAAAAAw6z00KQaTEreD2DYki6eJQ==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=649BC9EEQbu6hNjNndlASl3qjmoAAAAAQUIPAAAAAAANeKBzrAAGpNOc3i3OpBE6;
-        expires=Wed, 25 Aug 2027 22:47:56 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -175,12 +157,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=bW2PQ4LBF2E+0G9I7YB6CV/qjmoAAAAAhhLcZUXuVKJ6gCFtRGuE8w==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=649BC9EEQbu6hNjNndlASl3qjmoAAAAAQUIPAAAAAAANeKBzrAAGpNOc3i3OpBE6;
-        expires=Wed, 25 Aug 2027 22:50:32 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -224,12 +200,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=mySofWLY6h4+0G9I7YB6CWLqjmoAAAAARmpSnxigtnr8YowexPP7kQ==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=649BC9EEQbu6hNjNndlASl3qjmoAAAAAQUIPAAAAAAANeKBzrAAGpNOc3i3OpBE6;
-        expires=Wed, 25 Aug 2027 22:50:33 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -273,12 +243,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=YreNCpFsMyc+0G9I7YB6CWXqjmoAAAAAu9OnKKrallo4UUyv1KcqMw==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=649BC9EEQbu6hNjNndlASl3qjmoAAAAAQUIPAAAAAAANeKBzrAAGpNOc3i3OpBE6;
-        expires=Wed, 25 Aug 2027 22:50:33 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -322,12 +286,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=ajeoOrVdY3w+0G9I7YB6CWfqjmoAAAAAs5zz8DQpoqHr1DoY5511wg==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=649BC9EEQbu6hNjNndlASl3qjmoAAAAAQUIPAAAAAAANeKBzrAAGpNOc3i3OpBE6;
-        expires=Wed, 25 Aug 2027 22:50:33 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -373,12 +331,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=lB1lB9n0USA+0G9I7YB6CWjqjmoAAAAAezYvBT2aYKxj5HUCbzcyrA==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=649BC9EEQbu6hNjNndlASl3qjmoAAAAAQUIPAAAAAAANeKBzrAAGpNOc3i3OpBE6;
-        expires=Wed, 25 Aug 2027 22:50:32 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:
@@ -423,12 +375,6 @@ http_interactions:
       - keep-alive
       Server:
       - Kestrel
-      Set-Cookie:
-      - incap_ses_683_3285211=4f8gVH8peFc+0G9I7YB6CXDqjmoAAAAAZ94ivRLs7rUQbqwD47uhng==;
-        path=/; Domain=.ksef.mf.gov.pl; Secure; SameSite=None
-      - visid_incap_3285211=649BC9EEQbu6hNjNndlASl3qjmoAAAAAQUIPAAAAAAANeKBzrAAGpNOc3i3OpBE6;
-        expires=Wed, 25 Aug 2027 22:47:56 GMT; HttpOnly; path=/; Domain=.ksef.mf.gov.pl;
-        Secure; SameSite=None
       Strict-Transport-Security:
       - max-age=31536000
       X-Cdn:

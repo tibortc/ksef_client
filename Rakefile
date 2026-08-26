@@ -86,15 +86,25 @@ namespace :vcr do
     # so re-recording the whole tier to add one cassette creates permanent TEST invoices for
     # flows that had not changed. Adding `auth_refresh_spec.rb` costs one authentication and
     # no invoice when it is named; two invoices when it is not.
+    # **Anchored, not `start_with?`.** The old guard accepted `spec/recorded; curl …` — it only
+    # asked how the string began, and the string went on to reach a shell. The pattern now
+    # describes the whole argument: the directory, or one path beneath it made of the
+    # characters a path is made of.
     target = args[:target].to_s.empty? ? "spec/recorded" : args[:target]
-    abort "Refusing to record outside spec/recorded (got #{target})." unless target.start_with?("spec/recorded")
+    unless target.match?(%r{\Aspec/recorded(?:/[\w.-]+)*\z})
+      abort "Refusing to record #{target.inspect}: expected spec/recorded or a path beneath it."
+    end
 
     puts "Recording #{target} against TEST."
     puts "`spec/recorded/session_flow_spec.rb` creates a permanent TEST invoice per example."
     puts "Cassettes are scrubbed on write; `bundle exec rspec spec/cassette_hygiene_spec.rb`"
     puts "verifies that afterwards, and it is not optional."
+    # Argument form, so `target` is one argv entry rather than a fragment of a shell command.
+    # With a single string, `sh` runs it through /bin/sh and the interpolation is a shell
+    # injection — belt and braces alongside the anchored guard above, because the guard is one
+    # regex away from being wrong again.
     sh({ "KSEF_INTEGRATION" => "1", "KSEF_ENV" => "test", "KSEF_VCR_RECORD" => "1" },
-       "bundle exec rspec #{target} --tag recorded")
+       "bundle", "exec", "rspec", target, "--tag", "recorded")
   end
 end
 

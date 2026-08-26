@@ -34,27 +34,45 @@ module Ksef
 
       private
 
-      # The one element in FA(3) that declares attributes, and they are declared on
-      # `KodFormularza` itself — on the `xsd:extension` inside its anonymous simpleContent
-      # type, keyed "TNaglowek/KodFormularza".
+      # The one element in FA(3) that declares **fixed** attributes — `Kol` declares `@Typ`,
+      # which is required but not fixed — and they are declared on `KodFormularza` itself, on
+      # the `xsd:extension` inside its anonymous simpleContent type, keyed
+      # "TNaglowek/KodFormularza".
       #
       # This read `Generated::Types["TNaglowek"]` until 2026-08-26, and got the right answer
       # from the wrong place: the generator's attribute lookup used a descendant axis, so
       # `TNaglowek` inherited the attributes of everything beneath it and these two surfaced
       # one level too high. Both halves are fixed, and this is the only caller either half
       # had. Nothing about the emitted document changes.
+      # Every value here is fixed by the schema except the generation timestamp, and the fixed
+      # ones are read from the generated metadata rather than restated.
       def header
-        # Every value here is fixed by the schema except the generation timestamp, and the
-        # fixed ones are read from the generated metadata rather than restated.
-        attributes = Generated::Types["TNaglowek/KodFormularza"][:attributes]
-                     .select { |a| a[:fixed] }
-                     .to_h { |a| [a[:name], a[:fixed]] }
-
         {
-          "KodFormularza" => Serializer::Element.new(text: "FA", attributes: attributes),
-          "WariantFormularza" => 3,
+          "KodFormularza" => Serializer::Element.new(text: "FA", attributes: fixed_attributes),
+          "WariantFormularza" => schema_variant,
           "DataWytworzeniaFa" => issued_at || Formatting.date_time(Time.now)
         }
+      end
+
+      # `fetch`, so a renamed key fails by name rather than as `NoMethodError` on nil.
+      def fixed_attributes
+        declared = Generated::Types::ALL.fetch("TNaglowek/KodFormularza")[:attributes]
+        declared.select { |attribute| attribute[:fixed] }
+                .to_h { |attribute| [attribute[:name], attribute[:fixed]] }
+      end
+
+      # `WariantFormularza` is `xsd:byte` restricted to a single enumerated value, so the schema
+      # states it as surely as it states `KodFormularza`'s fixed attributes — and this was a
+      # hand-written `3` directly beneath a comment claiming the fixed values are read from the
+      # metadata. The codegen dropped element-level enumerations until 2026-08-26, so the
+      # comment described an intention rather than the line under it (audit finding).
+      #
+      # `fetch(0)` rather than `first`: a one-member enumeration that stopped having one member
+      # should fail here, not emit nil into the document.
+      def schema_variant
+        Generated::Types.ordered_elements("TNaglowek")
+                        .find { |element| element[:name] == "WariantFormularza" }
+                        .fetch(:values).fetch(0)
       end
 
       def invoice_body

@@ -25,6 +25,16 @@ gem version for which API state".
 
 ### Added
 
+- **`spec/tasks/fa3_codegen_spec.rb`** — the codegen had no unit spec and was outside SimpleCov
+  entirely, so `method: 100` never applied to it. Its only checks were `rake fa3:verify`, which
+  proves determinism rather than correctness, and assertions about the one schema it reads. Three
+  defects survived that arrangement. It is now driven against a synthetic schema written to hold
+  the constructs — a `complexContent` extension, an anonymous type nested in a named one, an
+  attribute on a nested type, inline enumerations on both an element and an attribute — because
+  testing only against FA(3) is what let the extension defect through: FA(3) has exactly one
+  extension and it is empty.
+
+
 - **`POST /auth/token/refresh` has now run against live TEST**, closing the last of §4.2's six
   auth calls to have never been exercised — and settling three assumptions the implementation
   was making. The response carries `accessToken` **and nothing else**, so reading
@@ -55,9 +65,9 @@ gem version for which API state".
   restate them in Ruby, which DESIGN.md §7.1 forbids. Groundwork for `Zalacznik`.
   (`docs/REFERENCE.md` §18.2.)
 
-- **The recorded test tier** — two VCR cassettes covering the full session flow, replaying in
-  about two seconds with **no credentials present**: authenticate, open a session, encrypt and
-  submit an invoice, poll to acceptance, fetch the UPO. They pin two things no stub can give —
+- **The recorded test tier** — three VCR cassettes, 31 interactions, replaying in about 1.4
+  seconds with **no credentials present**: authenticate, open a session, encrypt and submit an
+  invoice, poll to acceptance, fetch the UPO, and renew an access token. They pin two things no stub can give —
   a KSeF number whose CRC-8 agrees with ours, and a UPO that is XAdES-signed although upstream's
   own UPO schema declares no `ds:Signature` (`docs/REFERENCE.md` §14.7).
 
@@ -117,6 +127,52 @@ gem version for which API state".
 
 ### Fixed
 
+- **A live pre-signed URL was committed in two cassettes.** KSeF hands out the UPO as an Azure
+  user-delegation SAS, where the query string *is* the authorisation — and both session cassettes
+  carried one, read-only and valid for three days. DESIGN.md §9.1 requirement 1 names this exact
+  value alongside tokens and key material; the requirement's URI-matching half shipped and its
+  scrubbing half did not. All four hygiene checks passed over it, because a SAS `sig` is neither
+  `Bearer`-prefixed, nor JWT-shaped, nor a value the scanning machine holds. The query is now
+  stripped on record, the committed cassettes are scrubbed, and the scanner has a fifth check.
+
+- **Command injection in the one workflow holding a live credential.** `${{ inputs.target }}` was
+  interpolated into a `run:` script that also exports `KSEF_TEST_TOKEN` — as was
+  `${{ inputs.confirm }}`, inside the guard enforcing the typed confirmation, on a step that runs
+  before checkout. Inputs now reach the shell through `env:`; `rake vcr:record` passes its target
+  as an argv entry rather than a command fragment, and its guard is anchored rather than a
+  `start_with?` that accepted `spec/recorded; …`. Both credential-bearing workflows declare
+  `permissions: contents: read`, and the cassette artifact expires after a day.
+
+- **The cassettes would have stopped replaying on 2027-09-29.** `Client#public_keys` built
+  `Crypto::PublicKeys` without the clock, and `#for_usage` filters published certificates on
+  `valid_at?` — so the recorded certificate list expiring in 2027 would have taken the whole tier
+  with it. The same defect as the fifteen-minute one, in the second wall-clock consumer of the
+  same path.
+
+- **`compositor_of` missed a `complexContent` extension**, so `Faktura/Podmiot1/AdresKoresp`
+  reported no content model and `Serializer` refused its children while naming an **empty** list
+  of permitted ones. A false statement about the schema, sourced from metadata.
+  (`docs/REFERENCE.md` §18.2.)
+
+- **The codegen dropped element-level `fixed` and inline enumerations**, which is why
+  `DocumentMapping#header` hand-wrote `"WariantFormularza" => 3` six lines below a comment saying
+  the fixed values come from the metadata. Three elements carry an inline enumeration and one
+  carries `fixed`; all are captured now, and the header reads the enumeration.
+
+- **`spec/cassette_hygiene_spec.rb`'s anti-vacuity guard was itself vacuous** —
+  `expect(cassettes.size).to be >= 0` — in the file written to expose vacuous passes. It now
+  asserts the scanner found every committed cassette. The env-secret check also failed *open* on
+  a body with invalid bytes, since `String#include?` answers false rather than raising.
+
+- **A cassette held an interaction from an earlier, aborted recording**, on a different auth
+  reference number and 56 minutes older than the flow around it. It never replayed, but
+  `RecordedClock` seeds from the first interaction, so that cassette's pinned "now" was 56
+  minutes before the flow — making §9.1's claim about pinning false for one of three cassettes.
+
+- **`ModelValidator`'s leaf test** asked whether the metadata had an entry, which stopped meaning
+  "takes a text value" the moment the codegen began emitting `simpleContent` types. It now asks
+  about `:content`.
+
 - **The cassette hygiene scan read the file, and a cassette is not entirely text.** Psych stores
   a body it cannot write as a plain scalar as `!binary`, and one non-ASCII byte is enough — five
   of the tier's bodies are stored that way. A JWT inside one matches no regex over the file, and
@@ -147,7 +203,8 @@ gem version for which API state".
 - **The codegen attributed an XML attribute to every type above the one declaring it.** The
   extractor used a descendant axis, so seven complexTypes claimed an attribute where only two
   declare one. It survived because it produced a *correct document*: `DocumentMapping#header`
-  found `kodSystemowy`/`wersjaSchemy` on `TNaglowek`, one level above where the XSD puts them,
+  found `kodSystemowy`/`wersjaSchemy` on `TNaglowek`, one level above where `KodFormularza`
+  declares them,
   and a second defect made that the only lookup available — anonymous types nested inside a
   **named** type were never collected, so `TNaglowek/KodFormularza` did not exist. Both fixed,
   and `Generated::Types` gained one entry. (`docs/REFERENCE.md` §18.2.)
