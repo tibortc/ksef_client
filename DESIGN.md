@@ -625,6 +625,23 @@ catches the ones you did.
 XML bodies are exempt from redaction, for the §9.1 reason the NIP taught: the UPO's bytes must
 still match the `x-ms-meta-hash` KSeF sent. No KSeF XML document carries a bearer token.
 
+#### A cassette is not entirely text, so do not scan it as text
+
+Found 2026-08-26, while verifying the refresh recording. Psych stores any body it cannot write
+as a plain scalar as `!binary` — base64 — and **one non-ASCII byte anywhere in the body is
+enough**. Five of the tier's bodies are stored that way today.
+
+Every hygiene check read the file. So a JWT inside such a body matches no regex over the file,
+and `include?` of a known secret value fails too. A planted-secret example now proves both:
+`{"accessToken":{"token":"eyJ…"},"seller":"Łódź"}` is invisible to a scan of the file and
+caught by a scan of the decoded bodies.
+
+`Łódź` in a seller's name is not an edge case in Polish e-invoicing, and **the redeem response
+is the one that has actually leaked** — it carries both tokens in a JSON body. Whether that body
+happens to contain a diacritic is not something this project controls. The scanner now decodes
+every body and header value first, and the planted secret is what keeps it honest: asserting
+against the scanner's own definition would pass with the scanner broken.
+
 #### One cassette per example
 
 Each example here runs a *whole* flow — open a session, send, poll, close, fetch the UPO — so a

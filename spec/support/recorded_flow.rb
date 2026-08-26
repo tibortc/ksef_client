@@ -52,7 +52,12 @@ RSpec.shared_context "with a recorded KSeF flow" do
   def access_token = ENV.fetch("KSEF_TEST_TOKEN", "<KSEF_TEST_TOKEN>")
 
   let(:credential) { Ksef::Auth::Token.new(context_nip: context_nip, token: access_token) }
-  let(:client) { Ksef::Client.new(env: :test, auth: credential, clock: clock) }
+  let(:client) { Ksef::Client.new(env: :test, auth: credential, clock: clock, sleeper: sleeper) }
+
+  # Real waits while recording — the authentication really is asynchronous — and none while
+  # replaying, where every answer is already on disk. Without this the tier spent eight of its
+  # nine seconds asleep between recorded status calls.
+  let(:sleeper) { recording? ? method(:sleep) : ->(_seconds) {} }
 
   # Captured eagerly, before the first request: replaying consumes interactions out of the
   # list, so `.first` does not stay the first for long.

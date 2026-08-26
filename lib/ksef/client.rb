@@ -49,10 +49,17 @@ module Ksef
     #   issues a `POST /auth/token/refresh` that the cassette has no interaction for. Pinning
     #   the clock to the moment of recording replays the flow as it happened, rather than
     #   rewriting what KSeF said (`spec/recorded/session_flow_spec.rb`).
-    def initialize(env: :test, auth: nil, clock: -> { Time.now }, **)
+    # @param sleeper [#call] receives a number of seconds; used between polls of the
+    #   authentication operation, which is asynchronous ({Auth::Client#wait_until_complete}).
+    #   {Sessions::Status#poll} has taken one since it was written and {#wait_until_accepted}
+    #   exposes it; this is the same seam for the one poll the facade performs on its own.
+    #   A replay wants a no-op — the recorded tier spent eight of its nine seconds asleep
+    #   between status calls whose answers were already on disk.
+    def initialize(env: :test, auth: nil, clock: -> { Time.now }, sleeper: method(:sleep), **)
       @config = Configuration.new(env: env, auth: auth, **)
       @mutex = Mutex.new
       @clock = clock
+      @sleeper = sleeper
       @credential = auth.is_a?(Auth::AccessToken) ? auth : nil
     end
 
@@ -232,7 +239,8 @@ module Ksef
     # The KSeF-token flow of §4.5, end to end: submit, poll, redeem. Callers hold the mutex.
     def authenticate!
       initiated = auth.submit_ksef_token(token_request)
-      auth.authenticate!(initiated.reference_number, token: initiated.authentication_token)
+      auth.authenticate!(initiated.reference_number, token: initiated.authentication_token,
+                                                     sleeper: @sleeper)
 
       Auth::AccessToken.new(
         auth.redeem(token: initiated.authentication_token), client: auth, clock: @clock

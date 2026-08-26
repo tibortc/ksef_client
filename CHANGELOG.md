@@ -25,6 +25,14 @@ gem version for which API state".
 
 ### Added
 
+- **`POST /auth/token/refresh` has now run against live TEST**, closing the last of §4.2's six
+  auth calls to have never been exercised — and settling three assumptions the implementation
+  was making. The response carries `accessToken` **and nothing else**, so reading
+  `body["accessToken"]` is right and `renew!` is right to keep the refresh token. A renewed
+  token gets a **full fresh fifteen minutes**, not the remainder of the old one, so a long
+  session renews indefinitely within the refresh token's seven days — which are exactly seven
+  days on TEST, to the second. (`docs/REFERENCE.md` §4.2a.)
+
 - **A recorded cassette for `POST /auth/token/refresh`** — the one auth call whose real response
   had never been seen (`docs/REFERENCE.md` §4.2: the 2026-08-23 live run covered five of six).
   `Auth::Client#refresh` reads `body["accessToken"]` on the OpenAPI contract's word alone, and a
@@ -108,6 +116,24 @@ gem version for which API state".
   the document will carry it, rounded per bucket.
 
 ### Fixed
+
+- **The cassette hygiene scan read the file, and a cassette is not entirely text.** Psych stores
+  a body it cannot write as a plain scalar as `!binary`, and one non-ASCII byte is enough — five
+  of the tier's bodies are stored that way. A JWT inside one matches no regex over the file, and
+  `include?` of a known secret fails too. Since `Łódź` in a seller name is routine in Polish
+  e-invoicing, and the redeem response — the one that has actually leaked — carries both tokens
+  in a JSON body, this was the guard added after that leak being blind to the same leak. It now
+  decodes every body and header first, with a planted-secret example proving it.
+  (DESIGN.md §9.1.)
+
+- **The recorded tier spent eight of its nine seconds asleep.** Authentication is asynchronous,
+  so `Auth::Client#wait_until_complete` sleeps between status polls — including on replay, where
+  every answer is already on disk. `Ksef::Client.new` now takes `sleeper:`, the same seam
+  `Sessions::Status#poll` has always had, and the tier replays in 1.6 s again.
+
+- **`SimpleCov.add_filter` is deprecated in SimpleCov 1.1** and printed two lines on every run,
+  including inside `rake`, where a real coverage failure has to be spotted among them. Replaced
+  with `skip`.
 
 - **The recorded cassettes stopped replaying about twelve minutes after they were recorded.**
   A KSeF access token is valid for fifteen minutes and `Auth::AccessToken` refreshes at 80% of

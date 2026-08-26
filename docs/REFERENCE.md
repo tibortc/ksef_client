@@ -518,6 +518,46 @@ The full flow, verified end to end from `uwierzytelnianie.md` (retrieved 2026-08
 Note the header at steps 4–5 is the *temporary* `authenticationToken`, not an
 `accessToken`. Conflating them is the obvious implementation error here.
 
+#### 4.2a Step 6 measured — `/auth/token/refresh`, recorded 2026-08-26
+
+The last of the six to be exercised against the live service, and the only one whose response
+had never been seen. Recorded into `spec/cassettes/the_token_refresh_flow_recorded/`, so these
+are observations rather than readings of the contract.
+
+**The response carries `accessToken` and nothing else:**
+
+```json
+{ "accessToken": { "token": "…", "validUntil": "2026-08-26T13:45:24.2432483+00:00" } }
+```
+
+Three things follow, each of which the implementation had assumed:
+
+| Assumption | Now |
+|---|---|
+| `Auth::Client#refresh` reads `body["accessToken"]` | **confirmed.** The envelope matches the redeem response's `accessToken` member, not a bare `TokenInfo` |
+| `AccessToken#renew!` replaces the access token and keeps the refresh token | **confirmed.** No `refreshToken` is returned, so there is nothing to replace it with. A client that expected a rotated refresh token would have to re-authenticate every renewal |
+| The refresh token's life is "up to 7 days" | **exactly 7 days on TEST**, to the second: redeemed `13:30:06.5720816`, valid until `2026-09-02T13:30:06.5720816` |
+
+**A renewed access token gets a full fresh lifetime, not the remainder of the old one.** The
+redeemed token was valid until `13:45:06`; refreshing eighteen seconds later returned one valid
+until `13:45:24` — fifteen minutes from the refresh, not from the original issue. So a
+long-running session renews indefinitely without re-authenticating, bounded only by the refresh
+token's seven days.
+
+**Fifteen minutes is what "kilkanaście minut" means here.** Four measurements across the tier's
+three cassettes, as `validUntil` minus the moment the response was received: **900.2, 898.7,
+890.6, 900.2** seconds.
+
+The spread is ours, not KSeF's. The 890.6 figure is a redeem whose authentication took ten
+seconds to poll to completion — KSeF dates the grant from when it minted the token, and we can
+only measure from when we took delivery. Which is exactly why {Ksef::Auth::AccessToken} records
+`@acquired_at` rather than trusting a constant: measuring from delivery can only *under*-estimate
+the remaining life, so it refreshes slightly early rather than slightly late. The refresh
+response, arriving immediately, measures the full 900.2.
+
+Nothing here is hard-coded. This is a TEST observation, not a documented guarantee, so the
+threshold stays a proportion of the observed lifetime.
+
 **Step 4 must poll without a deadline on DEMO and PROD.** Those environments verify the
 signing certificate's status with the issuer over OCSP/CRL, and the operation legitimately
 reports "in progress" until the issuer answers — the docs state the duration depends on the
@@ -1091,7 +1131,9 @@ that no amount of offline testing could:
 - **The §4.2 steps the bootstrap exercises work as ledgered** — challenge, submission,
   polling on `StatusInfo.code`, and single-use redemption. Scoped deliberately (corrected
   2026-08-23): `POST /auth/token/refresh` is *not* among them, so nothing here vouches for
-  refresh, and `POST /auth/ksef-token` did not exist at the time.
+  refresh, and `POST /auth/ksef-token` did not exist at the time. **Refresh was closed
+  separately on 2026-08-26** by the recorded tier — see §4.2a, which is what makes all six
+  steps of §4.2 observed rather than five.
 
 Two failures on the way there, both bugs on this side rather than upstream: a local OpenSSL
 trust store with no CA bundle (see §6a.5), and the PESEL structure above.
