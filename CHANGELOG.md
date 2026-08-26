@@ -25,7 +25,13 @@ gem version for which API state".
 
 ### Added
 
-- **The recorded test tier's harness** (`spec/support/vcr.rb`, `rake vcr:record`) — VCR wired to
+- **The recorded test tier** — two VCR cassettes covering the full session flow, replaying in
+  about two seconds with **no credentials present**: authenticate, open a session, encrypt and
+  submit an invoice, poll to acceptance, fetch the UPO. They pin two things no stub can give —
+  a KSeF number whose CRC-8 agrees with ours, and a UPO that is XAdES-signed although upstream's
+  own UPO schema declares no `ds:Signature` (`docs/REFERENCE.md` §14.7).
+
+- **Its harness** (`spec/support/vcr.rb`, `rake vcr:record`) — VCR wired to
   the same WebMock the rest of the suite uses, scrubbing for every secret
   `spec/cassette_hygiene_spec.rb` scans for, and a `:recorded` tag excluded until a cassette
   exists. **No cassette is recorded yet**: recording needs TEST credentials, creates a permanent

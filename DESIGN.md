@@ -466,7 +466,7 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Tier | Tooling | Scope | When |
 |---|---|---|---|
 | Unit | RSpec + WebMock | request shaping, crypto primitives, models, serializer, validator | every push, full matrix |
-| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **harness built 2026-08-26, no cassette recorded yet.** Scrubbing, matchers, the `:recorded` tag and `rake vcr:record` are in place; recording needs TEST credentials and a deliberate run. A release gate refuses 0.1.0 while `spec/cassettes/` is empty. §9.1 |
+| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **built and recorded 2026-08-26.** Two cassettes, 23 interactions, replaying in ~2 s with no credentials. Re-record with `rake vcr:record`. §9.1 |
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors — NIST/FIPS, not C#, see §6.4 | every push |
 | Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning. Three specs exist — auth, crypto, session — and **all three have run green against TEST** (auth 2026-08-23, the other two 2026-08-24) | **nightly** CI + pre-release, never per-PR |
 
@@ -484,15 +484,13 @@ A threaded smoke spec for §5.2. A spec asserting no committed cassette contains
 
 ### 9.1 The recorded tier — requirements, obstacles and order of work
 
-Written 2026-08-26, when this became **the last outstanding Phase 2 scope item**. The harness
-landed the same day; **no cassette has been recorded**, because recording needs TEST credentials
-and creates a permanent TEST invoice, so it is a deliberate human-run step (`rake vcr:record`).
+**Built and recorded 2026-08-26**, closing the last Phase 2 scope item. Two cassettes, 23
+interactions, replaying in about two seconds with no credentials present.
 
-What exists: VCR wired to the same WebMock the rest of the suite uses, scrubbing for every
-secret `spec/cassette_hygiene_spec.rb` scans for, a matcher that ignores request bodies, the
-`Ksef::Client#session(encryptor:)` seam, `spec/recorded/session_flow_spec.rb`, and a
-`:release_check` gate that refuses 0.1.0 while `spec/cassettes/` is empty. What does not: the
-cassettes.
+Getting there took six attempts, and every failure but one was in this file's own assumptions
+rather than in the gem. They are written up below because each is invisible to a local `rake` —
+the code only runs during a credentialed recording — and the next person here will be recording,
+not replaying.
 
 #### What the tier is for
 

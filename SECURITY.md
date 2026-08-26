@@ -47,7 +47,9 @@ Enforced by:
   integrity header. The token is the credential.
 
   It also scans for anything shaped like a **JSON Web Token**, added 2026-08-26 after a
-  recording carried a live refresh token past both of the other checks: it was in a JSON
+  recording carried a live refresh token past both of the other checks (caught before it was
+  committed; the cassettes now in the repository were recorded after the fix and are scanned
+  on every run): it was in a JSON
   response body, so it was neither a `Bearer ` header nor a value this machine held in its
   environment. Scanning for the shape of a credential catches the ones you did not predict. It
   finds cassettes by content, not by path, so one saved somewhere unconventional is still
