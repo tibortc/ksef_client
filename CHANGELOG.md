@@ -24,6 +24,15 @@ gem version for which API state".
 > yet, so it is absent rather than stubbed.
 
 ### Added
+- **The release workflow now creates a GitHub release**, with the version's `CHANGELOG.md`
+  section as its body (`rake 'release:notes[X.Y.Z]'` prints what will be published). It is a
+  second job, running **after** the gem is pushed and with its own `contents: write`, so the job
+  that runs this gem's own code during publishing never holds write access to the repository —
+  and a release can never announce a publish that then failed. Prerelease status comes from
+  `Gem::Version#prerelease?`, so `v0.1.0.rc1` is flagged without the workflow keeping its own
+  opinion about version strings. Tagging while the entries are still under `[Unreleased]` fails
+  the job rather than publishing empty notes.
+
 
 - **`spec/tasks/fa3_codegen_spec.rb`** — the codegen had no unit spec and was outside SimpleCov
   entirely, so `method: 100` never applied to it. Its only checks were `rake fa3:verify`, which

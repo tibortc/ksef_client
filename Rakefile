@@ -109,6 +109,22 @@ namespace :vcr do
 end
 
 # Mirrors what CI runs, so `rake` locally means the same thing as a green matrix leg.
+namespace :release do
+  desc "Print the CHANGELOG section for a version, e.g. rake 'release:notes[0.1.0]'"
+  task :notes, [:version] do |_task, args|
+    require_relative "tasks/release_notes"
+
+    version = args[:version].to_s
+    abort "Usage: rake 'release:notes[VERSION]' (no leading \"v\")." if version.empty?
+
+    # `print`, not `puts`: this is piped into a notes file, and a trailing newline is the
+    # caller's business.
+    print ReleaseNotes.for(version)
+  rescue RuntimeError => e
+    abort e.message
+  end
+end
+
 namespace :auth do
   desc "Provision a TEST credential: register a NIP, authenticate by XAdES, mint a KSeF token"
   task :bootstrap do
