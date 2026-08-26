@@ -16,7 +16,7 @@ module Ksef
     Invoice = Data.define(
       :seller, :buyer, :number, :issue_date, :lines,
       :currency, :issued_at, :rounding, :invoice_type, :annotations,
-      :correction, :totals, :order, :advances, :raw_document, :stated_gross
+      :correction, :totals, :order, :advances, :raw_document, :stated_gross, :attachment
     )
 
     # Computation, defaults and serialisation for {Ksef::FA3::Invoice}.
@@ -102,7 +102,7 @@ module Ksef
       def initialize(seller:, buyer:, number:, issue_date:, lines: [],
                      currency: "PLN", issued_at: nil, rounding: :per_line, invoice_type: "VAT",
                      annotations: nil, correction: nil, totals: nil, order: nil, advances: [],
-                     raw_document: nil, stated_gross: nil)
+                     raw_document: nil, stated_gross: nil, attachment: nil)
         rows = self.class.rows_for(lines, rounding: rounding, totals: totals)
 
         super(
@@ -112,6 +112,9 @@ module Ksef
           invoice_type: Formatting.text(invoice_type),
           correction: correction, totals: totals, order: order,
           advances: Correction.wrap(advances).dup.freeze, raw_document: raw_document,
+          # `Zalacznik` is a sibling of `Fa`, not a child, so it takes part in no summary and
+          # no arithmetic — it is carried and re-emitted, nothing more (DESIGN.md §7.4).
+          attachment: attachment,
           stated_gross: self.class.scaled_gross(stated_gross, totals, rows, rounding),
           # `issue_date` is canonicalised for the same reason `issued_at` is: a String and the
           # Date it denotes must not produce two unequal invoices (§8.2b).

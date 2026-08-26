@@ -24,6 +24,20 @@ gem version for which API state".
 > yet, so it is absent rather than stubbed.
 
 ### Added
+- **`Zalacznik`, the FA(3) attachment**, at build and parse level — the last implementation item
+  in Phase 3's scope (DESIGN.md §7.4). `Ksef::FA3::Attachment`, `DataBlock`, `MetaEntry`,
+  `AttachmentTable` and `TableColumn`, read by `AttachmentReader` and built through
+  `Ksef::FA3.build`'s `f.attachment`. The Ministry's two attachment samples listed 17 attachment
+  paths in `#unmapped_elements`; that set is now empty, and both round-trip.
+
+  An FA(3) attachment carries no bytes and no MIME type: it is a structured document of
+  headings, key/value metadata, paragraphs and tables, sitting beside `Fa` rather than inside
+  it, so it touches no summary. Three schema facts shape the model — **rows are ragged** (`Kol`
+  and `WKom` each repeat 1..20 and are related nowhere, and the corpus has one-cell rows heading
+  nine-cell ones), **an empty cell is legal and distinct from an absent one** (`TZnakowy2` has
+  `minLength="0"`), and **`MetaDane` is the only mandatory child of a block**. Operational
+  constraints on *sending* one stay out of 0.1 scope. (`docs/REFERENCE.md` §8.7.)
+
 - **The release workflow now creates a GitHub release**, with the version's `CHANGELOG.md`
   section as its body (`rake 'release:notes[X.Y.Z]'` prints what will be published). It is a
   second job, running **after** the gem is pushed and with its own `contents: write`, so the job

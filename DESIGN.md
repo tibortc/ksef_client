@@ -888,10 +888,11 @@ the same day — two mutually exclusive claims three paragraphs apart.)
 **Two further gaps exist and belong to Phase 3, not here** — recorded because they were twice
 mis-assigned to Phase 2 before this was checked against the scope list word by word:
 
-- **`Zalacznik` is not carried.** §7.4 asks for the attachment node "at build/parse level" and
-  puts only *operational* submission constraints out of 0.1 scope, so build/parse support is a
-  0.1.0 requirement. Phase 2 cites §7.4 for the **implementation order of invoice types** and
-  nothing else, so this was never Phase 2's. Two Ministry samples carry one.
+- ~~**`Zalacznik` is not carried.**~~ **Built 2026-08-26**, in Phase 3 where it belonged: §7.4
+  asks for the attachment node "at build/parse level" and puts only *operational* submission
+  constraints out of 0.1 scope. Phase 2 cites §7.4 for the **implementation order of invoice
+  types** and nothing else. Both Ministry samples that carry one now parse, re-serialise,
+  validate and round-trip (`docs/REFERENCE.md` §8.7).
 - **`download` and `refresh` have never run against TEST.** Neither is a stated requirement of
   any phase: the scope above lists `download` as a *feature* and it is implemented, `refresh`
   is not named at all, and Phase 3's bar is "nightly integration green ≥ 3 consecutive nights",

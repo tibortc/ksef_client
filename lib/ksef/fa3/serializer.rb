@@ -27,8 +27,12 @@ module Ksef
       # this serializer writes, and both of its attributes are fixed by the schema. (FA(3) has
       # one other — `Zalacznik/BlokDanych/Tabela/…/Kol`, with a required, non-fixed `Typ` — but
       # this model does not carry `Zalacznik`, so it never comes up.)
-      Element = Data.define(:text, :attributes) do
-        def initialize(text: nil, attributes: {})
+      Element = Data.define(:text, :attributes, :children) do
+        # `children` arrived with the attachment: `Kol` carries a required `Typ` attribute *and*
+        # a nested `NKom`, which nothing before it needed. They are written through
+        # {Serializer#write_children} like any other nested element, so schema order and the
+        # unknown-key check apply inside an attributed element too rather than being bypassed.
+        def initialize(text: nil, attributes: {}, children: nil)
           super
         end
       end
@@ -107,16 +111,19 @@ module Ksef
         case value
         when Hash
           write_children(document, element, self.class.child_type_key(type_key, particle), value)
-        when Element then write_element_with_attributes(element, value)
+        when Element then write_attributed(document, element, type_key, particle, value)
         else element.content = value.to_s
         end
 
         element
       end
 
-      def write_element_with_attributes(element, value)
+      def write_attributed(document, element, type_key, particle, value)
         value.attributes.each { |name, attribute| element[name] = attribute.to_s }
         element.content = value.text.to_s unless value.text.nil?
+        return if value.children.nil?
+
+        write_children(document, element, self.class.child_type_key(type_key, particle), value.children)
       end
 
       def reject_unknown_keys(type_key, values, known)

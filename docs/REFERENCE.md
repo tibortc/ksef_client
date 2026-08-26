@@ -3282,6 +3282,34 @@ every unlisted key to one shared rank. `sort_by` is not stable, so those two tie
 rendered attribute — the same determinism trap that reached CI from `tasks/field_mapping.rb`.
 Adding `values` would have made three. Every key a rendered Hash can hold is now listed.
 
+### 8.7 `Zalacznik`, the attachment — measured 2026-08-26
+
+FA(3)'s attachment is **not a file**. There is no MIME type, no encoding, no bytes: `Zalacznik`
+is a structured document of headings, key/value metadata, paragraphs and tables, sitting as a
+**sibling of `Fa`** rather than one of its children. That placement is the first thing worth
+knowing — it takes part in no summary and no arithmetic, so modelling it could not affect a
+single tax figure.
+
+Two of the Ministry's samples carry one (Przykład 24 and 25, both energy bills): one block, eight
+metadata pairs, three tables.
+
+**Four facts the schema states that a naive model would get wrong:**
+
+| Fact | Where | Consequence |
+|---|---|---|
+| `MetaDane` is `minOccurs="1"` | inside `BlokDanych` | It is the *only* mandatory child. A block with a heading and a table but no metadata is schema-invalid, so {DataBlock} refuses one at construction |
+| `Kol` and `WKom` each repeat 1..20, **related nowhere** | `TNaglowek` / `Wiersz` | **Rows are ragged.** Measured widths in the corpus are `[1, 9]` and `[1, 6]` — a one-cell row heads a group of nine-cell ones. Storing rows as a rectangle would invent cells or drop them |
+| `TZnakowy2` has `minLength="0"` | `NKom`, `WKom`, `SKom` | An **empty cell is legal**, and distinct from an absent one. `Formatting.text("")` returns `""` rather than nil precisely so it survives; a dropped cell shifts every cell after it |
+| `Kol/@Typ` is `use="required"` with six inline values | `Kol` | FA(3)'s only inline *attribute* enumeration — `date`, `datetime`, `dec`, `int`, `time`, `txt`. {TableColumn} reads them from the generated metadata, which is why §18.2's codegen fix came first |
+
+`Suma` is `minOccurs="0"`, so a table with no summary row must not re-serialise with an empty one
+— {AttachmentTable#totals} is nil rather than `[]` for that reason.
+
+**Operational constraints are out of 0.1 scope and stay there** (DESIGN.md §7.4). Sending an
+invoice that carries an attachment needs prior opt-in in `e-Urząd Skarbowy` and, per §16, a batch
+session; the size ceiling rises from 1 MB to 3 MB. None of that is modelled: this is the
+document, not the submission.
+
 ## 19. Defects the 2026-08-26 audit round found
 
 Numbered as their own chapter because they were appended to §17 while it was being written and

@@ -14,8 +14,9 @@ module Ksef
           "Naglowek" => header,
           "Podmiot1" => seller.to_fa3(role: :seller),
           "Podmiot2" => buyer.to_fa3(role: :buyer),
-          "Fa" => invoice_body
-        }
+          "Fa" => invoice_body,
+          "Zalacznik" => attachment&.to_fa3
+        }.compact
       end
 
       # The summary buckets as the document will carry them: element name => amount, rounded

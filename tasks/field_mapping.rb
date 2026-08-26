@@ -55,6 +55,13 @@ module Fa3FieldMapping
       why: "A Hash **keyed by element name**, so each key is its own element. See " \
            "*Summary buckets* below."
     },
+    "TableColumn#type" => {
+      element: "`Kol/@Typ`",
+      why: "**An attribute, not an element** — the only one in FA(3) carrying an inline " \
+           "enumeration (`date`, `datetime`, `dec`, `int`, `time`, `txt`). Required by the " \
+           "schema, and the permitted values are read from the generated metadata rather " \
+           "than restated (`docs/REFERENCE.md` §18.2)."
+    },
     "Seller#buyer_id" => {
       element: nil,
       why: "**Buyer-only.** `TPodmiot1` declares no `IDNabywcy`; see the buyer section."
@@ -172,6 +179,7 @@ module Fa3FieldMapping
       intro: "The document itself. `Faktura` in the schema; its scalar fields live under " \
              "`Fa`, its parties directly under the root.",
       fields: [
+        %w[attachment Faktura/Zalacznik],
         %w[number Faktura/Fa/P_2],
         %w[issue_date Faktura/Fa/P_1],
         %w[currency Faktura/Fa/KodWaluty],
@@ -312,6 +320,67 @@ module Fa3FieldMapping
       fields: [
         %w[total Faktura/Fa/Zamowienie/WartoscZamowienia],
         %w[lines Faktura/Fa/Zamowienie/ZamowienieWiersz]
+      ]
+    },
+    {
+      model: "Ksef::FA3::Attachment",
+      title: "Attachment — the invoice attachment",
+      intro: "`Zalacznik`, a **sibling of `Fa`** rather than one of its children, so it takes " \
+             "part in no summary and no arithmetic. FA(3) carries no bytes and no MIME type: " \
+             "an attachment here is a structured document of headings, key/value metadata, " \
+             "paragraphs and tables. Operational constraints on sending one are out of 0.1 " \
+             "scope (DESIGN.md §7.4).",
+      fields: [
+        %w[blocks Faktura/Zalacznik/BlokDanych]
+      ]
+    },
+    {
+      model: "Ksef::FA3::DataBlock",
+      title: "DataBlock — one block of an attachment",
+      intro: "`BlokDanych`. `MetaDane` is the one child the schema requires, which is why a " \
+             "block describing itself only with a heading or a table is refused at " \
+             "construction.",
+      fields: [
+        %w[heading Faktura/Zalacznik/BlokDanych/ZNaglowek],
+        %w[metadata Faktura/Zalacznik/BlokDanych/MetaDane],
+        %w[paragraphs Faktura/Zalacznik/BlokDanych/Tekst/Akapit],
+        %w[tables Faktura/Zalacznik/BlokDanych/Tabela]
+      ]
+    },
+    {
+      model: "Ksef::FA3::MetaEntry",
+      title: "MetaEntry — one key/value pair",
+      intro: "`MetaDane` on a block and `TMetaDane` on a table are the same shape under " \
+             "different names, so one class serves both. Mapped against the block's names; " \
+             "the table's are `TKlucz`/`TWartosc`.",
+      fields: [
+        %w[key Faktura/Zalacznik/BlokDanych/MetaDane/ZKlucz],
+        %w[value Faktura/Zalacznik/BlokDanych/MetaDane/ZWartosc]
+      ]
+    },
+    {
+      model: "Ksef::FA3::AttachmentTable",
+      title: "AttachmentTable — a table inside a block",
+      intro: "`Tabela`. **Rows are ragged**: `Kol` and `WKom` each repeat 1..20 and the schema " \
+             "ties them together nowhere, so a row need not carry one cell per column — both " \
+             "Ministry samples have one-cell rows heading a group of nine-cell ones.",
+      fields: [
+        %w[metadata Faktura/Zalacznik/BlokDanych/Tabela/TMetaDane],
+        %w[caption Faktura/Zalacznik/BlokDanych/Tabela/Opis],
+        %w[columns Faktura/Zalacznik/BlokDanych/Tabela/TNaglowek/Kol],
+        %w[rows Faktura/Zalacznik/BlokDanych/Tabela/Wiersz/WKom],
+        %w[totals Faktura/Zalacznik/BlokDanych/Tabela/Suma/SKom]
+      ]
+    },
+    {
+      model: "Ksef::FA3::TableColumn",
+      title: "TableColumn — one column heading",
+      intro: "`Kol`. Its `Typ` attribute is FA(3)'s **only** inline attribute enumeration, and " \
+             "the six permitted values are read from the generated metadata rather than " \
+             "restated in Ruby (`docs/REFERENCE.md` §18.2).",
+      fields: [
+        %w[name Faktura/Zalacznik/BlokDanych/Tabela/TNaglowek/Kol/NKom],
+        ["type", nil]
       ]
     },
     {

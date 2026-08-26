@@ -407,7 +407,12 @@ RSpec.describe Ksef::FA3::Invoice do
         advances: [Ksef::FA3::AdvanceInvoice.new(number: "FZ/2026/01/001")],
         # The document's own `P_15`, kept only when it differs from the derived one. It is
         # identity because it changes the amount the invoice says is owed.
-        stated_gross: "9999.00"
+        stated_gross: "9999.00",
+        # `Zalacznik` carries no amount, but it is part of the document a taxpayer files, so
+        # two invoices differing only in their attachment are two different invoices.
+        attachment: Ksef::FA3::Attachment.new(
+          blocks: Ksef::FA3::DataBlock.new(metadata: { "Kod PPE" => "999999999999999999" })
+        )
       }
     end
 
