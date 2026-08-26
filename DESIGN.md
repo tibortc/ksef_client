@@ -603,6 +603,22 @@ come from the environment with a fallback that exists only so a replay can const
 - **The poll interval.** `Sessions::Status#poll` takes an injectable sleeper; a replay passes a
   no-op, or it waits out a recorded backoff for nothing.
 
+#### One cassette per example
+
+Each example here runs a *whole* flow — open a session, send, poll, close, fetch the UPO — so a
+cassette shared across the describe block interleaves several flows in one file. Every
+`POST /sessions/online` has the same URI, so replay hands the responses out in recorded order,
+and one example drifting by a single request leaves a later one asking for a UPO under session
+references belonging to a different flow. VCR reports `UnhandledHTTPRequestError`, which is
+accurate and tells you nothing about the cause.
+
+`vcr: true` with `configure_rspec_metadata!` names the cassette after the example. Each is then
+self-contained, order-independent, and re-recordable on its own.
+
+**Keep the example count low, and group assertions rather than splitting them.** Each example
+is one real invoice in TEST, permanent and unwithdrawable. That is a genuine reason to write
+fewer, fatter examples here and nowhere else in this suite.
+
 #### Scrub the token, not the NIP
 
 The third recording succeeded and then failed its own replay, with `KsefNumber.parse`
