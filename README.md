@@ -61,7 +61,8 @@ submitted.
 > **Validation runs in three stages now**, not one: the model (required fields, enum
 > membership, NIP checksums, string lengths, date sanity), the serialized bytes (valid UTF-8,
 > no BOM, no processing instructions, UTF-8 prolog, no characters KSeF refuses, size), then the
-> XSD. Those are validator tiers 1a, 1b and 2 — tier 3, the business rules, is still absent.
+> XSD. Those are validator tiers 1a, 1b and 2. Tier 3, the reconciliation rules, reports
+> through `#warnings` and never makes an invoice invalid.
 > `invoice.errors` reports the model problems together, each addressed to the field that
 > caused it (`lines[2].vat_rate`); the byte and schema checks run once the model is sound, and
 > report against `document` and `schema`.
@@ -82,7 +83,8 @@ submitted.
 > priced gross, two identifying their buyer by something other than a NIP — rather than for
 > their type.
 >
-> **Not yet:** validator tier 3, the reconciliation rules. See [Roadmap](#roadmap).
+> **Advisory:** `invoice.warnings` is tier 3 — it reconciles figures a *document* states
+> independently, and never blocks a send. See [Roadmap](#roadmap).
 
 ## Installation
 
@@ -410,7 +412,7 @@ integrators.
 - **MRI >= 3.2**, with **no upper bound, ever.** `required_ruby_version` resolves at
   install time, so an upper bound strands users on each new Ruby release.
 - CI covers 3.2, 3.3, 3.4, 4.0 and `head`, and the full suite is run locally on 3.2 at every
-  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1314
+  milestone — the floor is verified, not just declared. Last such run: 2026-08-26, 1369
   examples green.
 - **The 3.2 floor is a commitment, not a default.** Ruby 3.2 is EOL upstream, and this gem
   still supports it deliberately: Polish tax-compliance software upgrades slowly, and 3.2

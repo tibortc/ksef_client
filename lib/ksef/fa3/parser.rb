@@ -116,6 +116,12 @@ module Ksef
             order: AdvanceReader.order_from(fa_node),
             advances: AdvanceReader.advances_from(fa_node),
             totals: totals,
+            # Passed as text; {Invoice.scaled_gross} rounds it and drops it when it merely
+            # repeats what the rows derive. `P_15` is mandatory in `Fa`, so this is normally
+            # present — but the parser does not validate, and a document being read to find
+            # out *why* KSeF rejected it may well be missing it or carry something
+            # unparseable, so neither absence nor rubbish may raise here.
+            stated_gross: readable_gross(fa_node),
             currency: text(fa_node, "KodWaluty") || "PLN",
             # Read, not defaulted. These are declarations with tax consequences — cash
             # accounting, reverse charge, split payment, an actual VAT exemption — and
@@ -138,6 +144,19 @@ module Ksef
             rounding: :per_line,
             raw_document: document
           )
+        end
+
+        # @return [String, nil] `P_15` when it is a number this model can hold, nil otherwise.
+        #   An unreadable one is left to tiers 1 and 2 to complain about; refusing to parse it
+        #   would deny the reader the rest of a document they are trying to diagnose.
+        def readable_gross(fa_node)
+          stated = text(fa_node, "P_15")
+          return nil if stated.nil?
+
+          Formatting.decimal(stated)
+          stated
+        rescue ValidationError
+          nil
         end
 
         def party(root, name, role:)

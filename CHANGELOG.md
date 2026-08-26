@@ -25,6 +25,39 @@ gem version for which API state".
 
 ### Added
 
+- **Validator tier 3** — `Ksef::FA3::BusinessValidator`, reached through **`Invoice#warnings`**. It holds **one rule**, and the size is the finding rather than a shortfall: no
+  file in `CIRFMF/ksef-api` states a reconciliation rule anywhere, and the only business
+  validation KSeF ever proposed was withdrawn after it turned out to reject legal invoices. So
+  the tier is built on the one grounding that needs no catalogue — arithmetic that follows from
+  what a field is documented to be. `P_13_1` is annotated as a sum; checking a sum is not policy.
+
+  **It is advisory and never makes an invoice invalid**, which is the whole design. The rule is
+  `Σ P_13_* + Σ P_14_* ≈ P_15` compared over figures the *document* states — never against the
+  model's own derivation — with a one-grosz tolerance and a bucket-presence guard. A Polish
+  invoice whose nets are computed back from round gross prices misses it by roughly a grosz per
+  line and is entirely legal; the Ministry's own Przykład 1 is one. Making that an error would
+  refuse legal documents through `Client#send_invoice`, which is exactly what got KSeF's own
+  proposed business rule withdrawn. The `W` twins are excluded — `P_14_1W` is a PLN equivalent,
+  not a second tax. (`docs/REFERENCE.md` §17.)
+
+- **`Invoice#warnings`**, the advisory tier — empty unless a document's own figures disagree.
+
+- **`Invoice#stated_gross`** and **`Invoice#summary_buckets`**, both public. The first carries
+  the document's `P_15` when it differs from the derived figure; the second is the summary as
+  the document will carry it, rounded per bucket.
+
+### Fixed
+
+- **A `VAT` invoice derived `P_15` instead of reading it**, so re-serialising the Ministry's
+  Przykład 1 produced an invoice a grosz cheaper — 2050.99 against a stated 2051 — with tier 2
+  clean, `#errors` empty and `#unmapped_elements` silent, because `P_15` is present either way
+  and a path-difference diagnostic cannot see a changed value. Even the round-trip law held: a
+  parsed invoice is already a fixed point. The same class as the `P_9A` rounding defect, found
+  the same way, by measuring the corpus. `P_15` is now byte-identical on re-serialisation for
+  all 22 modelled samples, and a spec asserts it. (`docs/REFERENCE.md` §17.2.)
+
+### Added
+
 - **Every markdown file in `CIRFMF/ksef-api` is now pinned** — thirteen more, taking the
   mirror under `docs/upstream/` from 19 of 32 to 32 of 32, all verified byte-for-byte against
   their upstream blob SHAs at the same commit `1c34fe27`. They had been left out deliberately,

@@ -231,7 +231,8 @@ lib/
         ├── serializer.rb     # Nokogiri; ordering read from generated/, never hand-listed
         ├── parser.rb         # XML → models; retains raw Nokogiri doc — Phase 2
         ├── model_validator.rb, document_validator.rb  # tiers 1a and 1b (§7.7)
-        ├── validator.rb      # tier 2 (XSD). Tier 3 is not built (docs/REFERENCE.md §15.6)
+        ├── validator.rb      # tier 2 (XSD)
+        ├── business_validator.rb  # tier 3 — advisory only (docs/REFERENCE.md §17)
         └── schema/           # pinned FA(3) XSD + upstream MIT licence
 ```
 
@@ -358,7 +359,7 @@ Hand-written models/DSL sit **on top of** generated metadata; they consume it (f
 - Line: quantity, unit, unit net price, VAT rate code → line net/VAT/gross computed.
 - Invoice: per-rate-bucket summaries (`P_13_x`/`P_14_x` — **[VERIFY] resolved:** `docs/REFERENCE.md` §8.1a, read from the XSD's own documentation) and `P_15` computed from lines.
 - **Rounding strategy is explicit config** on `build`: `rounding: :per_line` (default) or `:per_summary` — Polish VAT law permits both; silently choosing one creates 1-grosz mismatches with users' ERPs. Both strategies round half-up to 2 dp at the documented point.
-- Every computed value is **overridable** (ERP-as-source-of-truth users); when overridden, tier-3 validation (§7.7) still checks reconciliation and reports — with a documented `strict: false` escape.
+- Every computed value is **overridable** (ERP-as-source-of-truth users); when overridden, tier-3 validation (§7.7) still checks reconciliation and reports. **No `strict: false` escape exists or is needed** — an earlier draft promised one, but tier 3 shipped as advisory (`Invoice#warnings`), so there is nothing to escape from. Corrected 2026-08-26.
 
 ### 7.4 Invoice types
 
@@ -418,7 +419,15 @@ field path, so a caller learns *which* value to fix. Two properties worth keepin
   `Encoding::CompatibilityError` from `String#strip`. Stated as behaviour rather than as a
   guarantee: it is bounded by the input classes that have been tried.
 
-Tier 3 remains unbuilt and unblocked-but-ungrounded; `Invoice#errors` is where it attaches.
+**Tier 3 built 2026-08-26**, and redesigned the same day after a five-lens audit — `Ksef::FA3::BusinessValidator`, reached through **`Invoice#warnings`** rather than `#errors`. That is the substantive amendment to this section: §7.7 above assumed tier 3 would join `validate!`, and it must not.
+
+It holds one rule, `Σ P_13_* + Σ P_14_* ≈ P_15`, compared over **figures the document states** and never against the model's own derivation. Its grounding is **empirical** (`docs/REFERENCE.md` §15.6 grounding 3), not definitional: `P_15`'s annotation says nothing about the buckets, and the definitional alternative — check `P_13_1` against the rows — is falsified by ten of the fourteen modelled stated-summary samples, because a correction's buckets are deltas and an advance's are pre-payments.
+
+**Why it cannot be an error.** A Polish invoice whose nets are computed back *w stu* from round gross prices misses the rule by roughly a grosz per line, and is entirely legal — the Ministry's own Przykład 1 is one. An error would refuse such invoices through `Client#send_invoice`, which is precisely the mistake that got KSeF's own proposed business rule withdrawn. §14.3 is the precedent for reporting rather than refusing.
+
+The one-grosz tolerance is what the single corpus witness shows and no more; it is not a bound, because the error scales with line count and with the issuer's rounding convention. `docs/REFERENCE.md` §17 records all of it, including the two false positives the first version produced and the `P_15`-was-derived defect (§17.2) that grounding the rule uncovered.
+
+The catalogue grows as evidence arrives — §17.4 lists what would ground the next rule, starting with `Rozliczenie/DoZaplaty`, the one arithmetic identity the XSD actually states. **Do not synthesise rules from Polish VAT law and record them as verified facts** (§15.6).
 
 ---
 
@@ -514,7 +523,7 @@ Gate status, precisely:
 |---|---|
 | §8 contract runs against TEST | **met**, verified live 2026-08-24 (nightly run `32692339217`) |
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
-| All seven types build, validate, round-trip | **met**, 2026-08-26 — all seven, round-trip and **validator tier 1** included. Twenty-two of the twenty-six Ministry samples go through end to end; the other four are refused for a *construct* (gross pricing, non-NIP buyer), not a type. Tier 3 remains |
+| All seven types build, validate, round-trip | **met**, 2026-08-26 — all seven, round-trip and **validator tier 1** included. Twenty-two of the twenty-six Ministry samples go through end to end; the other four are refused for a *construct* (gross pricing, non-NIP buyer), not a type. Tier 3 landed the same day, advisory (§7.7) |
 
 Remaining for Phase 2: **validator tier 3 and `docs/field_mapping.md`.**
 

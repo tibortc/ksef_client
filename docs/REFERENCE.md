@@ -256,12 +256,30 @@ filesystems and Windows checkouts; the **bytes are untouched**, and the bytes ar
 
 #### What the corpus establishes, beyond being a corpus
 
-- **`Σ P_13_* + Σ P_14_* == P_15` holds exactly in 24 of the 26** — including every correction.
+- **`Σ P_13_* + Σ P_14_* == P_15` holds exactly in 22 of the 26, and 24 count only if you let
+  `0 == 0` stand as a witness** — Przykład 5 and 13 state no buckets and a `P_15` of zero, so
+  they reconcile trivially and tier 3 skips them before comparing. Three samples state no
+  buckets at all (5, 13, 16), not one. Corrected 2026-08-26; the earlier "24 of 26" inflated
+  the evidence by two.
   The two exceptions are the useful part, and they constrain any future tier 3: **Przykład 1 is
-  off by 0.01** — bucket-level tax rounding loses a grosz (1666.66 + 383.33 + 0.95 + 0.05 =
-  2050.99 against a stated `P_15` of 2051). An earlier revision called it "a gross-priced
-  invoice"; it is not, and could not be, since it states `P_9A`/`P_11` throughout and the
-  parser refuses gross rows while Przykład 1 is in `MINISTRY_MODELLED` (corrected 2026-08-26).
+  off by 0.01** (1666.66 + 383.33 + 0.95 + 0.05 = 2050.99 against a stated `P_15` of 2051).
+
+  **The cause, corrected twice.** An early revision called it "a gross-priced invoice"; it is
+  not, and could not be, since it states `P_9A`/`P_11` throughout. A later one called it
+  bucket-level tax rounding; **that is arithmetically false** — the exact taxes are 383.3318
+  and 0.0475, which round individually to 383.33 and 0.05 and sum to 383.38, exactly what
+  rounding their sum gives. Per-bucket tax rounding moves this invoice's total by 0.0007.
+
+  The real cause is in the rows: the nets are computed back *w stu* from **round gross prices**
+  of 2000, 50 and 1, and rounded **down** — `2000 / 1.23 = 1626.0163`, where two-place rounding
+  gives `1626.02` and the document states `1626.01`. Substitute the correctly-rounded net and
+  the invoice reconciles exactly, with no tolerance needed. `P_15` is 2000 + 50 + 1.
+
+  This matters for more than accuracy: under the tax-rounding story the error is bounded by the
+  five tax buckets, so a grosz of tolerance nearly covers it. Under the real mechanism it is
+  bounded by the **number of lines** and by the issuer's rounding convention — which is to say
+  not bounded at all. Two such lines and the gap is two grosze. That is why tier 3's rule is a
+  **warning** and not an error (§17.1). Both corrections made 2026-08-26.
   And
   **Przykład 16 (`UPR`) omits the buckets entirely**, the descriptions PDF stating that a
   simplified invoice may carry `P_15` alone. **A zero-tolerance equality check would reject the
@@ -1652,7 +1670,7 @@ stanowi kwotę pozostałą ponad płatności otrzymane przed wykonaniem"*.
 Tier 1 therefore requires a stated summary whenever an order is present or an advance invoice
 is settled — the same rule, and the same module, as the `state_before` case of §8.4b. All three
 triggers are **structural**: an element the document either carries or does not. Whether the
-figures then reconcile is tier 3's, and tier 3 is not built.
+figures then reconcile is tier 3's, and tier 3 reports it as a warning (§17.1).
 
 #### What is deliberately not modelled
 
@@ -2732,9 +2750,22 @@ technical rather than semantic.
 
 The FA(3) XSD does carry **683 `xsd:documentation` annotations** — every field described in
 Polish, with citations to the VAT Act. They are a genuine first-tier source for what a
-field *means* (that is where §8.1a's rate buckets came from). They state no equalities:
-`P_13_1` is documented as "the sum of net sales values under the basic rate" and `P_15` as
-"the total amount due", and the arithmetic relating them is left to the reader.
+field *means* (that is where §8.1a's rate buckets came from). They state **almost** no
+equalities: `P_13_1` is documented as "the sum of net sales values under the basic rate" and
+`P_15` as "the total amount due", and the arithmetic relating those two is left to the reader.
+
+**The one exception, found by audit 2026-08-26 — this sentence read "They state no equalities"
+and that was wrong.** `Rozliczenie/DoZaplaty` is annotated *"Kwota należności do zapłaty **równa
+polu P_15 powiększonemu o Obciazenia i pomniejszonemu o Odliczenia**"* — a literal arithmetic
+identity, and precisely the grounding-1 shape tier 3 wants. Measured over the corpus it holds
+**exactly**, with no tolerance and no guard, in all four samples that carry a `Rozliczenie`:
+Przykład 4 (`64279.92 + 0.00 − 1000.00 = 63279.92`), 24 and 25 (`53.63 + 0 − 0`), 26
+(`31.50 + 5.00 − 0.00 = 36.50`).
+
+It is **not implemented**, because the model does not carry `Rozliczenie` at all — the whole
+group is in `#unmapped_elements` for those four samples. That makes it the best-grounded
+candidate rule this project knows of, and the argument for carrying `Rozliczenie` when tier 3
+is next extended (§17.4).
 
 So tier 3 has three possible groundings, and they are not equal:
 
@@ -2952,3 +2983,142 @@ One oddity, flagged rather than resolved: the 2.7.0 row is dated `21.07.2027` fo
 year after the commit that introduces it (authored 2026-07-21). Every other row is
 chronologically consistent. Most likely an upstream typo for 2026; do not build anything on
 that date.
+
+---
+
+## 17. Validator tier 3 — one advisory rule, and why it cannot be more
+
+Built 2026-08-26, then **substantially redesigned the same day** after a five-lens audit found
+that the first version refused legal invoices. `Ksef::FA3::BusinessValidator`, reached through
+`Invoice#warnings` — deliberately **not** `#errors`, and so it can never block a send.
+
+### 17.1 The summary-reconciliation rule
+
+`Σ P_13_* + Σ P_14_* ≈ P_15`, over **figures the document states**, within one grosz, skipped
+when no buckets are stated.
+
+**Its grounding is empirical — §15.6's grounding 3 — and not definitional.** The first version
+of this section claimed otherwise ("`P_13_1` is annotated as a sum; checking a sum is not
+policy") and that was wrong twice over. `P_15` is annotated *"Kwota należności ogółem"* and says
+nothing about the buckets; §15.6's own sentence is "Nothing says `P_15` equals the sum of the
+rate buckets." And the definitional rule one might reach for instead — check `P_13_1` against
+the rows — **is not implementable on this model**: ten of the fourteen modelled stated-summary
+samples falsify it, because a correction's buckets are deltas, an advance's are pre-payments
+and a settlement's are remainders (§8.4, §8.5). Grounding 1 yields no rule here at all.
+
+The measurement, over the 26 pinned samples:
+
+| | Samples | Note |
+|---|---|---|
+| buckets stated, reconcile exactly | 22 | including all six non-`VAT` types |
+| buckets stated, out by one grosz | 1 | Przykład 1 |
+| **no buckets stated** | **3** | Przykład 5 and 13 (`P_15` 0), Przykład 16 (`P_15` 450) |
+
+So the rule evaluates 23 of 26, not 25. Przykład 5 and 13 are skipped by the guard, not passed
+by the rule, and counting them as witnesses inflates the evidence.
+
+**Why one grosz, and why it is honestly arbitrary.** Przykład 1 is the only witness, and §1.5
+records what actually causes its gap: nets computed back *w stu* from round gross prices and
+rounded down, not per-bucket tax rounding, which moves that invoice by 0.0007. The error
+therefore scales with the **number of lines** and with the issuer's rounding convention — two
+such lines and it is two grosze, fifty and it is 38. **No tolerance sized from this corpus can
+be sound**, because the corpus never varies the dimension the error scales with. One grosz is
+what the single witness shows, and the rule warns rather than refuses precisely because that
+number cannot be defended as a bound.
+
+**Why it is a warning.** An invoice priced from round gross prices — the commonest shape in
+Polish retail — fails this check while being entirely legal. Making it an error would repeat
+the mistake that got KSeF's own proposed business rule withdrawn (§15.6, issue #837: *it
+rejects legal invoices*). §14.3 is the precedent: the UPO receiving-party mismatch is a warning
+so that a schema opinion cannot stand between a legal document and its being filed.
+
+**Why it reads the document rather than the model.** Both sides must come from the same source
+or the comparison measures this gem instead of the invoice. The first version compared the
+model's *derived* buckets against the document's total, and produced two false positives that
+`Ksef::Client#send_invoice` turned into refusals:
+
+- **A rounding-regime artefact.** `summary_buckets` rounds each bucket; `gross_total`'s derived
+  arm did not. Three ordinary lines priced the way DESIGN.md §8's snippet prices them gave a
+  two-grosz "error" on an invoice this gem had just built. It also made the verdict depend on
+  whether you had round-tripped: built accused, parsed clean.
+- **The model's own incompleteness.** A document using `P_13_5`/`P_14_5` (OSS) or `P_13_11`
+  (margin scheme) states buckets no rate code reaches ({VatRate.unreachable_elements}), so the
+  model's derivation is necessarily short and the invoice was accused of an arithmetic error
+  that was really a gap in this gem.
+
+Reading both sides from `raw_document` removes both. A built invoice states nothing
+independently and is therefore never compared — which is the honest answer, not a limitation.
+
+**The `W` twins are excluded, and this is now the only place it is decisive.** `P_14_1W` is the
+PLN equivalent of `P_14_1` on a foreign-currency invoice, not a second tax; Przykład 20 states
+13560 + 3118.80 against a `P_15` of 16678.80, and counting its 14036.16 twin gives 30714.96.
+`Totals::ELEMENTS` is the single definition of "a bucket" and the rule reads it. Note that the
+earlier version cited Przykład 20 for this and could not have been testing it: 20 has a
+*derived* summary, where `VatRate::BUCKETS` governs and no `W` element can appear whatever
+`Totals::ELEMENTS` says. No Ministry sample pairs a stated summary with a `W` twin, so the
+guard is exercised by an injected one.
+
+### 17.2 The defect grounding the rule uncovered: `P_15` was derived, not read
+
+**A `VAT` invoice re-serialised the Ministry's Przykład 1 a grosz cheaper, and nothing said so.**
+
+`P_15` is mandatory in `Fa`, so every document states one. The six types in
+`Invoice::STATED_TOTALS_TYPES` read it into `Totals#gross`; `VAT` derived it from its rows. For
+21 of the 22 modelled samples the two agree. For Przykład 1 they do not — 2051 stated, 2050.99
+derived — so parsing and re-serialising it produced an invoice asking a grosz less.
+
+Invisible to everything: tier 2 passes, `#unmapped_elements` is silent (`P_15` is present either
+way — a path-difference diagnostic cannot see a changed *value*), and even the round-trip law
+held, because a parsed invoice is already a fixed point. The `P_9A` class from §8.6, found the
+same way, by measuring the corpus rather than reading the code.
+
+`Invoice#stated_gross` carries the document's `P_15` **only when it differs** from what the rows
+derive — the `Line#row_number` idiom (§8.4). **Canonicalised in the constructor**, where
+`Invoice.positioned` does the equivalent job for `row_number`; the first version canonicalised
+in the parser only, so `Invoice.new(stated_gross:)` and `#with(stated_gross:)` — both public —
+bypassed it and broke DESIGN.md §7.6 with no diagnostic. It is nil when `totals` is present,
+because a stated summary already carries its own gross.
+
+Measured after the fix: **`P_15` is numerically unchanged on re-serialisation for all 22
+modelled samples**, asserted by a spec. *Numerically*, not byte-for-byte — 17 of the 22 change
+their formatting (`2051` → `2051.00`, `31.5` → `31.50`), which §1.5 already warns about
+("amounts are unpadded, so any comparison must be numeric and never on strings"). An earlier
+draft of this section claimed byte-identity and was wrong.
+
+The parser reads `P_15` **tolerantly**: an empty or unparseable one yields nil rather than
+raising, because the parser does not validate and a document being read to find out why KSeF
+rejected it may well be one whose `P_15` is the problem.
+
+### 17.3 Two asymmetries of the same shape, still open
+
+Both predate this work and neither is fixed here; recorded so they are not rediscovered.
+
+- **A line built with a quantity and a price and no `net_amount`** serialises a derived `P_11`
+  that parses back *into* `net_amount`, so the built invoice and the parsed one differ in a
+  field the caller never set. DESIGN.md §8's own snippet does this.
+- **An invoice with no `issued_at`** gets one written at serialisation and reads it back.
+
+Both are the same shape as §17.2 — a value the document must carry that the model derives
+rather than holds — and the same remedy would apply.
+
+A third, bounding what tier 3 can ever detect: **`P_13_*`/`P_14_*` are still recomputed** on a
+derived invoice rather than carried. Rewrite Przykład 1's `P_13_1` to 1700.00 and the
+re-serialised document silently restores 1666.66, with `#unmapped_elements` empty and tier 3
+silent — the rule compares the document against itself, and the model's derivation is not part
+of that comparison. Catching it needs a value-level provenance diagnostic, which is the
+generalisation of §8.6's "a path-difference diagnostic cannot see a changed value".
+
+### 17.4 What would ground the next rule
+
+In order of strength:
+
+1. **`Rozliczenie/DoZaplaty`** — the one arithmetic identity the XSD actually states
+   (§15.6), holding exactly in all four corpus samples that carry it. Blocked only by the model
+   not carrying `Rozliczenie`.
+2. **`P_15` less the sum of `P_15Z`** — the amount beyond pre-payments; stated in the Ministry's
+   brochure, which is not a pinned artifact (§15.6 grounding 2).
+3. **Observation against TEST** — reliable, slow, and it only ever finds rules we thought to
+   probe for.
+
+**Do not synthesise rules from Polish VAT law and record them as verified facts** (§15.6). Every
+rule added to `RULES` needs a ledger entry saying what grounds it.
