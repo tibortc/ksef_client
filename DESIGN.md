@@ -350,7 +350,11 @@ Hand-written models/DSL sit **on top of** generated metadata; they consume it (f
 
 - English-friendly attribute names; the full English↔Polish mapping (e.g. `issue_date ↔ P_1`, `number ↔ P_2`, `gross_total ↔ P_15`, seller `↔ Podmiot1`, buyer `↔ Podmiot2`, line `↔ FaWiersz`) generated into `docs/field_mapping.md` — accountants and auditors will demand it. Field-name truth comes from the XSD, not from this document.
 
-  **Deferred as of 2026-08-22.** `docs/field_mapping.md` is not written yet. Generating it from the current model set would produce a table covering one invoice type out of seven, which for an audience checking whether *their* field is supported is worse than no table — an absent row would read as "not supported" rather than "not documented yet". It lands once the models cover all seven types (§7.4). At that point it must be generated from a declared mapping rather than hand-written, or it will drift. **That condition was met on 2026-08-26**, so this is a due deliverable rather than a deferred one.
+  **Delivered 2026-08-26.** Deferred since 2026-08-22 behind an explicit trigger — a table covering one invoice type out of seven would read as "not supported" rather than "not documented yet" — and the seventh type landed that day.
+
+  It is **generated**, as this section required: `rake fa3:field_mapping` renders it from a declared mapping in `tasks/field_mapping.rb` plus the pinned XSD, and `rake fa3:verify` fails if the committed file is stale, exactly as it does for `generated/`. Three guards make drift loud: an element path that does not resolve against the schema aborts the run, an attribute that is not a member of its model aborts, and a model member that is neither mapped nor listed with a reason aborts. So the table can fall out of date only by failing to build.
+
+  Descriptions are the Ministry's own `xsd:documentation`, shown only where every occurrence of an element name in the schema agrees — eleven names carry different wording in different places, and guessing which applies would put the wrong statute against a field an auditor is reading.
 - Builder DSL as in §8; additionally plain keyword-arg constructors on every model (DSL is sugar, not the only door).
 - `Subject` covers NIP + name + address (+ VAT-UE and other identifier variants per schema); include NIP checksum validation (weights 6,5,7,2,3,4,5,6,7; weighted sum mod 11 must equal digit 10 and must not be 10).
 
@@ -525,14 +529,9 @@ Gate status, precisely:
 | A KSeF token minted end-to-end with no external client | **met**, verified live 2026-08-23 (§6a.4) |
 | All seven types build, validate, round-trip | **met**, 2026-08-26 — all seven, round-trip and **validator tier 1** included. Twenty-two of the twenty-six Ministry samples go through end to end; the other four are refused for a *construct* (gross pricing, non-NIP buyer), not a type. Tier 3 landed the same day, advisory (§7.7) |
 
-Remaining for Phase 2: **validator tier 3 and `docs/field_mapping.md`.**
+**Phase 2's scope is complete as of 2026-08-26.** Validator tier 3 landed that day (§7.7, advisory), and `docs/field_mapping.md` with it (§7.2, generated). The three "Done when" gates were already met.
 
-This said "tier 3, and only that" until 2026-08-26, and that was an inconsistency introduced in
-the same commit that created the other half of it. §7.2's deferral of `docs/field_mapping.md`
-carried an explicit trigger — *"it lands once the models cover all seven types"* — and Phase 1's
-note above records it as "required before 0.1.0 and tracked in Phase 2". The seventh type landed
-that day, so the trigger fired and the deferral ended; the sentence claiming tier 3 was the only
-thing left was written a few paragraphs from the one marking the mapping due. All seven invoice types landed by 2026-08-26 (`docs/REFERENCE.md` §8.4, §8.5, §8.6). **Tier 1 landed 2026-08-24**, split into the model and document halves §7.7 now describes; **`KOR` landed the same day**, built against the Ministry's five worked corrections (`docs/REFERENCE.md` §8.4) — the only examples of a non-`VAT` type in existence.
+The sentence here read "validator tier 3, and only that" until 2026-08-26, and that was an inconsistency introduced in the same commit that created the other half of it: §7.2's deferral of the field mapping carried an explicit trigger — *"it lands once the models cover all seven types"* — and Phase 1's note above records it as "required before 0.1.0 and tracked in Phase 2". The seventh type landed that day, so the trigger fired and the deferral ended.
 
 **The parser landed 2026-08-24**, with the sample corpus §7.6 assumed and did not have
 (`docs/REFERENCE.md` §1.4). Two findings changed the plan around it, both ledgered:

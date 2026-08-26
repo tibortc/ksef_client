@@ -25,6 +25,17 @@ gem version for which API state".
 
 ### Added
 
+- **`docs/field_mapping.md`** — the English↔Polish field table, listing every attribute this
+  model carries against the FA(3) element it reads and writes, with the element's XSD type,
+  cardinality and the Ministry's own description. **Generated** by `rake fa3:field_mapping`
+  from a declared mapping plus the pinned schema, and `rake fa3:verify` fails if the committed
+  file is stale — the same gate `lib/ksef/fa3/generated/` gets.
+
+  Three guards make drift loud rather than silent: an element path that does not resolve
+  against the schema aborts the run, an attribute that is not a member of its model aborts, and
+  a model member that is neither mapped nor given a reason aborts. Adding a field to a model
+  without saying where it goes fails the build.
+
 - **Validator tier 3** — `Ksef::FA3::BusinessValidator`, reached through **`Invoice#warnings`**. It holds **one rule**, and the size is the finding rather than a shortfall: no
   file in `CIRFMF/ksef-api` states a reconciliation rule anywhere, and the only business
   validation KSeF ever proposed was withdrawn after it turned out to reject legal invoices. So
