@@ -88,14 +88,23 @@ submitted.
 
 ## Installation
 
-**0.1.0 is not released yet.** Only `0.1.0.rc1` is on RubyGems — a name-claiming
-placeholder that deliberately contains none of the API below — and Bundler will not select a
-prerelease for an unconstrained requirement, so `gem "ksef_client"` fails outright. Until
-0.1.0 ships, install from git:
+**0.1.0 is not released yet.** What is on RubyGems is prereleases, and Bundler will not select
+a prerelease for an unconstrained requirement — so `gem "ksef_client"` fails outright until
+0.1.0 ships. Ask for the candidate by name:
+
+```ruby
+gem "ksef_client", "0.1.0.rc2"      # everything documented below
+```
+
+Or track the branch, where fixes land first:
 
 ```ruby
 gem "ksef_client", github: "tibortc/ksef_client"
 ```
+
+**Not `0.1.0.rc1`.** It predates this API: a name-claiming placeholder holding the transport
+layer and nothing else — no authentication, no FA(3), no sessions. It is still on RubyGems
+because a published version cannot be replaced.
 
 After release, the usual line will work:
 
