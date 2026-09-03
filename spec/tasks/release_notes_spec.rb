@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "tmpdir"
+require "yaml"
 require_relative "../../tasks/release_notes"
 
 # The GitHub release's body (DESIGN.md §10).
@@ -77,5 +78,71 @@ RSpec.describe ReleaseNotes do
   it "finds an unreleased section in the committed changelog" do
     expect(described_class.section(File.read("CHANGELOG.md", encoding: "UTF-8"), "Unreleased"))
       .not_to be_nil
+  end
+
+  describe ".version_from_tag" do
+    it "drops the conventional leading v" do
+      expect(described_class.version_from_tag("v0.1.0")).to eq("0.1.0")
+      expect(described_class.version_from_tag("v0.1.0.rc2")).to eq("0.1.0.rc2")
+    end
+
+    it "accepts a tag that never had one" do
+      expect(described_class.version_from_tag("0.1.0")).to eq("0.1.0")
+    end
+
+    it "refuses a tag that is not a version at all" do
+      # `v` alone is the one that matters: it reduces to `""`, for which
+      # `Gem::Version.correct?` answers **true** — its pattern is entirely optional.
+      expect { described_class.version_from_tag("v") }.to raise_error(/not a version tag/)
+      expect { described_class.version_from_tag("nightly") }.to raise_error(/not a version tag/)
+    end
+
+    # Documented because it looks like a bug and is not: a letter segment is a legal
+    # prerelease, so `0.1.O` is a version RubyGems would publish. This is not a typo checker
+    # and must not be turned into one.
+    it "passes a version that merely looks like a typo, because RubyGems would accept it" do
+      expect(described_class.version_from_tag("v0.1.O")).to eq("0.1.O")
+    end
+  end
+
+  # **What was missing was a test of the *call*, not the function.**
+  #
+  # `release.yml` is this module's only caller, and it passed `github.ref_name` — the *tag* —
+  # where every example above passes a version. `ReleaseNotes.for("v0.1.0")` raises, so the
+  # `announce` job would have failed on every release; and it runs `needs: publish`, so that
+  # failure lands *after* the gem is on RubyGems. The irreversible half succeeds and the
+  # recoverable half breaks.
+  #
+  # Eight passing examples and a broken caller: the seam between a tested function and its
+  # untested call site is where this project keeps finding defects. So this reads the workflow.
+  describe "the release workflow's use of it" do
+    let(:notes_step) do
+      YAML.safe_load_file(".github/workflows/release.yml")
+          .dig("jobs", "announce", "steps")
+          .find { |step| step["run"].to_s.include?("ReleaseNotes") }
+    end
+
+    # Newest first, ignoring the unreleased section — so this keeps meaning the same thing as
+    # versions are added.
+    def released_versions
+      File.read("CHANGELOG.md", encoding: "UTF-8").scan(described_class::HEADING).flatten - ["Unreleased"]
+    end
+
+    it "takes the tag from the environment, never interpolated into the script" do
+      expect(notes_step.fetch("env")).to eq("TAG" => "${{ github.ref_name }}")
+      expect(notes_step.fetch("run")).not_to include("${{")
+    end
+
+    it "routes the tag through the tag-to-version mapping rather than straight in" do
+      expect(notes_step.fetch("run")).to include("version_from_tag")
+    end
+
+    # The end-to-end claim, against the committed changelog and a tag in the form git holds:
+    # what the job does, minus the runner.
+    it "resolves real notes from a real tag" do
+      version = released_versions.first
+
+      expect(described_class.for(described_class.version_from_tag("v#{version}"))).not_to be_empty
+    end
   end
 end
