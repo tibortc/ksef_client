@@ -177,6 +177,26 @@ gem version for which API state".
 
 ### Fixed
 
+- **The GitHub-release job would have failed on every release, after the gem was published.**
+  `release.yml` passed `github.ref_name` — the *tag*, `v0.1.0` — to `ReleaseNotes.for`, which is
+  keyed on the CHANGELOG heading, `0.1.0`. One character, and it raises. The next step in the
+  same job strips the `v` correctly, so the two disagreed and the first one lost. `announce`
+  runs `needs: publish`, so the failure lands after the push to RubyGems: the irreversible half
+  succeeds and the recoverable half breaks.
+
+  Never caught because the spec and the workflow never met. Eight examples exercised
+  `ReleaseNotes.for`, all passing a bare version; the workflow was the only caller that exists,
+  and it passed a tag. The mapping is now `ReleaseNotes.version_from_tag`, in one place with a
+  test, and `spec/tasks/release_notes_spec.rb` reads `release.yml` and asserts the call — not
+  just the function.
+
+  Two things about the guard, since they look like bugs and are not: `Gem::Version.correct?("")`
+  is **true** (its pattern is entirely optional), which is what the tag `v` reduces to — so the
+  check requires a leading digit. And `0.1.O` is a *legal prerelease*, not a typo, so this
+  refuses tags that are not versions and deliberately does not try to catch mistyping.
+
+  Development-only; `tasks/` is not packaged.
+
 - **Live integration specs could not reach the network at all**, so the nightly ran red for six
   consecutive nights (2026-08-28 onward: 27 examples, 27 failures, one error class). The
   recorded tier's `hook_into :webmock` installs a *global* WebMock stub, and

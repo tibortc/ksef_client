@@ -80,17 +80,23 @@ jobs:
           bundler-cache: false
 
       - name: Take the notes from the CHANGELOG
-        # `ruby -e` with the version in the environment rather than interpolated, so a tag name
-        # is data. Tags are pushed by anyone with write access, which is not a reason to hand
-        # one a shell (DESIGN.md §9.1).
+        # `ruby -e` with the tag in the environment rather than interpolated, so a tag name is
+        # data. Tags are pushed by anyone with write access, which is not a reason to hand one
+        # a shell (DESIGN.md §9.1).
         #
-        # This fails when the CHANGELOG has no section for the version — which is the useful
-        # failure. It means the entries are still sitting under [Unreleased].
+        # **`github.ref_name` is the tag, not the version** — `v0.1.0` against a CHANGELOG keyed
+        # on `0.1.0` — so it goes through `version_from_tag`. It did not until 2026-09-03, which
+        # would have failed this step on every release, after `publish` had already pushed the
+        # gem. See `tasks/release_notes.rb`.
+        #
+        # This still fails when the CHANGELOG has no section for the version, which is the
+        # useful failure: it means the entries are sitting under [Unreleased].
         run: |
           ruby -r./tasks/release_notes \
-               -e 'File.write("release-notes.md", ReleaseNotes.for(ENV.fetch("VERSION")))'
+               -e 'File.write("release-notes.md",
+                              ReleaseNotes.for(ReleaseNotes.version_from_tag(ENV.fetch("TAG"))))'
         env:
-          VERSION: ${{ github.ref_name }}
+          TAG: ${{ github.ref_name }}
 
       - name: Create the GitHub release
         # `gh` is preinstalled on the runner, so this needs no third-party action — one less
