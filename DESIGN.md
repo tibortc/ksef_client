@@ -466,7 +466,7 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Tier | Tooling | Scope | When |
 |---|---|---|---|
 | Unit | RSpec + WebMock | request shaping, crypto primitives, models, serializer, validator | every push, full matrix |
-| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **built and recorded 2026-08-26.** Three cassettes, 31 interactions, replaying in ~1.4 s with no credentials. Re-record one flow at a time — `rake 'vcr:record[spec/recorded/auth_refresh_spec.rb]'`. §9.1 |
+| Recorded | VCR (scrubbed per §4.5) | full auth + session flows against recorded TEST responses | **built and recorded 2026-08-26.** Four cassettes, 45 interactions, replaying in ~1.8 s with no credentials. Re-record one flow at a time — `rake 'vcr:record[spec/recorded/auth_refresh_spec.rb]'`. §9.1 |
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors — NIST/FIPS, not C#, see §6.4 | every push |
 | Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning. Three specs exist — auth, crypto, session — and **all three have run green against TEST** (auth 2026-08-23, the other two 2026-08-24) | **nightly** CI + pre-release, never per-PR |
 
@@ -860,6 +860,72 @@ new flow will produce and run `RecordedTier.redact` and `.redact_url` over every
 its body forced to `ASCII-8BIT`. That, and replaying the flow against the synthetic cassette,
 found three defects here before any of them cost an invoice — including that `#collective_upo`
 reads the session state a *second* time, which a one-read cassette cannot satisfy.
+
+#### The two network tiers hook the same WebMock, and one of them wins
+
+Found 2026-09-03, after **six consecutive red nightlies**: 27 examples, 27 failures, one error
+class — `VCR::Errors::UnhandledHTTPRequestError` on `POST /v2/auth/challenge`, the first request
+every live flow makes.
+
+Requirement 2 above says the recorded tier must `hook_into :webmock` because `spec_helper`
+disables net connect suite-wide and *"the two must not disagree about who answers a request"*.
+That is right, and it has a consequence the live tier's own hook did not account for.
+`hook_into :webmock` registers a **global** stub — `WebMock.globally_stub_request` — and
+`StubRegistry#response_for_request` consults global stubs **before** WebMock ever asks whether a
+real connection is allowed. So `WebMock.allow_net_connect!`, which had been the live tier's
+opt-in since long before VCR existed here, stopped being read. VCR further aliases
+`WebMock.net_connect_allowed?` to answer `true` while it is turned on, so the flag was doubly
+irrelevant. With no cassette in use and `record: :none`, VCR did exactly what it is configured
+to do: it refused the request.
+
+The live tier now opens the seam through `LiveNetwork` (`spec/support/live_network.rb`), which
+also turns VCR off for the example's duration — `VCR.real_http_connections_allowed?` answers
+`!turned_on?`, so the handler classifies the request `:recordable`, returns nil, and the global
+stub does not match.
+
+**Nothing could have noticed.** The live tier is the only tier that opens this seam, so neither
+PR CI nor a local `rake` exercises the hook at all; the nightly is its only reader, and the
+nightly is what broke. `spec/live_network_spec.rb` closes that: it asks
+`StubRegistry#response_for_request` — the exact call `Net::HTTP#request` makes — what is
+handling a request to the KSeF challenge endpoint, with the seam open and closed, and needs
+neither a socket nor a credential to do it. Its first example is the negative control, asserting
+that an ordinary spec *is* intercepted; without that, `LiveNetwork.open!` could be a no-op and
+the rest would still pass.
+
+The broader point is a tier boundary, not a library quirk: **the recorded tier and the live tier
+are the only two things in this suite that touch the network, and they now share a mechanism.**
+A change to either one's interception is a change to both.
+
+#### A signed link decays too — the second clock, and it takes three days
+
+Found in the same session, and red since 2026-08-29 without anyone seeing it: the retrieval
+cassette stopped replaying, asking for `GET /sessions/{ref}/upo/{upoRef}` — a URI it does not
+contain, because the recording took the pre-signed link instead.
+
+`UPO::Client#fetch` prefers the unmetered link and falls back to the metered route once it has
+expired (§12.3). That expiry check read `Time.now`, which made it the one route decision in the
+library the pinned clock could not reach. KSeF signs a UPO link for **exactly three days**
+— measured across three cassettes and two recording sessions — so the cassette replayed
+correctly for three days and then started taking a fallback nothing had recorded.
+
+Obstacle 4 above already named it: *"`referenceNumber`, the KSeF number, `validUntil` and the UPO
+`downloadUrl` all come from the server … anything consulting `Session#expired?` or `AccessToken`
+expiry must take an injected clock."* The seam existed, the requirement was written down, and
+one caller did not use it — the same shape as the fifteen-minute credential, which obstacle 2
+had also already covered.
+
+**Why the existing tests could not see it.** `spec/ksef/upo/client_spec.rb` had covered both
+branches since the method was written, with `Time.now + 600` and `Time.now - 60` — building
+`expires_at` from the very clock the code was reading, so the two agreed by construction and a
+wall-clock read was indistinguishable from an injected one. Coverage was 100% and the branch was
+tested; what was untested was *which clock decides*. The regression examples now pin an injected
+clock that disagrees with the wall clock in both directions, so each fails if the read goes back.
+
+And the failure was invisible for a second reason: **nothing pushed between 2026-08-26 and
+2026-09-03**, and the recorded tier runs per-push. A tier that only runs on a trigger nobody
+pulled is a tier that is not running. The nightly does run daily — and was red for its own
+reason, which is how one week produced two independent clock-and-interception defects and no
+signal at all.
 
 #### What not to do
 

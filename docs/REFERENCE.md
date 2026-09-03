@@ -2319,6 +2319,7 @@ The third of these tables, after §10.3 (crypto) and §11.2a (sessions). Impleme
 | `Ksef::IntegrityError` | a new branch of DESIGN.md §6.7 | A hash mismatch means *fetch it again* — nothing is wrong with the request, the credentials or the document. Not a `ValidationError` (the caller's data is fine) nor an `ApiError` (the response was a success) |
 | `#verifiable?` separate from `#verified?` | two booleans, not one tri-state | "Nothing to check" and "the check failed" need different responses. **Corrected 2026-08-23:** this row used to justify the split by claiming the metered route publishes no hash. It does — §5.5 records the header on four `200` responses, all three UPO routes and the invoice download — and the client was discarding it. Both paths now verify; the split still earns its place for a response that genuinely omits the header |
 | `#fetch` prefers the link | falls back to the metered route on expiry or absence | §14.2's resolution, in one call: the link is unmetered and hash-verified, and `GET /sessions` already allows only 10/min |
+| **`#fetch` judges the expiry against an injected clock** | `UPO::Client.new(clock:)`, threaded from `Ksef::Client` | It read `Time.now` until 2026-09-03, which made it the only route decision here the recorded tier's pinned clock could not reach. The link lives three days (§14.2), so a cassette replayed correctly for three days and then began requesting a fallback URL nothing had recorded. Same class as reading a token's expiry off the wall clock, one layer down |
 | A relative `downloadUrl` is resolved | against the API host; an absolute one used untouched | §9 still carries which form the live API sends as unverified, so both are handled rather than one guessed at |
 | KSeF numbers parsed before use | `for_ksef_number` runs §13's CRC-8 first | A mistyped number fails locally instead of as an opaque 404 |
 | `Ksef::Client#upo` uses the **metered** route | against this section's own preference for the link | Deliberate, and only for a single invoice: obtaining the unmetered link costs a metered status call first, so the direct route is one request against two. `#collective_upo` and `UPO::Client#fetch` prefer the link, where it pays |
@@ -2489,6 +2490,19 @@ fallback when the link has expired.
 Two consequences for the client design. The URL must never be logged or persisted as a
 durable reference — it expires, and it is credential-bearing. And the token-suppression is
 not optional politeness: sending a bearer token to third-party storage leaks it.
+
+**How long it lives: exactly three days.** Measured 2026-09-03 from the committed cassettes —
+five links across three cassettes and two separate recording sessions, on both
+`downloadUrlExpirationDate` (session pages) and `upoDownloadUrlExpirationDate` (invoice status),
+each `recorded_at` + 72 h to within two seconds. The contract states the field but no duration,
+so this is observed rather than documented, and it is the kind of value that should be read from
+the response rather than assumed — `UpoPage#expires_at` does exactly that.
+
+It is recorded because the *magnitude* matters to anything replaying a recorded response: three
+days is long enough for a cassette recorded and verified today to keep replaying correctly for
+days and then diverge, which is precisely what happened between 2026-08-26 and 2026-08-29
+(DESIGN.md §9.1). A credential that expires in fifteen minutes announces itself; one that expires
+in three days does not.
 
 **Unverified:** whether the live API returns this field absolute or host-relative.
 `srodowiska.md` says only that a returned URL's *host* matches the environment called. Code

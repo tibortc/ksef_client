@@ -30,10 +30,14 @@ module Ksef
       # @param credential [Ksef::Auth::AccessToken, String] anything with `#bearer`
       # @param storage [Faraday::Connection] from {Ksef::HTTP::Connection.storage} — must
       #   not carry a credential
-      def initialize(connection, credential, storage:)
+      # @param clock [#call] returns the current {Time}. {#fetch} is the only route decision
+      #   in this library that depends on the clock, so it is the only reason this exists —
+      #   see there for what reading the wall clock instead cost.
+      def initialize(connection, credential, storage:, clock: -> { Time.now })
         @connection = connection
         @credential = credential
         @storage = storage
+        @clock = clock
       end
 
       # Follows a pre-signed link, verifying the published hash.
@@ -84,11 +88,23 @@ module Ksef
       # Prefers the unmetered link and falls back to the metered route when it has expired
       # or is missing — the resolution of §14.2, in one call.
       #
+      # **The expiry is judged against the injected clock, not `Time.now`.** This read the wall
+      # clock until 2026-09-03, which made it the one route decision in this library the
+      # recorded tier's pinned clock could not reach. KSeF signs the link for about three days,
+      # so `spec/recorded/invoice_download_spec.rb` replayed correctly for three and then
+      # started taking the metered fallback — a request its cassette had never recorded, since
+      # the recording itself took the link. The tier went red on 2026-08-29 with nothing
+      # changed, and nothing noticed until 2026-09-03 because no push ran the suite in between.
+      #
+      # Same failure as the fifteen-minute access token ({Ksef::Client#initialize}), one layer
+      # down: a recorded response is not a fixture, it decays, and every decision made against
+      # it has to be made against the moment it was recorded.
+      #
       # @param page [Ksef::Sessions::UpoPage]
       # @param session_reference [String] needed for the fallback
       # @return [Document]
       def fetch(page, session_reference:)
-        return download(page) unless page.download_url.to_s.empty? || page.expired?
+        return download(page) unless page.download_url.to_s.empty? || page.expired?(@clock.call)
 
         collective(session_reference, page.reference_number)
       end

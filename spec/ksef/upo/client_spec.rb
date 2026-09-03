@@ -205,6 +205,49 @@ RSpec.describe Ksef::UPO::Client do
 
       expect(upo.fetch(page(url: nil), session_reference: session_ref).source).to eq(:api)
     end
+
+    # **The two examples above cannot see which clock decides**, and that is why the bug they
+    # were written to cover reached a cassette: each builds `expires_at` from `Time.now`, the
+    # very clock the code was reading, so the two agreed by construction and a wall-clock read
+    # was indistinguishable from an injected one.
+    #
+    # These make them disagree, in both directions, so each fails if the decision goes back to
+    # reading `Time.now`. The recorded tier could only find it three days after a recording,
+    # once KSeF's signature on the link actually lapsed — which it did, silently, on
+    # 2026-08-29 (`spec/recorded/invoice_download_spec.rb`).
+    describe "which clock the expiry is judged against" do
+      # Plain methods rather than `let`, matching the rest of this file: neither is memoised
+      # state, and the group is already at RuboCop's limit for those.
+      #
+      # The moment the retrieval cassette's own link stopped being valid — long past by the
+      # wall clock, whenever this runs.
+      def lapsed = Time.utc(2026, 8, 29, 21, 48, 31)
+
+      # Far enough out that no wall clock will ever reach it.
+      def distant = Time.utc(2099, 1, 1)
+
+      it "follows a link the injected clock places inside the window, however long ago that was" do
+        stub_request(:get, link).to_return(status: 200, body: xml,
+                                           headers: { Ksef::UPO::HASH_HEADER => hash_of(xml) })
+        client = described_class.new(connection, "access.jwt", storage: storage,
+                                                               clock: -> { lapsed - 60 })
+
+        expect(client.fetch(page(expires_at: lapsed), session_reference: session_ref).source)
+          .to eq(:storage)
+        expect(a_request(:get, %r{/sessions/.+/upo/})).not_to have_been_made
+      end
+
+      it "falls back when the injected clock places it outside, however far off that is" do
+        stub_request(:get, "#{base}/sessions/#{session_ref}/upo/20260823-EU-1-1-ZZ")
+          .to_return(status: 200, body: xml)
+        client = described_class.new(connection, "access.jwt", storage: storage,
+                                                               clock: -> { distant + 60 })
+
+        expect(client.fetch(page(expires_at: distant), session_reference: session_ref).source)
+          .to eq(:api)
+        expect(a_request(:get, link)).not_to have_been_made
+      end
+    end
   end
 
   describe "the storage connection" do
