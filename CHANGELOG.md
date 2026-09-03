@@ -19,9 +19,10 @@ gem version for which API state".
 > built by this gem encrypted, submitted and accepted, a KSeF number assigned, and the signed
 > UPO retrieved and hash-verified. The **KSeF-token auth call and the crypto module went live
 > the same day** — a stale `timestampMs` refused by TEST, and `certificateId`/`publicKeyId`
-> recomputed against real certificates (run `32704511675`, `docs/REFERENCE.md` §9). What is
-> still **WebMock stubs** only: token refresh and invoice download. Batch has no code at all
-> yet, so it is absent rather than stubbed.
+> recomputed against real certificates (run `32704511675`, `docs/REFERENCE.md` §9). **Token
+> refresh and invoice download have since run against TEST too** (2026-08-26), each with a
+> committed cassette, so nothing in the shipped surface is WebMock-only any more. Batch has no
+> code at all yet, so it is absent rather than stubbed.
 
 ### Added
 - **A recorded flow for the two retrieval paths nothing had ever run**:
@@ -175,6 +176,41 @@ gem version for which API state".
   the document will carry it, rounded per bucket.
 
 ### Fixed
+
+- **Live integration specs could not reach the network at all**, so the nightly ran red for six
+  consecutive nights (2026-08-28 onward: 27 examples, 27 failures, one error class). The
+  recorded tier's `hook_into :webmock` installs a *global* WebMock stub, and
+  `StubRegistry#response_for_request` consults global stubs **before** WebMock asks whether a
+  real connection is allowed — so `WebMock.allow_net_connect!`, the live tier's opt-in since
+  long before VCR arrived here, stopped being read. VCR also aliases
+  `WebMock.net_connect_allowed?` to answer `true` while it is turned on. With no cassette in use
+  and `record: :none`, VCR refused every request with `UnhandledHTTPRequestError`.
+
+  The seam is now `spec/support/live_network.rb`, which turns VCR off for the example as well.
+  Nothing in the suite could have caught this — the live tier is the only tier that opens the
+  seam, so neither per-push CI nor `rake` exercises the hook — so `spec/live_network_spec.rb`
+  now asks `StubRegistry#response_for_request`, the exact call `Net::HTTP#request` makes, what
+  is handling a request with the seam open and closed. It needs no socket and no credential, and
+  its first example is the negative control that keeps the rest meaningful.
+
+  Test-only; no shipped behaviour changed.
+
+- **`UPO::Client#fetch` judged a pre-signed link's expiry against the wall clock**, which made it
+  the one route decision in the library that `Ksef::Client.new(clock:)` did not reach. KSeF signs
+  a UPO `downloadUrl` for **exactly three days** (measured across three cassettes and two
+  recording sessions; `docs/REFERENCE.md` §14.2), so the retrieval cassette replayed correctly
+  for three days and then began taking the metered fallback — a request no recording contained.
+  The recorded tier went red on 2026-08-29 and stayed unseen until 2026-09-03, because nothing
+  pushed in between.
+
+  `UPO::Client` now takes a `clock:`, threaded from the facade. **Both branches had been covered
+  since the method was written**, using `Time.now + 600` and `Time.now - 60` — built from the
+  very clock the code read, so the two agreed by construction and no coverage criterion could
+  distinguish an injected clock from a wall-clock one. The regression examples pin a clock that
+  disagrees with the wall clock in both directions.
+
+  This affects a caller who holds a `UPO::Client` open across the link's three-day lifetime;
+  everything reached through `Ksef::Client` behaves as before.
 
 - **The VCR record hooks raised on any body VCR delivered as `ASCII-8BIT`.** A UTF-8 pattern
   matched against a binary string raises as soon as it holds a non-ASCII byte, and KSeF's bodies

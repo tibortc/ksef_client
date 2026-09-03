@@ -91,6 +91,25 @@ RSpec.describe "the recorded test tier" do
     expect(lifetimes).to all(be < 3600)
   end
 
+  # **The credential is not the only thing in a cassette that decays**, and the second one took
+  # a week to surface because it decays slowly.
+  #
+  # KSeF signs a UPO `downloadUrl` for about three days. {Ksef::UPO::Client#fetch} prefers that
+  # link and falls back to the metered API route once it has expired — a *route* decision, made
+  # against the clock. It read `Time.now` rather than the injected one, so
+  # `spec/recorded/invoice_download_spec.rb` replayed correctly for three days and then began
+  # requesting a URL its cassette had never recorded, because the recording had taken the link.
+  # Red on 2026-08-29, unseen until 2026-09-03: nothing pushed in between.
+  #
+  # The example above states the same durable fact about the credential. This states it about
+  # the link, so removing either clock injection leaves a spec that explains what broke.
+  it "records pre-signed links that expire long before the cassettes stop being replayed" do
+    lifetimes = RecordedTier.download_url_lifetimes
+
+    expect(lifetimes).not_to be_empty
+    expect(lifetimes).to all(be < 7 * 86_400)
+  end
+
   # **`auth_refresh_spec`'s "does not renew twice" assertion is enforced by the cassette**, not
   # by the expectation: a second renewal raises `UnhandledHTTPRequestError` only because exactly
   # one refresh interaction was recorded. Nothing said so, and a re-recording that captured two

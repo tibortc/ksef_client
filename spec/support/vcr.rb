@@ -67,6 +67,36 @@ module RecordedTier
     end
   end
 
+  # How long each recorded pre-signed UPO link was valid for, in seconds — measured from the
+  # `recorded_at` of the interaction that published it.
+  #
+  # The credential is not the only thing in a cassette that decays. The link's expiry decides a
+  # **route** ({Ksef::UPO::Client#fetch}), and it decays about three hundred times more slowly
+  # than the token — slowly enough that a recording verified on the day it is made looks
+  # entirely correct and turns red days later.
+  #
+  # Read by regexp rather than by walking the JSON because the key appears at two depths under
+  # two names — `upo.pages[].downloadUrlExpirationDate` on a session and
+  # `upoDownloadUrlExpirationDate` on an invoice — and the claim being made is about all of
+  # them.
+  EXPIRY_FIELD = /"\w*[Dd]ownloadUrlExpirationDate"\s*:\s*"([^"]+)"/
+
+  # @return [Array<Float>]
+  def self.download_url_lifetimes
+    Dir.glob(File.join(DIR, "**", "*.yml")).flat_map do |file|
+      interactions = YAML.safe_load_file(file)["http_interactions"] || []
+      interactions.flat_map { |interaction| download_url_lifetime(interaction) }
+    end
+  end
+
+  # @return [Array<Float>] one entry per link the interaction published; empty for most
+  def self.download_url_lifetime(interaction)
+    recorded_at = Time.httpdate(interaction.fetch("recorded_at"))
+
+    interaction.dig("response", "body", "string").to_s.scan(EXPIRY_FIELD).flatten
+               .map { |stamp| Time.iso8601(stamp) - recorded_at }
+  end
+
   # nil unless this interaction's response carries an access token — most do not.
   def self.access_token_lifetime(interaction)
     body = interaction.dig("response", "body", "string").to_s
@@ -99,9 +129,13 @@ module RecordedTier
   # It matched no existing rule and no scanner: a SAS `sig` is not a JWT, not `Bearer`-prefixed,
   # and not a value any machine holds in its environment.
   #
-  # The path is kept and the query dropped. Nothing needs the query — the matcher ignores those
-  # parameters, and no cassette follows the link (`Client#upo` uses the metered API route) — while
-  # the path keeps the field a recognisable URL for anything that parses it.
+  # The path is kept and the query dropped. Nothing needs the query: `invoice_download_spec.rb`
+  # does follow the link, and matches because {IGNORED_QUERY} strips these parameters from both
+  # sides. Keeping the path leaves the field a recognisable URL for anything that parses it.
+  #
+  # (This said "no cassette follows the link" until 2026-09-03, which stopped being true when
+  # the retrieval flow was recorded — the same belief that let {Ksef::UPO::Client#fetch}'s
+  # wall-clock read go unnoticed.)
   SIGNED_URL_FIELD = /("(?:upoDownloadUrl|downloadUrl)"\s*:\s*")([^"?]+)\?[^"]*(")/
 
   # What a stripped one looks like, so the scanner can tell "scrubbed" from "never had a query".

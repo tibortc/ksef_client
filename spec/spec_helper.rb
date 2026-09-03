@@ -124,6 +124,7 @@ WebMock.disable_net_connect!(allow_localhost: false)
 # before any example runs (DESIGN.md §9.1).
 require_relative "support/vcr"
 require_relative "support/recorded_flow"
+require_relative "support/live_network"
 
 RSpec.configure do |config|
   config.expect_with(:rspec) { |c| c.syntax = :expect }
@@ -142,13 +143,16 @@ RSpec.configure do |config|
   # this exclusion were unconditional — the env var is what actually lifts it.
   config.filter_run_excluding(:integration) unless ENV["KSEF_INTEGRATION"] == "1"
 
-  # WebMock is disabled suite-wide above. Integration specs opt back in for their own
-  # duration only, so a failure cannot leave the network open for whatever runs next.
+  # WebMock is disabled suite-wide above, and the recorded tier's VCR hook intercepts ahead
+  # of it — `WebMock.allow_net_connect!` on its own has not reached the network since
+  # 2026-08-26, which is what broke six consecutive nightlies. {LiveNetwork} opens both, and
+  # says why. Scoped to the example's own duration, so a failure cannot leave the network open
+  # for whatever runs next.
   config.around(:each, :integration) do |example|
-    WebMock.allow_net_connect!
+    LiveNetwork.open!
     example.run
   ensure
-    WebMock.disable_net_connect!(allow_localhost: false)
+    LiveNetwork.close!
   end
   config.example_status_persistence_file_path = ".rspec_status"
   config.disable_monkey_patching!

@@ -216,7 +216,9 @@ module Ksef
 
     # @return [Ksef::UPO::Client]
     def upo_client
-      @upo_client ||= UPO::Client.new(connection, credential, storage: HTTP::Connection.storage(config))
+      @upo_client ||= UPO::Client.new(
+        connection, credential, clock: @clock, storage: HTTP::Connection.storage(config)
+      )
     end
 
     # @return [Ksef::Invoices::Client]
