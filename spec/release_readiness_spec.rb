@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../tasks/release_notes"
+
 # Gates that only matter at release. Excluded from ordinary runs; `release.yml` sets
 # KSEF_RELEASE_CHECK=1 so a tag build fails rather than publishing a broken gem.
 RSpec.describe "release readiness", :release_check do
@@ -85,6 +87,32 @@ RSpec.describe "release readiness", :release_check do
     # than only in the repository.
     it "ships the field mapping, which is for the gem's users" do
       expect(gemspec.files).to include("docs/field_mapping.md")
+    end
+  end
+
+  # **The `announce` job already makes this check — too late to be useful.**
+  #
+  # It reads the CHANGELOG section for the tag and fails when there is none, which is the right
+  # failure: it means the entries are still sitting under `[Unreleased]`. But it runs
+  # `needs: publish`, so it fails *after* the gem is on RubyGems. The irreversible half succeeds
+  # and the recoverable half breaks, and a version number cannot be reused.
+  #
+  # `release.yml` sets `KSEF_RELEASE_CHECK=1` on the suite that gates publishing, so the same
+  # check placed here runs *before* either job. Cutting the section is then part of the release
+  # commit rather than something to remember at tag time.
+  describe "the changelog" do
+    # Not `raise_error`: `ReleaseNotes.for` raises with a message naming the version and listing
+    # the headings that do exist, and that message is the whole value of the failure.
+    it "has a non-empty section for the version about to be published" do
+      expect(ReleaseNotes.for(Ksef::VERSION)).not_to be_empty
+    end
+
+    # The one the gate above cannot make: `[Unreleased]` has to survive a release so the next
+    # change has somewhere to go. `ReleaseNotes.for` refuses to publish it by name, which only
+    # helps while it is still there to refuse.
+    it "keeps an unreleased section for whatever comes next" do
+      expect(ReleaseNotes.section(File.read("CHANGELOG.md", encoding: "UTF-8"), "Unreleased"))
+        .not_to be_nil
     end
   end
 end
