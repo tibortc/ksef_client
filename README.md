@@ -116,12 +116,13 @@ an API change here breaks a test — though the snippet is mirrored by hand rath
 extracted, so the *prose* can still drift from the spec. And see the status note above on what
 stubs do and do not prove.
 
-```ruby
-client = Ksef::Client.new(
-  env:  :test,
-  auth: Ksef::Auth::Token.new(context_nip: "9999999999", token: ENV["KSEF_TOKEN"])
-)
+**Everything down to `to_xml` is offline and needs no credential** — building, validating and
+serialising an invoice never touches the network. From `send_invoice` on you need a KSeF token
+in `KSEF_TOKEN`; `Ksef::Auth::Token.new` raises immediately if it is nil, rather than failing
+later against the API. A token is issued by `POST /tokens` after a one-time XAdES
+authentication, so getting the first one is a separate exercise.
 
+```ruby
 invoice = Ksef::FA3.build do |f|
   f.seller nip: "9999999999", name: "ACME sp. z o.o.",
            address: { street: "Prosta 1", city: "Warszawa", postal_code: "00-001", country: "PL" }
@@ -134,6 +135,11 @@ end
 
 invoice.validate!                              # offline: model, bytes, then the XSD
 invoice.to_xml
+
+client = Ksef::Client.new(                     # from here on, a credential is required
+  env:  :test,
+  auth: Ksef::Auth::Token.new(context_nip: "9999999999", token: ENV["KSEF_TOKEN"])
+)
 
 result = client.send_invoice(invoice)          # validate! → encrypt → session → submit
 status = client.wait_until_accepted(result.reference)
@@ -349,9 +355,17 @@ whatever it does not cover.** Nothing is thrown away — the whole document stay
 
 ```ruby
 invoice.fully_mapped?       # => false
-invoice.unmapped_elements   # => ["Faktura/Fa/Platnosc", "Faktura/Podmiot3", ...]
+invoice.unmapped_elements   # => ["Faktura/Fa/DodatkowyOpis", "Faktura/Podmiot3", ...]
 invoice.raw_document        # the complete Nokogiri document, always
 ```
+
+**The first two answer by re-serialising, so they raise when the document cannot be** — which
+is the case the paragraph above sends you here for. A rejected invoice with a malformed NIP
+parses happily and then fails `#unmapped_elements` with
+`This invoice cannot be re-serialised, so there is nothing to say about what re-serialising it
+would drop: …`. That is deliberate: what a document would lose on the way out is not a question
+about a document that cannot get out. `#raw_document` is the one that always answers, which is
+why it says *always*.
 
 For an invoice this gem built, the XML always round-trips byte for byte, and
 `Ksef::FA3.parse(invoice.to_xml) == invoice` holds whenever the invoice states everything the
