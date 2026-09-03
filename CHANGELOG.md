@@ -1288,6 +1288,66 @@ evidence in `docs/REFERENCE.md` §14.
   Given how tight the session budgets are, this unmetered path is the better default, with
   `GET /sessions/{ref}/upo/{upoRef}` as the fallback once a link expires.
 
+## [0.1.0.rc2] — 2026-09-03
+
+**Targets:** KSeF API 2.0 · FA(3) `1-0E` · upstream `CIRFMF/ksef-api@1c34fe27`,
+`CIRFMF/ksef-client-csharp@406904d6`, `CIRFMF/ksef-pdf-generator@2b7c1dae` (sample corpus,
+`docs/REFERENCE.md` §1.4)
+
+> **The release candidate for 0.1.0.** Unlike `0.1.0.rc1`, this is a working client: it
+> authenticates, builds and validates FA(3), sends, polls, and retrieves the UPO — all verified
+> against the live KSeF **TEST** environment. It is a candidate rather than a release because
+> 0.1.0's gates are not yet met (below), and because this API has not yet been used by anyone
+> but its author.
+>
+> Prereleases are not installed by `gem install ksef_client`; ask for this version explicitly.
+> **Do not point it at production.**
+
+### Why this release exists
+
+To run the publishing pipeline end to end before `0.1.0` does.
+
+`0.1.0.rc1` proved trusted publishing — OIDC, no long-lived API key anywhere. It did not prove
+the rest: the job that creates the GitHub release from this file landed four days *after* that
+tag, and rc1's release entry was written by hand. That job had never executed, and when it was
+finally read it turned out to be broken — it passed the git tag where a version was expected, so
+it would have failed on any tag at all. It runs `needs: publish`, so the failure would have
+landed *after* the gem was irreversibly on RubyGems.
+
+That is the shape of thing a rehearsal is for, and it is why this version exists rather than
+going straight to `0.1.0`.
+
+### What is in it
+
+The 0.1.0 development line as it stood on 2026-09-03. The entries are kept under the 0.1.0
+heading rather than duplicated here — at the time of tagging that heading is `[Unreleased]`.
+
+Since `0.1.0.rc1`, in summary:
+
+- **Authentication**, both methods the Ministry documents: XAdES-BES with a qualified
+  certificate, and the KSeF-token flow. Both have minted a token against live TEST.
+- **The FA(3) layer** — a builder DSL, a parser with a round-trip law green over the Ministry's
+  own sample corpus, all seven invoice types (`VAT`, `KOR`, `ZAL`, `ROZ`, `UPR`, `KOR_ZAL`,
+  `KOR_ROZ`), the attachment node, and a generated `docs/field_mapping.md`.
+- **Four validator tiers**, split by what each can actually see: the model, the serialised
+  bytes, the XSD, and business checks. The last are advisory — `Invoice#warnings`, never
+  `#errors` — because a Polish invoice priced from round gross prices legitimately misses the
+  arithmetic by a grosz per line, and refusing those is what got KSeF's own proposed rule
+  withdrawn.
+- **Online sessions** — open, send, poll, close — with UPO retrieval and invoice download, both
+  integrity-checked against the hash KSeF publishes.
+- **`Ksef::Client`**, the facade, thread-safe by construction rather than by convention.
+
+### Known gaps
+
+- **Batch sessions are absent**, not stubbed. 0.2.
+- `Rozliczenie`, `Platnosc`, `Stopka` and other optional FA(3) nodes are not carried.
+  `Invoice#unmapped_elements` names exactly what a parsed document would lose on the way back
+  out, so this is visible rather than silent. 0.2.
+- The error-code catalogue in `docs/errors.md` is incomplete. 0.2.
+- **This is a release candidate and the API may still change.** SemVer's promises begin at 1.0;
+  until then see the support policy in the README.
+
 ## [0.1.0.rc1] — 2026-08-22
 
 **Targets:** KSeF API 2.0 · FA(3) `1-0E` (`kodSystemowy` `FA (3)`, variant 3)
