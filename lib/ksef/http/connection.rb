@@ -31,7 +31,17 @@ module Ksef
             f.use Retry, policy: config.retry_policy, logger: config.logger
             f.use ErrorHandler
             f.use SystemWarning, logger: config.logger
-            f.response :json, content_type: JSON_CONTENT_TYPE
+            # `parser_options` carries the decoder; see {JsonDecoder} for why one exists.
+            #
+            # **The hash must stay a fresh literal here.** Faraday's middleware reads the
+            # decoder with `@parser_options&.delete(:decoder)` — destructively — so hoisting
+            # this into a frozen constant raises `FrozenError` on the first request, and
+            # sharing one hash across two connections leaves the second silently falling back
+            # to `::JSON.parse` and failing again. `build` is called per connection, so the
+            # literal is already correct; the point is not to "tidy" it into a constant. Both
+            # failures measured 2026-09-07.
+            f.response :json, content_type: JSON_CONTENT_TYPE,
+                              parser_options: { decoder: [JsonDecoder, :call] }
 
             apply_transport_options(f, config)
             f.adapter config.adapter

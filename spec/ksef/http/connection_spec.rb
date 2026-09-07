@@ -69,6 +69,25 @@ RSpec.describe Ksef::HTTP::Connection do
       expect(handlers.index(Ksef::HTTP::ErrorHandler))
         .to be < handlers.index(Faraday::Response::Json)
     end
+
+    # **This is the only thing that can see the decoder go missing.**
+    #
+    # Under `json` 2 the middleware's default decoder works, so every other example in this
+    # suite passes with the wiring removed — the failure appears only on `json` 3, i.e. only
+    # in a CI leg that resolved it, which is exactly how the breakage arrived unannounced
+    # (see {Ksef::HTTP::JsonDecoder}). Asserting that our decoder is the one actually called
+    # holds on any json version.
+    #
+    # A message expectation rather than a peek at Faraday's `@kwargs`: what matters is that
+    # the parse goes through {Ksef::HTTP::JsonDecoder}, not how Faraday stores the option.
+    it "parses through our own decoder, not Faraday's default" do
+      stub_request(:get, "#{base}/probe")
+        .to_return(status: 200, body: '{"ok":true}', headers: { "Content-Type" => "application/json" })
+      allow(Ksef::HTTP::JsonDecoder).to receive(:call).and_call_original
+
+      expect(connection.get("probe").body).to eq("ok" => true)
+      expect(Ksef::HTTP::JsonDecoder).to have_received(:call).with('{"ok":true}', anything)
+    end
   end
 
   describe "successful responses" do

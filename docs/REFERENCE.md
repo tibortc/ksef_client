@@ -824,6 +824,56 @@ distinguished from "stuck" by elapsed time alone.
 
 ---
 
+### 4.9 `json` 3.0.0 breaks Faraday 2.14.3 — a shim with a removal trigger
+
+Not a KSeF fact; recorded here because it is the one place a dependency's behaviour reaches
+shipped transport code, and because the shim must be deleted rather than forgotten.
+
+**What happened.** `json 3.0.0` (released 2026-09) dropped the second **positional** argument to
+`JSON.parse`; options are keyword-only now. `Faraday::Response::Json#parse` still calls
+`decoder.public_send(method_name, body, @parser_options || {})`, so under json 3 every JSON
+response raised `Faraday::ParsingError: wrong number of arguments (given 2, expected 1)`.
+Measured in a clone of this repository bundled against json 3.0.0: **1580 examples,
+163 failures**, all one cause. With the shim: **0 failures**, coverage gates enforced.
+
+**It reached users, not just CI.** The gemspec requires `faraday "~> 2.0"`, faraday declares
+`json >= 0`, and **faraday 2.14.3 is the latest release** — so `gem install ksef_client` produced
+a client that could not read any API response.
+
+**Why it arrived with no commit.** `Gemfile.lock` is gitignored by library convention
+(DESIGN.md §4.1), so CI resolves fresh — and **rubocop 1.90.0 relaxed its own `json ~> 2.3` pin
+to `>= 2.3`**, which is what let json 3.0.0 into the resolve. A transitive development pin had
+been shielding the build, invisibly and by accident.
+
+**The fix.** Faraday's response middleware accepts a caller-supplied decoder, read from *inside*
+`parser_options`. `Ksef::HTTP::JsonDecoder.call(body, _options = nil)` calls `JSON.parse(body)`,
+and `HTTP::Connection.build` wires it. This keeps every other behaviour the middleware provides
+— the content-type match with its `;` split (so `application/problem+json; charset=utf-8` still
+parses), the `respond_to?(:to_str)` guard, blank body to `nil`, the `StandardError`/`SyntaxError`
+rescue, and `Faraday::ParsingError` wrapping — and leaves the ordering spec that pins the
+middleware by class working untouched.
+
+Three measured traps, all recorded on the code:
+
+| Trap | Behaviour |
+|---|---|
+| `parser_options` in a frozen constant | `FrozenError` on the first request — the middleware reads the decoder with a destructive `delete` |
+| One `parser_options` hash shared by two connections | the first request empties it; the second silently reverts to `::JSON.parse` and fails again |
+| `decoder: JSON` (Faraday's `respond_to?(:load)` branch) | `JSON.load(body, {})` returns **nil** for a valid body, no exception |
+
+So the hash stays a fresh literal in `build`, and the decoder is given in array form.
+
+**Removal trigger.** Faraday *merged* json 3 support in
+[PR #1687](https://github.com/lostisland/faraday/pull/1687) on 2026-08-12 and has **not released
+it** — 2.14.3 shipped 2026-06-16. When a release containing it exists, raise the gemspec floor to
+that version and delete `JsonDecoder`, its wiring in `HTTP::Connection`, the copy in
+`spec/ksef/http/retry_spec.rb`, and the guard example in `spec/ksef/http/connection_spec.rb`.
+`JsonDecoder`'s optional second parameter is what makes the interim safe in both worlds: the
+merged fix splats the options as keywords, and `(body, _options = nil)` satisfies that call shape
+as well as today's.
+
+---
+
 ## 5. Error model — resolves DESIGN.md §6.7 [VERIFY]
 
 ### 5.1 Two envelopes; the *request* opts in
