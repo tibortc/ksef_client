@@ -203,6 +203,36 @@ gem version for which API state".
   No new dependency, and no version pin — pinning `json` would have fought faraday's own
   `json >= 0` and rubocop's `json >= 2.3`, making the gem uninstallable next to them.
 
+- **The cassette-recording workflow discarded the recordings it had just paid for.**
+  `record-cassettes.yml` has never succeeded: four dispatches, four failures. The two that got
+  furthest recorded real cassettes, passed the credential scan, then failed the *replay* step —
+  and `upload-artifact` carried no `if:`, so its implicit `success()` skipped it. Each of those
+  runs created a permanent, unwithdrawable TEST invoice and produced nothing retrievable. It is
+  why every cassette in this repository was recorded locally, against DESIGN.md §9.1's own
+  decision that recording belongs in CI.
+
+  Now `if: always() && steps.hygiene.outcome == 'success'`. Deliberately **not** `if: always()`,
+  which would publish after a failed credential scan — exactly when a cassette may hold a live
+  credential, to an artifact anyone with the run id can fetch. Verification that runs after an
+  irreversible step must not be able to destroy its output: fail the job, keep the artifact.
+
+- **The "refuse to run against production" guard could not fire.** Both credentialed workflows
+  set `KSEF_ENV: test` in the guard step's own `env:` and then asked whether it equalled `prod`
+  — a literal against a different literal, in the step whose whole purpose is to be able to
+  fail. `KSEF_ENV` now sits on the job, so the guard validates the one setting every step
+  inherits, and it is an allow-list (`!= "test"`) rather than a `prod` denylist, matching
+  `rake vcr:record`'s own guard.
+
+- **The rules the workflows must obey are asserted now, not reviewed.**
+  `spec/workflows_spec.rb` reads `.github/workflows/*.yml` and fails on an expression
+  interpolated into a `run:` script (a hard rule that had already been violated once, enforced
+  only by comments), an unpinned action, a `KSEF_ENV` that is not `test`, a guard that sets the
+  value it checks, and an upload not gated on the credential scan. Three defects in three
+  workflows — this, the guard above, and the release-announce bug below — were all in code no
+  spec could reach.
+
+  Development-only; nothing shipped changes.
+
 - **The GitHub-release job would have failed on every release, after the gem was published.**
   `release.yml` passed `github.ref_name` — the *tag*, `v0.1.0` — to `ReleaseNotes.for`, which is
   keyed on the CHANGELOG heading, `0.1.0`. One character, and it raises. The next step in the

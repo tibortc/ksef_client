@@ -94,6 +94,10 @@ RSpec/DescribeClass:
     - "spec/recorded_tier_spec.rb"
     - "spec/recorded/**/*_spec.rb"
     - "spec/openapi_contract_spec.rb"  # asserts facts about a pinned artifact, not a class
+    # Reads .github/workflows/*.yml. The subject is CI configuration — a workflow step is the
+    # least-tested code here and some of it only runs when a mistake is expensive, so the rules
+    # it must obey are asserted rather than reviewed. No class involved.
+    - "spec/workflows_spec.rb"
     # A law over the pinned FA(3) corpus (DESIGN.md §7.6), holding across the parser, the
     # serializer and the validator together — no single class owns it.
     - "spec/ksef/fa3/round_trip_spec.rb"
