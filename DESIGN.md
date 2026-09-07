@@ -576,7 +576,10 @@ vary per recording just as much.
 
 #### Order of work
 
-**Recording runs in CI, not on a developer machine, because that is where the credentials are.**
+**Recording is meant to run in CI, not on a developer machine, because that is where the
+credentials are — and it never has.** All four dispatches failed and every cassette in this
+repository was recorded locally (found 2026-09-07, below). The decision stands; the mechanism
+did not work.
 `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN` are environment secrets on `ksef-test`, scoped so only a
 job declaring that environment can read them (§6a.3). `rake auth:bootstrap` can mint a second
 credential from nothing, and doing so *to record locally* would be creating a third-party
@@ -926,6 +929,59 @@ And the failure was invisible for a second reason: **nothing pushed between 2026
 pulled is a tier that is not running. The nightly does run daily — and was red for its own
 reason, which is how one week produced two independent clock-and-interception defects and no
 signal at all.
+
+#### The expensive artifact was the one being discarded
+
+Found 2026-09-07 by reading the run history: **`record-cassettes.yml` has never succeeded.**
+Four dispatches, four failures — and the two that got furthest are the instructive ones.
+
+Runs `32951640218` and `32955762854` both recorded real cassettes, both passed the credential
+scan, and both then failed the *replay* step on an unrelated spec bug. `upload-artifact` carried
+no `if:` at all, which means an implicit `success()`, so it was skipped. Each of those runs
+created a permanent, unwithdrawable TEST invoice and produced nothing anyone could retrieve.
+
+That is why every cassette here was recorded locally, against this section's own decision — the
+workflow kept losing them, so the work moved to where it would not.
+
+**`if: always()` is the obvious repair and the wrong one.** It would upload after a failed
+*scan* too, which is exactly when a cassette may hold a live credential, and on a public
+repository anyone with the run id can fetch an artifact. The condition wants the scan's own
+outcome: `always() && steps.hygiene.outcome == 'success'` publishes a verified-clean recording
+whatever the replay did, and publishes nothing when the scan failed or never ran. Losing a
+cassette that failed the scan is correct — it is a leak, not an artifact.
+
+The general lesson is about ordering rather than YAML: **verification that runs after an
+irreversible step must not be able to destroy its output.** Fail the job, keep the artifact.
+
+#### A guard that sets the value it then checks
+
+Both credentialed workflows carried this, and the nightly's called itself *"belt and braces"*:
+
+```yaml
+run: |
+  if [ "${KSEF_ENV}" = "prod" ]; then exit 1; fi
+env:
+  KSEF_ENV: test          # ← set by this same step
+```
+
+It compares a literal against a different literal, so it could not fail — in the step whose
+entire purpose is to be able to. `KSEF_ENV` now sits on the **job**, so every step inherits one
+setting and the guard validates that rather than its own argument, and the test is an allow-list
+(`!= "test"`) rather than a `prod` denylist: these tiers are TEST-only, so `demo` would be wrong
+too and a typo wronger still. `rake vcr:record`'s guard was already written that way.
+
+#### The rules these files must obey are now asserted, not reviewed
+
+`spec/workflows_spec.rb` reads `.github/workflows/*.yml` and fails on: an expression
+interpolated into a `run:` script (a CLAUDE.md hard rule that had already been violated once,
+and was enforced only by comments), an action not pinned to a full SHA, a `KSEF_ENV` set to
+anything but `test`, a TEST-only guard that sets the variable it checks, and an upload condition
+that is not gated on the credential scan. Its first example asserts it found workflows and more
+than twenty steps, so it cannot pass by matching nothing.
+
+Three defects in three workflows, all in code no spec could reach, is the argument for the file
+existing: `release.yml`'s announce job had never run and was broken, `record-cassettes.yml` had
+never succeeded and threw away what it paid for, and the production guard could not fire.
 
 #### What not to do
 

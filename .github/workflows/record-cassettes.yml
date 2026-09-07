@@ -42,6 +42,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: ksef-test
 
+    # **One place decides the environment**, and the guard below reads *that* rather than a
+    # literal it set itself. It used to set `KSEF_ENV: test` in the guard step's own `env:` and
+    # then ask whether it equalled `prod` — comparing a literal against a different literal, so
+    # the check could not fail. Hoisted here, every step inherits it and the guard validates the
+    # single setting they all share.
+    env:
+      KSEF_ENV: test
+
     steps:
       # **Never interpolate `${{ }}` into a `run:` script.** GitHub substitutes it textually
       # before the shell parses, so a dispatch input can close the quote and append commands —
@@ -67,14 +75,14 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
-      - name: Refuse to run against production
+      - name: Refuse to run against anything but TEST
+        # An allow-list, matching `rake vcr:record`'s own guard: `prod` is the one that must
+        # never happen, but `demo` would be just as wrong here and a typo wronger still.
         run: |
-          if [ "${KSEF_ENV}" = "prod" ]; then
-            echo "::error::Recording must never target production."
+          if [ "$KSEF_ENV" != "test" ]; then
+            echo "::error::Recording is TEST-only, got KSEF_ENV=$KSEF_ENV."
             exit 1
           fi
-        env:
-          KSEF_ENV: test
 
       - name: Record
         # `TARGET` through the environment, for the reason above — this step is where the
@@ -82,11 +90,11 @@ jobs:
         run: bundle exec rake "vcr:record[$TARGET]"
         env:
           TARGET: ${{ inputs.target }}
-          KSEF_ENV: test
           KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
           KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
 
       - name: Scan the recordings for credentials
+        id: hygiene
         # The scrub happens on write; this proves it worked, with the real token in the
         # environment so the scan compares against the value that was actually used.
         #
@@ -107,7 +115,23 @@ jobs:
         # than a few minutes after the recording (DESIGN.md §9.1).
         run: bundle exec rspec spec/recorded
 
+      # **Upload whenever the cassettes have passed the credential scan, even if the replay
+      # then failed.** This step carried no `if:` at all until 2026-09-07, which means an
+      # implicit `success()` — so a failure in the replay above skipped it and discarded the
+      # recording. That happened twice (runs 32951640218 and 32955762854): both recorded real
+      # cassettes, both passed the scan, both failed the replay on an unrelated spec bug, and
+      # both threw away a permanent, unwithdrawable TEST invoice. Every cassette in this
+      # repository was recorded locally as a result, against this section's own decision that
+      # recording belongs in CI.
+      #
+      # **Not `if: always()`**, which is the obvious repair and the wrong one: it would upload
+      # when the *scan* failed too — exactly when a cassette may hold a live credential — and on
+      # a public repository anyone with the run id can fetch the artifact. Gating on the scan's
+      # own outcome uploads a verified-clean recording whatever the replay did, and uploads
+      # nothing when the scan failed or never ran. Losing a cassette that failed the scan is
+      # correct: it is a leak, not an artifact.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.hygiene.outcome == 'success'
         with:
           name: cassettes
           path: spec/cassettes/
