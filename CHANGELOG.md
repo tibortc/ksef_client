@@ -177,6 +177,32 @@ gem version for which API state".
 
 ### Fixed
 
+- **`json` 3.0.0 broke every API response, for users as well as CI.** json 3 dropped the second
+  *positional* argument to `JSON.parse`, and `Faraday::Response::Json#parse` still passes one —
+  so every JSON response from KSeF raised
+  `Faraday::ParsingError: wrong number of arguments (given 2, expected 1)`. Since the gemspec
+  requires `faraday "~> 2.0"`, faraday declares `json >= 0`, and **faraday 2.14.3 is the latest
+  release**, a plain `gem install ksef_client` produced a client that could not read any
+  response. Measured in a clone bundled against json 3.0.0: **1580 examples, 163 failures**, one
+  cause; with the fix, **0 failures** with the coverage gates enforced.
+
+  It arrived with no commit to this repository. `Gemfile.lock` is gitignored by library
+  convention, so CI resolves fresh — and rubocop 1.90.0 relaxed its own `json ~> 2.3` pin to
+  `>= 2.3`, which let json 3.0.0 in. A transitive development pin had been shielding the build
+  by accident.
+
+  Faraday's response middleware takes a caller-supplied decoder, so `Ksef::HTTP::JsonDecoder`
+  now provides one and only the failing call changes. Everything else the middleware does is
+  retained — the content-type match with its `;` split, the `to_str` guard, blank body to `nil`,
+  and `Faraday::ParsingError` wrapping — which also leaves the spec pinning the middleware
+  ordering by class working untouched. `docs/REFERENCE.md` §4.9 records three measured traps
+  (a frozen options hash raises; a shared one silently reverts; `decoder: JSON` returns nil for
+  a valid body) and a **removal trigger**: faraday merged json 3 support in PR #1687 on
+  2026-08-12 but has not released it, and the shim goes when it does.
+
+  No new dependency, and no version pin — pinning `json` would have fought faraday's own
+  `json >= 0` and rubocop's `json >= 2.3`, making the gem uninstallable next to them.
+
 - **The GitHub-release job would have failed on every release, after the gem was published.**
   `release.yml` passed `github.ref_name` — the *tag*, `v0.1.0` — to `ReleaseNotes.for`, which is
   keyed on the CHANGELOG heading, `0.1.0`. One character, and it raises. The next step in the
