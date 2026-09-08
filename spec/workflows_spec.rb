@@ -95,6 +95,31 @@ RSpec.describe "the GitHub Actions workflows" do
     end
   end
 
+  # **A dry run must skip exactly one step.** The point of it is to exercise everything the
+  # recording job does *except* the irreversible part, so that the upload — which has never
+  # executed — can be proven without spending a permanent TEST invoice. A flag that grew to
+  # skip the hygiene scan as well would quietly turn the rehearsal into a weaker check than
+  # the thing it rehearses.
+  it "skips only the recording step on a dry run" do
+    job = workflows.fetch("record-cassettes.yml").fetch("jobs").fetch("record")
+    gated = job.fetch("steps").select { |step| step["if"].to_s.include?("dry_run") }
+
+    expect(gated.map { |step| step["name"] }).to eq(["Record"])
+  end
+
+  # Still confirmed, still TEST-only, still not a schedule: a dry run is a mode of this job,
+  # not a relaxation of it.
+  it "keeps the dispatch guards regardless of the dry-run flag" do
+    # `fetch(true)`, not `fetch("on")`: YAML reads a bare `on` as the boolean, so that is the
+    # key Psych hands back for a workflow's trigger block.
+    triggers = workflows.fetch("record-cassettes.yml").fetch(true)
+    inputs = triggers.fetch("workflow_dispatch").fetch("inputs")
+
+    expect(triggers.keys).to eq(["workflow_dispatch"]) # no schedule, ever
+    expect(inputs.fetch("confirm").fetch("required")).to be(true)
+    expect(inputs.fetch("dry_run").fetch("default")).to be(false)
+  end
+
   # The recording is the expensive artifact in this repository — one permanent, unwithdrawable
   # TEST invoice per example. It must survive a failed *replay* and must never be published
   # after a failed *credential scan*, which `if: always()` would do. See the step's comment.
