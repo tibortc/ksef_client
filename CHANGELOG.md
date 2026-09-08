@@ -10,6 +10,8 @@ gem version for which API state".
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-09-08
+
 **Targets:** KSeF API 2.0 · FA(3) `1-0E` · upstream `CIRFMF/ksef-api@1c34fe27`,
 `CIRFMF/ksef-client-csharp@406904d6`, `CIRFMF/ksef-pdf-generator@2b7c1dae` (sample corpus,
 `docs/REFERENCE.md` §1.4)
