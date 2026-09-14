@@ -159,8 +159,8 @@ module Ksef
     end
 
     # The collective UPO for a whole session, following the unmetered link when it is still
-    # valid. Available only after the session has closed *and* finished processing — poll
-    # {#session_status} until it reports success, since `170` means closed but not done.
+    # valid. Available only after the session has closed *and* finished processing, so call
+    # {#wait_for_session} first — `170` means closed but not done.
     #
     # @param session_reference [String]
     # @return [Array<Ksef::UPO::Document>] one per page; a collective UPO holds at most
@@ -173,6 +173,30 @@ module Ksef
 
     # @return [Ksef::Sessions::SessionState]
     def session_status(session_reference) = status_client.session(session_reference)
+
+    # Waits until KSeF has finished processing a whole session.
+    #
+    # **Closing a session and finishing it are two different clocks.** {#session} closes on
+    # the way out, which *starts* asynchronous generation of the collective UPO; the session
+    # then sits at `170` until that finishes at `200`. {#wait_until_accepted} does not cover
+    # it — an accepted invoice says nothing about the session's own progress — so a caller
+    # that sends, waits for the invoice and then asks for {#collective_upo} is racing.
+    #
+    # This existed on {Sessions::Status} from the start and was simply not reachable through
+    # the facade, which left `#collective_upo`'s own documentation telling callers to poll
+    # {#session_status} by hand. Two places in this repository did exactly that, and one of
+    # them got it wrong: `spec/integration/session_flow_spec.rb` read the status once and
+    # asserted a terminal code, which passed until the nightly of 2026-09-13 found TEST still
+    # at `170`.
+    #
+    # @param session_reference [String]
+    # @param deadline [Numeric] seconds; defaults to {Sessions::Status::DEFAULT_DEADLINE}
+    # @yieldparam state [Ksef::Sessions::SessionState] after each poll, for progress reporting
+    # @return [Ksef::Sessions::SessionState] no longer in progress
+    # @raise [Ksef::TimeoutError] when the deadline passes with the session still working
+    def wait_for_session(session_reference, **, &)
+      status_client.wait_for_session(session_reference, **, &)
+    end
 
     # Downloads an invoice KSeF holds, by its KSeF number.
     #

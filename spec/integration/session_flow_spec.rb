@@ -106,8 +106,13 @@ RSpec.describe "an online session against TEST", :integration do
       expect(parsed.assigned_on).to be_a(Date)
     end
 
+    # **Waits, rather than reading once.** Closing the session starts asynchronous generation
+    # of the collective UPO, so it sits at `170` until that finishes at `200` — and
+    # `wait_until_accepted` above does not cover it, because an accepted invoice and a
+    # processed session are different clocks. A single read passed most nights and failed on
+    # 2026-09-13 with TEST still at `170`, which is the race rather than a flake.
     it "reports the session as processed once it has closed" do
-      state = client.session_status(outcome[:receipt].session_reference)
+      state = client.wait_for_session(outcome[:receipt].session_reference, deadline: 240)
 
       expect(state.code).to be >= 200
       expect(state.invoice_count).to be >= 1
