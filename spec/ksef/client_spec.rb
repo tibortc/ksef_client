@@ -317,6 +317,43 @@ RSpec.describe Ksef::Client do
       expect(client.session_status(session_ref)).to be_closed
     end
 
+    # **`170` is closed, not done.** Closing a session starts asynchronous generation of the
+    # collective UPO, so it sits at `170` until `200`. `#wait_until_accepted` does not cover
+    # that — an accepted invoice and a processed session are different clocks — which left
+    # `#collective_upo`'s own docs telling callers to poll `#session_status` by hand. Two
+    # places here did, and the live one got it wrong: it read once and asserted a terminal
+    # code, passing until the nightly of 2026-09-13 caught TEST still at `170`.
+    describe "#wait_for_session" do
+      it "polls past closed, because the collective UPO does not exist at 170" do
+        stub_request(:get, "#{base}/sessions/#{session_ref}")
+          .to_return(json({ "status" => { "code" => 100 } }),
+                     json({ "status" => { "code" => 170 } }),
+                     json({ "status" => { "code" => 200 }, "invoiceCount" => 1 }))
+
+        state = client.wait_for_session(session_ref, sleeper: ->(_) {})
+
+        expect(state.code).to eq(200)
+        expect(a_request(:get, "#{base}/sessions/#{session_ref}")).to have_been_made.times(3)
+      end
+
+      it "reports each state as it goes, for a caller showing progress" do
+        stub_request(:get, "#{base}/sessions/#{session_ref}")
+          .to_return(json({ "status" => { "code" => 170 } }), json({ "status" => { "code" => 200 } }))
+        seen = []
+
+        client.wait_for_session(session_ref, sleeper: ->(_) {}) { |state| seen << state.code }
+
+        expect(seen).to eq([170, 200])
+      end
+
+      it "gives up at the deadline rather than polling for ever" do
+        stub_request(:get, "#{base}/sessions/#{session_ref}").to_return(json({ "status" => { "code" => 170 } }))
+
+        expect { client.wait_for_session(session_ref, deadline: 0, sleeper: ->(_) {}) }
+          .to raise_error(Ksef::TimeoutError)
+      end
+    end
+
     describe "#collective_upo" do
       it "follows every page, since one page is at most 10 000 invoices" do
         stub_request(:get, "#{base}/sessions/#{session_ref}").to_return(

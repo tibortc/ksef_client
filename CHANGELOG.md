@@ -25,6 +25,21 @@ gem version for which API state".
 > code at all yet, so it is absent rather than stubbed.
 
 ### Added
+
+- **`Ksef::Client#wait_for_session`** — waits until KSeF has finished processing a whole
+  session, rather than just closing it.
+
+  **Closing and finishing are two different clocks.** `#session` closes on the way out, which
+  *starts* asynchronous generation of the collective UPO; the session then sits at `170` until
+  that completes at `200`. `#wait_until_accepted` does not cover it — an accepted invoice says
+  nothing about the session's own progress — so a caller that sends, waits for the invoice and
+  then asks for `#collective_upo` is racing.
+
+  The wait already existed on `Sessions::Status` and simply was not reachable through the
+  facade, which left `#collective_upo`'s own documentation instructing callers to poll
+  `#session_status` by hand. Two places in this repository did exactly that, and the live one
+  got it wrong — see below.
+
 - **A recorded flow for the two retrieval paths nothing had ever run**:
   `GET /invoices/ksef/{ksefNumber}` and the pre-signed **storage** leg. All 31 interactions in
   the first three cassettes were on the API host, and none touched `/invoices/ksef/` — so
@@ -176,6 +191,15 @@ gem version for which API state".
   the document will carry it, rounded per bucket.
 
 ### Fixed
+
+- **The live integration suite asserted a terminal session code without waiting for one**, so
+  the nightly of 2026-09-13 went red on a commit that passed on 09-12 and 09-14. It read
+  `session_status` once, immediately after `wait_until_accepted`, and required `code >= 200` —
+  but `170` means closed with the collective UPO still generating, exactly as
+  `SessionCodes`' own documentation says. A race, not a flake: roughly one night in ten on
+  this sample, which is enough to reset a three-consecutive-night release gate. It now uses
+  the new `Client#wait_for_session`.
+
 
 - **`json` 3.0.0 broke every API response, for users as well as CI.** json 3 dropped the second
   *positional* argument to `JSON.parse`, and `Faraday::Response::Json#parse` still passes one —
