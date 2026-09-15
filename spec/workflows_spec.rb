@@ -109,15 +109,25 @@ RSpec.describe "the GitHub Actions workflows" do
 
   # Still confirmed, still TEST-only, still not a schedule: a dry run is a mode of this job,
   # not a relaxation of it.
+  #
+  # **And `dry_run` defaults to true**, so the mode an accidental dispatch gets is the free
+  # one. The two ways of forgetting are not symmetric — meaning to rehearse and forgetting the
+  # flag cost two permanent TEST invoices, while meaning to record and forgetting to clear it
+  # costs a re-dispatch.
+  #
+  # **No schedule, ever, and here the policy has teeth beyond policy.** `Record` is gated on
+  # `${{ !inputs.dry_run }}`, and a `schedule` event carries no `inputs` at all — so
+  # `inputs.dry_run` is null, `!null` is true, and Record would *run*. A cron on this workflow
+  # would record for real every night. Anyone adding one has to change that condition first.
   it "keeps the dispatch guards regardless of the dry-run flag" do
     # `fetch(true)`, not `fetch("on")`: YAML reads a bare `on` as the boolean, so that is the
     # key Psych hands back for a workflow's trigger block.
     triggers = workflows.fetch("record-cassettes.yml").fetch(true)
     inputs = triggers.fetch("workflow_dispatch").fetch("inputs")
 
-    expect(triggers.keys).to eq(["workflow_dispatch"]) # no schedule, ever
+    expect(triggers.keys).to eq(["workflow_dispatch"]) # see above: a cron here would record
     expect(inputs.fetch("confirm").fetch("required")).to be(true)
-    expect(inputs.fetch("dry_run").fetch("default")).to be(false)
+    expect(inputs.fetch("dry_run").fetch("default")).to be(true)
   end
 
   # The recording is the expensive artifact in this repository — one permanent, unwithdrawable
