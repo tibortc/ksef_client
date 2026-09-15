@@ -10,6 +10,21 @@ gem version for which API state".
 
 ## [Unreleased]
 
+### Changed
+
+- **`record-cassettes.yml` now defaults to a dry run.** The workflow creates permanent,
+  unwithdrawable TEST invoices, and its `dry_run` flag — which skips only the recording step —
+  used to default to `false`, so the default dispatch was the maximally expensive one and the
+  free rehearsal was an extra opt-in you had to remember.
+
+  The two ways of forgetting are not symmetric: meaning to rehearse and forgetting the flag cost
+  two invoices, while meaning to record and forgetting to clear it costs a re-dispatch. The
+  typed confirmation already guarded against dispatching *casually*; nothing guarded against
+  dispatching the *wrong mode*. So a workflow called `record-cassettes` no longer records unless
+  asked — the intended surprise, and the cheap one.
+
+  Development-only; nothing shipped changes.
+
 ## [0.1.0] — 2026-09-14
 
 **Targets:** KSeF API 2.0 · FA(3) `1-0E` · upstream `CIRFMF/ksef-api@1c34fe27`,
