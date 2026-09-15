@@ -943,6 +943,19 @@ created a permanent, unwithdrawable TEST invoice and produced nothing anyone cou
 That is why every cassette here was recorded locally, against this section's own decision — the
 workflow kept losing them, so the work moved to where it would not.
 
+**Closed 2026-09-15 — the first success in five dispatches, and it cost nothing.** Once
+`dry_run` defaulted to true the rehearsal became free, and run `34958095284` went green in 16
+seconds: `Record` skipped, the credential scan passing **with the real token in the
+environment** (6 examples) — the one check that cannot run anywhere else, since `test.yml`
+cannot read the secret and that example passes vacuously there — the full-tier replay green (4
+examples), and `upload-artifact` **executing for the first time**, 36 520 bytes at one-day
+retention. Zero KSeF calls, zero TEST invoices.
+
+**It proves the success path, not the repair.** The 2026-09-07 fix is about the upload
+surviving a *failed replay*, and a green rehearsal never enters that branch. What holds it is
+`spec/workflows_spec.rb`'s assertion on the condition itself — the weaker guarantee, and worth
+naming as such rather than counting the run as a full acquittal.
+
 **`if: always()` is the obvious repair and the wrong one.** It would upload after a failed
 *scan* too, which is exactly when a cassette may hold a live credential, and on a public
 repository anyone with the run id can fetch an artifact. The condition wants the scan's own
@@ -1058,12 +1071,15 @@ mis-assigned to Phase 2 before this was checked against the scope list word by w
   constraints out of 0.1 scope. Phase 2 cites §7.4 for the **implementation order of invoice
   types** and nothing else. Both Ministry samples that carry one now parse, re-serialise,
   validate and round-trip (`docs/REFERENCE.md` §8.7).
-- **`download` and `refresh` have never run against TEST.** Neither is a stated requirement of
-  any phase: the scope above lists `download` as a *feature* and it is implemented, `refresh`
-  is not named at all, and Phase 3's bar is "nightly integration green ≥ 3 consecutive nights",
-  which the current nightly meets without exercising either. So this is a judgement about
-  confidence, not an unmet commitment — worth closing before 0.1.0, and worth not dressing up
-  as scope.
+- ~~**`download` and `refresh` have never run against TEST.**~~ **Both closed 2026-08-26**, and
+  with `download` the **storage leg** — the pre-signed `downloadUrl` and its `x-ms-meta-hash`
+  verification, which no cassette had ever exercised. `refresh` is measured at
+  `docs/REFERENCE.md` §4.2a; `spec/recorded/invoice_download_spec.rb` records both halves of
+  the download. Neither was a stated requirement of any phase: the scope above lists `download`
+  as a *feature* and it is implemented, `refresh` is not named at all, and Phase 3's bar is
+  "nightly integration green ≥ 3 consecutive nights", which the nightly met without exercising
+  either. So it was a judgement about confidence, not an unmet commitment — worth closing
+  before 0.1.0, and worth not having dressed up as scope.
 
 The lesson, since it has now recurred three times in one day: **read the scope list before
 saying what is left.** "Complete" was wrong, "two items" was wrong, and both were assertions
@@ -1090,6 +1106,30 @@ The sentence here read "validator tier 3, and only that" until 2026-08-26, and t
 ### Phase 3 — Publish 0.1.0
 Docs complete, nightly integration green ≥ 3 consecutive nights, trusted-publishing pipeline verified with an `-rc` release, then `0.1.0` tagged and published.
 **Done when:** `gem install ksef_client` + README quickstart works for a clean user against TEST.
+
+**✅ Complete 2026-09-15.** `0.1.0` is on RubyGems, published by trusted publishing from the
+`v0.1.0` tag on `2f7a3ef`.
+
+| Gate | State |
+|---|---|
+| Docs complete | **met** — `docs/field_mapping.md` generated and gated by `rake fa3:verify`; every README example run from the *packaged* gem, outside the repo |
+| Nightly green ≥ 3 consecutive nights | **met** — five consecutive, 2026-09-04 to 09-08, each with 27 real examples. The count was read by hand every time, because a green run of *zero* examples is this project's documented failure mode; it is asserted in the workflow as of 2026-09-15 (§9.1) |
+| Trusted publishing verified with an `-rc` | **met** — `0.1.0.rc2`, 2026-09-08: OIDC and no API key, release authored by `github-actions[bot]`, marked prerelease from `Gem::Version#prerelease?`, body verbatim from the CHANGELOG |
+
+The **Done when** was measured rather than assumed: `gem install ksef_client -v 0.1.0.rc2` into
+an empty `GEM_HOME`, then the README quickstart run outside any repository — 1645 bytes of XML,
+no errors.
+
+**The rehearsal earned its keep twice.** `announce` had never executed and was broken — it
+passed the git tag where a version belongs, and it runs `needs: publish`, so the failure would
+have landed *after* the gem was irreversibly on RubyGems (§10). And holding one night on a
+human decision revealed that the four earlier green nightlies had all resolved `json 2.21.2`:
+json 3.0.0 reached RubyGems mid-morning on 2026-09-07, between the nightly that passed and the
+push that failed, so the decoder shim (`docs/REFERENCE.md` §4.9) would otherwise have shipped
+unproven against the live service.
+
+On the release run itself (`34956812691`), **`announce` executed for the first time in the
+project's history and passed.**
 
 ### 0.2
 Batch sessions (ZIP/parts/storage upload, per-invoice results; adds `rubyzip`), invoice query/search + pagination, package export, complete error-code catalog + retry semantics hardened.

@@ -6,10 +6,15 @@ require "yaml"
 # **A workflow step is the least-tested code in this repository, and some of it only runs when
 # a mistake is expensive.**
 #
-# `release.yml`'s announce job had never executed and was broken; `record-cassettes.yml` has
+# `release.yml`'s announce job had never executed and was broken; `record-cassettes.yml` had
 # never succeeded and discarded two recordings that each cost a permanent TEST invoice; and the
 # production guard in two workflows compared a literal against a different literal, so it could
 # not fire. None of that was reachable from a spec, because nothing read these files.
+#
+# Both have since run green — `announce` on the `v0.1.0` tag and `record-cassettes` as a dry
+# run, both on 2026-09-15 — which is the argument rather than a retirement of it: each was
+# repaired against these assertions *before* it next got the chance to fail somewhere
+# irreversible.
 #
 # These do. Every rule here is one the repository already states in prose — CLAUDE.md's hard
 # rules, or a decision written in the workflow's own comments — moved somewhere that fails.
@@ -96,10 +101,14 @@ RSpec.describe "the GitHub Actions workflows" do
   end
 
   # **A dry run must skip exactly one step.** The point of it is to exercise everything the
-  # recording job does *except* the irreversible part, so that the upload — which has never
-  # executed — can be proven without spending a permanent TEST invoice. A flag that grew to
-  # skip the hygiene scan as well would quietly turn the rehearsal into a weaker check than
-  # the thing it rehearses.
+  # recording job does *except* the irreversible part, so that the upload — which had never
+  # executed before the dry run of 2026-09-15 — could be proven without spending a permanent
+  # TEST invoice. A flag that grew to skip the hygiene scan as well would quietly turn the
+  # rehearsal into a weaker check than the thing it rehearses.
+  #
+  # **That dry run proved the success path only.** The condition asserted below exists so a
+  # recording survives a *failed replay*, and a green rehearsal cannot reach that branch — so
+  # this assertion, not the run history, is still the only thing holding it.
   it "skips only the recording step on a dry run" do
     job = workflows.fetch("record-cassettes.yml").fetch("jobs").fetch("record")
     gated = job.fetch("steps").select { |step| step["if"].to_s.include?("dry_run") }
@@ -128,6 +137,40 @@ RSpec.describe "the GitHub Actions workflows" do
     expect(triggers.keys).to eq(["workflow_dispatch"]) # see above: a cron here would record
     expect(inputs.fetch("confirm").fetch("required")).to be(true)
     expect(inputs.fetch("dry_run").fetch("default")).to be(true)
+  end
+
+  # **A nightly can fail by passing, and that failure reaches nobody.** Failure notifications
+  # cover a red run; they cannot cover a green one, because it is a success. Two paths produce a
+  # green run that verified nothing: `KSEF_INTEGRATION` unset filters the whole tier out (RSpec
+  # exits 0 on zero examples), and absent or rotated credentials make `session_flow_spec.rb` and
+  # `crypto_spec.rb` skip wholesale (RSpec exits 0 on an all-pending file). The second is the
+  # one to expect — a credential lapsing is a matter of time. This is why the example count was
+  # read by hand after every run.
+  #
+  # The guard turns both into a red run, where the existing notifications already work. What is
+  # pinned here is the **correspondence**: the step that writes the JSON and the step that reads
+  # it must name the same file. Asserting only that both exist is exactly the mistake
+  # `docs/field_mapping.md`'s guards made — two ends that each looked right and did not pair.
+  it "fails the nightly when it passes without having run anything" do
+    job = workflows.fetch("nightly.yml").fetch("jobs").fetch("integration")
+    runner = job.fetch("steps").find { |step| step["run"].to_s.include?("rspec --tag integration") }
+    guard = job.fetch("steps").find { |step| step["name"].to_s.include?("vacuously green") }
+
+    expect(guard).not_to be_nil
+    expect(runner.fetch("run")).to include("--format json", "$RSPEC_JSON")
+    expect(guard.fetch("env").fetch("RSPEC_JSON")).to eq(runner.fetch("env").fetch("RSPEC_JSON"))
+  end
+
+  # The guard is only a guard if it can fail, and the number it compares against is the whole
+  # rule. One legitimate skip exists — the collective UPO page, which KSeF generates
+  # asynchronously — so the tolerance is one, and a tolerance wide enough to swallow a whole
+  # file's worth of skips would restore the silence it was built to end.
+  it "tolerates the one legitimate skip and no more" do
+    job = workflows.fetch("nightly.yml").fetch("jobs").fetch("integration")
+    guard = job.fetch("steps").find { |step| step["name"].to_s.include?("vacuously green") }
+
+    expect(guard.fetch("env").fetch("MAX_PENDING")).to eq("1")
+    expect(guard.fetch("run")).to include("exit 1")
   end
 
   # The recording is the expensive artifact in this repository — one permanent, unwithdrawable

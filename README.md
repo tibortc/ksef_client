@@ -1,5 +1,6 @@
 # ksef_client
 
+[![Gem Version](https://img.shields.io/gem/v/ksef_client.svg)](https://rubygems.org/gems/ksef_client)
 [![test](https://github.com/tibortc/ksef_client/actions/workflows/test.yml/badge.svg)](https://github.com/tibortc/ksef_client/actions/workflows/test.yml)
 [![Coverage Status](https://coveralls.io/repos/github/tibortc/ksef_client/badge.svg?branch=main)](https://coveralls.io/github/tibortc/ksef_client?branch=main)
 
@@ -17,7 +18,9 @@ XML yourself, it may be all you need. `ksef_client` aims at the other half of th
 invoice types, the FA(3) XSD bundled, and three tiers of validation before anything is
 submitted.
 
-> **Status: pre-release, under active development.**
+> **Status: 0.1.0 is released** — on RubyGems since 2026-09-15, published by trusted
+> publishing (OIDC, no API key). The API carries no stability promise yet; that begins at
+> 1.0 (see [Roadmap](#roadmap)).
 >
 > **Working:** the transport foundations (configuration, environments, error model, HTTP
 > layer), the FA(3) schema metadata, offline XSD validation, and building a plain `VAT`
@@ -49,10 +52,11 @@ submitted.
 > KSeF number whose checksum our own code agrees with, and retrieved the signed UPO with its
 > bytes matching the hash the server published.
 >
-> **The honest caveat, narrowed:** token refresh and invoice download are implemented but
-> verified against stubs only — still "believed correct" rather than proven. Batch has no code at all yet, so it
-> is absent rather than stubbed. The KSeF-token auth call and the crypto module went live on
-> 2026-08-24, so they are no longer on this list.
+> **The honest caveat, now down to one item:** **batch has no code at all yet**, so it is absent
+> rather than stubbed. Everything else on this list has since been exercised against the live
+> service — the KSeF-token auth call and the crypto module on 2026-08-24, and **token refresh and
+> invoice download on 2026-08-26**: `refresh` measured and recorded (`docs/REFERENCE.md` §4.2a),
+> `download` together with the pre-signed storage leg it shares with UPO retrieval.
 >
 > **Reading invoices back works** — `Ksef::FA3.parse` turns FA(3) XML into the same model the
 > builder produces, tested against the Ministry's own published sample invoices. It refuses
