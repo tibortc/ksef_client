@@ -12,6 +12,24 @@ gem version for which API state".
 
 ### Changed
 
+- **The nightly now fails when it passes without running anything.** Failure notifications
+  cover a red run and cannot cover a green one, because a green run is a success — so the
+  project's documented failure mode, *"a green run of zero examples"*, reached nobody and the
+  example count was read by hand after every run instead.
+
+  Two paths produce such a run. `KSEF_INTEGRATION` unset filters the whole tier out, and RSpec
+  exits 0 on zero examples. Absent or rotated TEST credentials make `session_flow_spec.rb` and
+  `crypto_spec.rb` skip in their entirety — 20 of the 27 examples — and RSpec exits 0 on an
+  all-pending file. The second is the one to expect: a credential lapsing is a matter of time,
+  and it fails green.
+
+  The run now emits an RSpec JSON summary and a following step reads it, failing on zero
+  examples or on more than one skip. The tolerance is one because exactly one skip is
+  legitimate — the collective UPO page, which KSeF generates asynchronously. Both modes become
+  *failed* runs, where the existing notifications already work.
+
+  Development-only; nothing shipped changes.
+
 - **`record-cassettes.yml` now defaults to a dry run.** The workflow creates permanent,
   unwithdrawable TEST invoices, and its `dry_run` flag — which skips only the recording step —
   used to default to `false`, so the default dispatch was the maximally expensive one and the
@@ -23,9 +41,15 @@ gem version for which API state".
   dispatching the *wrong mode*. So a workflow called `record-cassettes` no longer records unless
   asked — the intended surprise, and the cheap one.
 
+  **It worked: the workflow succeeded on 2026-09-15, for the first time in five dispatches.**
+  The free rehearsal ran green in 16 seconds — credential scan with the real token, full-tier
+  replay, and `upload-artifact` executing for the first time — for zero KSeF calls and zero TEST
+  invoices. It proves the success path only; the 2026-09-07 fix was about the upload surviving a
+  *failed* replay, and a green rehearsal cannot reach that branch.
+
   Development-only; nothing shipped changes.
 
-## [0.1.0] — 2026-09-14
+## [0.1.0] — 2026-09-15
 
 **Targets:** KSeF API 2.0 · FA(3) `1-0E` · upstream `CIRFMF/ksef-api@1c34fe27`,
 `CIRFMF/ksef-client-csharp@406904d6`, `CIRFMF/ksef-pdf-generator@2b7c1dae` (sample corpus,

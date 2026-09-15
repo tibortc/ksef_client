@@ -61,8 +61,61 @@ jobs:
       - name: Run live integration specs
         # KSEF_INTEGRATION lifts the exclusion filter; --tag then selects only these specs.
         # Both are needed: RSpec ANDs exclusion filters with CLI inclusions.
-        run: bundle exec rspec --tag integration
+        #
+        # The JSON formatter is what the next step reads. `progress` is kept alongside it so the
+        # log still reads the way it always has.
+        run: bundle exec rspec --tag integration --format progress --format json --out "$RSPEC_JSON"
         env:
           KSEF_INTEGRATION: "1"
+          RSPEC_JSON: rspec-integration.json
           KSEF_TEST_NIP: ${{ secrets.KSEF_TEST_NIP }}
           KSEF_TEST_TOKEN: ${{ secrets.KSEF_TEST_TOKEN }}
+
+      - name: Refuse a vacuously green run
+        # **A failed nightly notifies the maintainer; a nightly that passes without running
+        # anything notifies nobody**, because it is a success. That is this project's documented
+        # failure mode — "a green run of *zero* examples" — and the reason the example count has
+        # been read by hand after every run.
+        #
+        # Two paths produce one, and neither is hypothetical:
+        #
+        #   * `KSEF_INTEGRATION` unset or misspelled. `spec_helper.rb`'s
+        #     `filter_run_excluding(:integration)` then matches nothing and RSpec exits 0 on
+        #     zero examples.
+        #   * The TEST credentials missing, rotated, or unreadable because the environment
+        #     protection changed. `session_flow_spec.rb` and `crypto_spec.rb` each `skip` in
+        #     their entirety — 20 of the 27 examples — and RSpec exits 0 on an all-pending file.
+        #     This is the likelier one: a credential lapsing is a matter of time, and it fails
+        #     green.
+        #
+        # The numbers are measured, not assumed: 27 examples (7 auth, 9 crypto, 11 session), of
+        # which exactly **one** may legitimately skip — the collective UPO page at
+        # `session_flow_spec.rb:169`, which KSeF generates asynchronously and may not have ready.
+        # So the invariant is "at most that one", which survives integration specs being added
+        # and goes red the moment a file opts out silently. A raw count floor would not.
+        env:
+          RSPEC_JSON: rspec-integration.json
+          MAX_PENDING: "1"
+        run: |
+          ruby -rjson -e '
+            summary = JSON.parse(File.read(ENV.fetch("RSPEC_JSON"))).fetch("summary")
+            total   = summary.fetch("example_count")
+            pending = summary.fetch("pending_count")
+            allowed = Integer(ENV.fetch("MAX_PENDING"))
+            puts "#{total} examples, #{pending} pending, #{total - pending} executed"
+
+            if total.zero?
+              warn "::error::The nightly passed without running a single example, so it " \
+                   "verified nothing. The integration tier was filtered out entirely — " \
+                   "check that KSEF_INTEGRATION is still set on the step above."
+              exit 1
+            end
+
+            if pending > allowed
+              warn "::error::#{pending} of #{total} examples skipped; at most #{allowed} is " \
+                   "expected. The TEST credentials have most likely lapsed — session_flow " \
+                   "and crypto skip wholesale when KSEF_TEST_NIP/KSEF_TEST_TOKEN cannot be " \
+                   "read, and that failure is otherwise green."
+              exit 1
+            end
+          '
