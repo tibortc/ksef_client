@@ -863,14 +863,32 @@ Three measured traps, all recorded on the code:
 
 So the hash stays a fresh literal in `build`, and the decoder is given in array form.
 
-**Removal trigger.** Faraday *merged* json 3 support in
-[PR #1687](https://github.com/lostisland/faraday/pull/1687) on 2026-08-12 and has **not released
-it** — 2.14.3 shipped 2026-06-16. When a release containing it exists, raise the gemspec floor to
-that version and delete `JsonDecoder`, its wiring in `HTTP::Connection`, the copy in
+**Removal trigger — fired 2026-09-16, and the shim is gone.** Faraday merged json 3 support in
+[PR #1687](https://github.com/lostisland/faraday/pull/1687) on 2026-08-12 and released it in
+**2.14.4 on 2026-09-15**. `Faraday::Response::Json#parse` now calls
+`decoder.public_send(method_name, body, **(@parser_options || {}))` — keywords, not a second
+positional — so the stock `::JSON.parse` works under json 3.
+
+Removed as this section instructed: `JsonDecoder`, its wiring in `HTTP::Connection`, the copy in
 `spec/ksef/http/retry_spec.rb`, and the guard example in `spec/ksef/http/connection_spec.rb`.
-`JsonDecoder`'s optional second parameter is what makes the interim safe in both worlds: the
-merged fix splats the options as keywords, and `(body, _options = nil)` satisfies that call shape
-as well as today's.
+**The gemspec floor is what replaced it** — `faraday "~> 2.14", ">= 2.14.4"` — because on any
+earlier faraday a user resolving json 3 still gets a client that cannot read a response. Lowering
+that floor silently reintroduces the bug for those users; it is not a cosmetic bound.
+
+Verified on the combination that was broken, json 3.0.2 with faraday 2.14.4 and no shim: 1594
+examples, 0 failures, coverage gates enforced.
+
+**Two of the three traps above went with it.** 2.14.4 does `@parser_options = parser_options&.dup`
+before the destructive `delete`, so a frozen or shared options hash is no longer a hazard — but
+this gem passes no `parser_options` at all now, which is the stronger form of the same safety.
+The `decoder: JSON` trap is moot for the same reason.
+
+**How it arrived is the part worth keeping.** The release landed 2026-09-15 13:16Z, after this
+repository's last CI run that day, and the lockfile is gitignored — so the first thing to notice
+was an unrelated pull request going red on every Ruby, on a spec asserting the decoder's arity.
+That is the second time in ten days an upstream release changed this gem's behaviour with no
+commit here (§4.9's own origin was the first). The per-push tier caught it; the nightly did not,
+because it runs only `--tag integration`.
 
 ---
 
