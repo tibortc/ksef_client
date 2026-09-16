@@ -41,6 +41,26 @@ SimpleCov.start do
   # Codegen output is excluded from the coverage gate (DESIGN.md §9).
   skip "lib/ksef/fa3/generated/"
 
+  # **Track every library file, not only the ones a run happens to load.** Without this a file
+  # nothing requires is absent from the report *entirely* — invisible to `line: 100` and to
+  # `method: 100`, which is precisely the slack those floors exist to remove. A whole dead file
+  # could sit in `lib/` and every gate would stay green. With it, such a file reports 0% and
+  # fails the build.
+  track_files "lib/**/*.rb"
+
+  # `version.rb` is the one library file whose coverage cannot be measured, so it is named here
+  # rather than left to look tracked. The gemspec does `require_relative "lib/ksef/version"`,
+  # and Bundler evaluates the gemspec — the Gemfile uses `gemspec` — before `spec_helper` runs.
+  # The file is therefore in `$LOADED_FEATURES` by the time `SimpleCov.start` begins recording,
+  # and Ruby's Coverage never sees it. It *is* exercised: `spec/ksef_spec.rb` asserts
+  # `Ksef::VERSION` and `configuration_spec.rb` builds the User-Agent from it. Only the
+  # measurement is impossible.
+  #
+  # Found 2026-09-16 while proving the new line floor could fail: a probe method added to this
+  # file moved no coverage number at all, because the file was not in the report. The same probe
+  # in a tracked file failed both line and method immediately.
+  skip "lib/ksef/version.rb"
+
   enable_coverage :line
   # Line coverage alone was 99% while branch coverage was 83% — conditional paths were
   # going untested behind fully-covered lines. Method coverage is a cheap regression
@@ -111,7 +131,14 @@ SimpleCov.start do
   # *can* occur, unlike the other ten, and dropping it left the suite green. An audit found it
   # and it now has a test. Worth the note because the count is easy to read as noise: a new
   # uncovered branch in new code is a missing test, and only the ten are the deliberate kind.
-  minimum_coverage line: 99, branch: 98, method: 100
+  # **Ratcheted to line 100 at the Phase 3 boundary (2026-09-16), branch left at 98.** Measured
+  # on the 0.2 boundary commit: line 100.00% (2996/2996), branch 98.76% (877/888), method 100%.
+  # Line had been reading 100.00 for several milestones while the floor sat at 99 — a gate with
+  # slack it never used, which is the same shape as the `--pattern` bug above and the TEST guard
+  # that compared a literal against itself: a check that cannot fail. Branch deliberately stays
+  # at 98, because the actual is 98.76 and a floor the suite cannot meet is not a ratchet. Line
+  # is now the third criterion where a single regression fails the build, alongside method.
+  minimum_coverage line: 100, branch: 98, method: 100
 end
 
 require "ksef_client"

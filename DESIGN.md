@@ -470,7 +470,7 @@ The README quickstart is this snippet plus install instructions — a developer 
 | Golden files | RSpec fixtures | builder XML per invoice type vs approved snapshots; XSD-valid; round-trip law (§7.6); crypto vectors — NIST/FIPS, not C#, see §6.4 | every push |
 | Live integration | RSpec, env-gated (`KSEF_ENV=test` + creds) | end-to-end §8 contract, incl. TEST env test-data helper API for provisioning. Three specs exist — auth, crypto, session — and **all three have run green against TEST** (auth 2026-08-23, the other two 2026-08-24) | **nightly** CI + pre-release, never per-PR |
 
-**Coverage gate (ratcheted 2026-08-22, then 95 → 96 → 97 on 2026-08-24, then 97 → 98 at the Phase 2 boundary on 2026-08-26):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 99, branch 98, method 100**. The `minimum_coverage` call in `spec/spec_helper.rb` is the gate that fails the build and is therefore the authority; every restatement, here included, is a copy that has gone stale before.
+**Coverage gate (ratcheted 2026-08-22, then 95 → 96 → 97 on 2026-08-24, then 97 → 98 at the Phase 2 boundary on 2026-08-26, then line 99 → 100 at the Phase 3 boundary on 2026-09-16):** three criteria, all enforced by SimpleCov and all excluding `generated/` — **line 100, branch 98, method 100**. The `minimum_coverage` call in `spec/spec_helper.rb` is the gate that fails the build and is therefore the authority; every restatement, here included, is a copy that has gone stale before.
 
 **There is a second gate, and it is stricter than the floors.** Coveralls posts a `coverage/coveralls` commit status that blocks the PR on any *decline* against the base branch, measured as a combined line+branch figure. It is not a floor and does not ratchet: one new uncovered branch is enough. The workflow's `fail-on-error` was `false` on the reasoning that Coveralls is reporting rather than enforcement — but that flag governs only the action erroring, never the status, so the policy was stated and not applied; it is `true` as of 2026-08-26. In practice this is the gate that catches a conditional added without a test per path, which the percentage floors are too slack to see.
 
@@ -1148,8 +1148,28 @@ After sustained production use; API stability promise begins.
 
 1. ~~Repo/org placement and gem author metadata (name, email, homepage).~~ **Resolved:** Tibor Molnár, `tibor@timcraft.pl`, `github.com/tibortc/ksef_client`; asserted by `spec/release_readiness_spec.rb`.
 2. ~~XSD redistribution outcome (§7.7 tier 2) — bundle vs fetch-and-cache.~~ **Resolved:** the schemas are MIT-licensed, so they are bundled and no fetch-and-cache fallback is needed (`docs/REFERENCE.md` §1.2, which also gives the test for where a *third-party* schema may live).
-3. Default rounding strategy confirmation (`:per_line` proposed) once real accounting examples are in fixtures — **which has now happened**: the Ministry's 26
-worked examples are pinned at `spec/fixtures/fa3/mf-samples/` (docs/REFERENCE.md §1.5), so this
-decision is ready to be taken.
+3. ~~Default rounding strategy confirmation (`:per_line` proposed) once real accounting examples are in fixtures.~~ **Resolved 2026-09-16 — confirmed by the human: `:per_line` stays the default**, with `:per_summary` available explicitly on `build`.
+
+   **The trigger this item named was met and turned out not to settle it.** The Ministry's 26
+   worked examples are pinned (`docs/REFERENCE.md` §1.5), and an earlier revision of this item
+   concluded the decision was therefore "ready to be taken". Measuring the corpus shows it
+   cannot decide the question at all: **8 of the 16 parseable line-carrying samples have the
+   structure needed to discriminate** — more than one line sharing a VAT rate, three of them
+   with three lines at 23% — and in **all 8 the two strategies produce identical buckets**. Zero
+   of the 26 discriminate. The corpus is not structurally blind, as §17.2's note about
+   `stated_gross` might suggest; it has the right shape in half the cases and is simply silent.
+
+   So the confirmation rests on other grounds, and they are worth stating because they are not
+   evidentiary: Polish VAT law permits both (§7.3), neither reference client builds invoices so
+   there is no upstream default to inherit, and `ksef-pdf-generator` only reads. `:per_line` is
+   what shipped in 0.1.0 and what this document and the README describe. Adoption at the time of
+   the decision was negligible, so this was the cheapest moment the default could have changed —
+   it was confirmed deliberately rather than by inertia.
+
+   **Do not read "every one of the twenty-six pinned samples infers `:per_line`" as the corpus
+   endorsing the default.** `RoundingInference.strategy_for` returns `:per_line` on a tie *and*
+   when neither strategy matches, so that sentence describes the fallback firing. Re-open this
+   only on a reported mismatch against a real ERP, which is the evidence the corpus does not
+   contain.
 4. ~~Whether TEST-env credentials for nightly CI come from a dedicated test NIP (recommended) — needs human to provision via the TEST self-service tools.~~ **Resolved 2026-08-23.** A dedicated invented NIP, provisioned by `rake auth:bootstrap` (docs/REFERENCE.md §6a.3) rather than by hand. `KSEF_TEST_NIP` and `KSEF_TEST_TOKEN` are stored in the `ksef-test` environment and the nightly schedule is enabled. The run also confirmed that KSeF accepts this gem's XAdES signature (`docs/REFERENCE.md` §6a.4).
 5. ~~Any trademark/naming sensitivities around "KSeF" in the gem description (likely none — official SDKs use it — but confirm before publishing).~~ **Resolved 2026-08-23 — confirmed by the human**, on the basis the question anticipated. Two KSeF-named gems are already published unchallenged — [`ksef`](https://rubygems.org/gems/ksef) and [`ksef-rb`](https://rubygems.org/gems/ksef-rb), both catalogued in §1 — and the Ministry's own C# and Java SDKs use the name. Settled practice, not a trademark search, which is enough to publish on: `0.1.0.rc1` did so on 2026-08-22.
