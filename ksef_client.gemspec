@@ -57,7 +57,12 @@ Gem::Specification.new do |spec|
   # the dependency itself, which is unrelated to the rule against bounding
   # `required_ruby_version` (DESIGN.md §3).
   spec.add_dependency "bigdecimal", ">= 3.1", "< 5"
-  spec.add_dependency "faraday", "~> 2.0"
+  # **The floor is 2.14.4, not 2.0, and it is load-bearing.** json 3.0.0 dropped the second
+  # positional argument to `JSON.parse`; faraday passed one until 2.14.4 splatted its parser
+  # options as keywords instead. On any earlier faraday, a user resolving json 3 gets a client
+  # that cannot read a single API response. This gem carried a decoder shim for that window;
+  # the floor is what replaced it (docs/REFERENCE.md §4.9).
+  spec.add_dependency "faraday", "~> 2.14", ">= 2.14.4"
   spec.add_dependency "nokogiri", "~> 1.16"
   spec.add_dependency "zeitwerk", "~> 2.6"
 end

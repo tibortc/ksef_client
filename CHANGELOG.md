@@ -12,6 +12,33 @@ gem version for which API state".
 
 ### Changed
 
+- **The `json` 3 decoder shim is removed, and the faraday floor is now `>= 2.14.4`.** Faraday
+  2.14.4 (released 2026-09-15) shipped PR #1687: `Faraday::Response::Json#parse` now calls
+  `decoder.public_send(method_name, body, **(@parser_options || {}))` — keywords rather than a
+  second positional — so the stock `::JSON.parse` works under json 3 and
+  `Ksef::HTTP::JsonDecoder` has nothing left to do.
+
+  Removed exactly as `docs/REFERENCE.md` §4.9 instructed when it recorded the trigger: the
+  decoder, its wiring in `HTTP::Connection`, the duplicate in `spec/ksef/http/retry_spec.rb`, and
+  the guard example in `spec/ksef/http/connection_spec.rb`. Verified on the combination that was
+  broken — json 3.0.2 with faraday 2.14.4 and no shim — at 1594 examples, 0 failures, coverage
+  gates enforced.
+
+  **The gemspec floor is what replaced the shim, so it is load-bearing.** `faraday "~> 2.14",
+  ">= 2.14.4"` (was `"~> 2.0"`). On any earlier faraday a user resolving json 3 still gets a
+  client that cannot read a single API response, so lowering this bound silently reintroduces
+  the bug for them. This is a dependency-floor raise: applications pinned below faraday 2.14.4
+  will not resolve the next release of this gem until they upgrade, which is a patch-level move
+  within faraday 2.x.
+
+  **How it arrived is worth more than the fix.** The release landed after this repository's last
+  CI run that day, and `Gemfile.lock` is gitignored by library convention, so it surfaced as an
+  unrelated pull request going red on every Ruby against a spec asserting the decoder's arity.
+  That is the second upstream release in ten days to change this gem's behaviour with no commit
+  here — json 3.0.0 was the first, and it created the shim this one retires. Both were caught by
+  the per-push tier; neither would have been caught by the nightly, which runs only
+  `--tag integration`.
+
 - **The nightly now fails when it passes without running anything.** Failure notifications
   cover a red run and cannot cover a green one, because a green run is a success — so the
   project's documented failure mode, *"a green run of zero examples"*, reached nobody and the
