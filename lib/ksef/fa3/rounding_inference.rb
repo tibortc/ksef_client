@@ -43,6 +43,13 @@ module Ksef
         # would have shown it, except every one of the twenty-six pinned samples infers
         # `:per_line`, so the corpus is structurally blind to it (docs/REFERENCE.md §17.2).
         #
+        # **That last sentence is not the corpus endorsing `:per_line`**, and it is easy to read
+        # as though it were. This method returns `:per_line` on a tie and when *neither* strategy
+        # matches, so "all twenty-six infer `:per_line`" describes the fallback firing. Measured
+        # 2026-09-16: 8 of the 16 parseable line-carrying samples have the shape needed to tell
+        # the strategies apart — more than one line sharing a rate — and all 8 produce identical
+        # buckets under both. The default is a decision (DESIGN.md §12 item 3), not a finding.
+        #
         # @param lines [Array<Line>]
         # @param stated [Hash{String => BigDecimal}] the document's own `P_14_*` values
         # @return [Symbol] `:per_line` unless `:per_summary` is what reproduces `stated`

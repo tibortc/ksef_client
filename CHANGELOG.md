@@ -38,6 +38,50 @@ gem version for which API state".
   here — json 3.0.0 was the first, and it created the shim this one retires. Both were caught by
   the per-push tier; neither would have been caught by the nightly, which runs only
   `--tag integration`.
+- **The default rounding strategy is confirmed as `:per_line`** (DESIGN.md §12 item 3, the last
+  open decision in that section). No behaviour changes — this records a decision that had been
+  carried as open since the design was written.
+
+  The item said the decision would become takeable once real accounting examples were pinned.
+  They were, and they do not settle it: **8 of the 16 parseable line-carrying Ministry samples
+  have the structure needed to tell the two strategies apart** — more than one line sharing a
+  VAT rate — and **all 8 produce identical buckets under both**. Zero of the 26 discriminate, so
+  the corpus is consistent with either convention.
+
+  The confirmation therefore rests on non-evidentiary grounds, stated in §12 rather than
+  implied: Polish VAT law permits both, no reference client builds invoices so there is no
+  upstream default to inherit, and `:per_line` is what shipped. `:per_summary` remains available
+  explicitly on `build`. Re-open only on a reported mismatch against a real ERP.
+
+  A related comment was corrected rather than left to mislead: "every one of the twenty-six
+  pinned samples infers `:per_line`" describes `RoundingInference.strategy_for`'s fallback —
+  which returns `:per_line` on a tie *and* when neither strategy matches — not the corpus
+  preferring it.
+
+- **Coverage floor ratcheted: line 99 → 100**, at the Phase 3 boundary. Branch stays at 98 and
+  method at 100. Measured on the boundary commit: line 100.00% (2991/2991), branch 98.76%
+  (877/888), method 100%.
+
+  Line had been reading 100.00 for several milestones while the floor sat at 99 — a gate
+  carrying slack it never used, which is the shape of two defects this project has already
+  found: the `--pattern` check that read every `rake` run as filtered, and the TEST guard that
+  compared a literal against itself. Branch is deliberately not raised: the actual is 98.76, and
+  a floor the suite cannot meet is not a ratchet.
+
+- **The coverage report now tracks every library file, not only the ones a run loads.** Found
+  while proving the new line floor could fail: a probe method added to `lib/ksef/version.rb`
+  moved no coverage number at all. SimpleCov reports only files loaded after `SimpleCov.start`,
+  so **a file nothing requires was absent from the report entirely** — invisible to `line: 100`
+  and `method: 100` alike. A whole dead file could have sat in `lib/` with every gate green.
+
+  `track_files "lib/**/*.rb"` closes it: a dead file now reports 0% and fails the build, which
+  was verified by adding one (line 99.96%, method 99.85%, exit 2) and removing it again.
+
+  `version.rb` is skipped explicitly rather than left looking tracked, because its coverage
+  genuinely cannot be measured: the gemspec does `require_relative "lib/ksef/version"` and
+  Bundler evaluates the gemspec before `spec_helper` runs, so the file is in `$LOADED_FEATURES`
+  before recording starts. It is exercised — `spec/ksef_spec.rb` asserts `Ksef::VERSION` — only
+  unmeasurable. One file, now named instead of silent.
 
 - **The nightly now fails when it passes without running anything.** Failure notifications
   cover a red run and cannot cover a green one, because a green run is a success — so the

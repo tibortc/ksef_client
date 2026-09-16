@@ -79,7 +79,7 @@ declaration, never the output. `rake fa3:verify` fails if the committed file is 
 | Golden files, round-trip, crypto vectors | every push |
 | Live TEST integration | nightly and pre-release only, never per-PR |
 
-Coverage is gated on three criteria, excluding `generated/`: **line 99, branch 98,
+Coverage is gated on three criteria, excluding `generated/`: **line 100, branch 98,
 method 100**. `spec/spec_helper.rb` is the single source of truth for these numbers —
 if this paragraph and that file ever disagree, the file wins. Branch coverage is the one that finds real gaps — the suite once sat at 99%
 line coverage with 83% branch coverage, meaning plenty of conditional paths were untested
