@@ -12,10 +12,7 @@ RSpec.describe Ksef::HTTP::Retry do
       f.request :json
       f.use described_class, policy: config.retry_policy, sleeper: ->(s) { slept << s }
       f.use Ksef::HTTP::ErrorHandler
-      # Its own stack, so it needs the decoder too — `Connection.build` is not involved
-      # here, and without this the json-3 breakage survives in these seven examples alone.
-      f.response :json, content_type: /\bjson\b/,
-                        parser_options: { decoder: [Ksef::HTTP::JsonDecoder, :call] }
+      f.response :json, content_type: /\bjson\b/
       f.adapter :net_http
     end
   end
