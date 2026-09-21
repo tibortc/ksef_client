@@ -173,6 +173,60 @@ RSpec.describe "the GitHub Actions workflows" do
     expect(guard.fetch("run")).to include("exit 1")
   end
 
+  # **The per-push tier is the only thing that can see a dependency break, and it runs only when
+  # someone pushes.** `Gemfile.lock` is gitignored, so every leg resolves fresh — that is what
+  # makes this suite a drift detector, and what makes it useless in a quiet week. Twice in one
+  # month an upstream release broke `main` with no commit here: `json` 3.0.0, then faraday
+  # 2.14.4. The second sat red for five days, under five consecutive *green* nightlies that
+  # could not see it, because `nightly.yml` runs only `--tag integration`.
+  #
+  # Asserted because removing the schedule reopens a hole whose only symptom is silence.
+  it "runs the unit tier on a schedule, not only when someone pushes" do
+    triggers = workflows.fetch("test.yml").fetch(true)
+
+    expect(triggers.keys).to include("schedule", "push", "pull_request")
+    expect(triggers.fetch("schedule").map { |entry| entry.fetch("cron") }).to all(be_a(String))
+  end
+
+  # **The coverage gate is what stops this suite passing vacuously, and any selector switches it
+  # off.** `spec_helper.rb` skips `minimum_coverage` on a filtered run, so a `--tag`, a path or a
+  # `--pattern` on this step would exit 0 having proved nothing. That exact failure already
+  # shipped once, through `rake spec`'s own `--pattern` (2026-08-23) — and a scheduled run that
+  # nobody watches is where it would hide best.
+  it "runs the scheduled suite unfiltered, so the coverage gate stays armed" do
+    job = workflows.fetch("test.yml").fetch("jobs").fetch("spec")
+    step = job.fetch("steps").find { |s| s["name"] == "Run specs" }
+
+    expect(step.fetch("run").strip).to eq("bundle exec rspec")
+  end
+
+  # A scheduled run is not a change, so it must not post a commit status against one.
+  it "does not report coverage to Coveralls on a scheduled run" do
+    job = workflows.fetch("test.yml").fetch("jobs").fetch("spec")
+    step = job.fetch("steps").find { |s| s["uses"].to_s.include?("coverallsapp") }
+
+    expect(step.fetch("if")).to include("github.event_name != 'schedule'")
+  end
+
+  # **The run-page summary restates the coverage floors, and it had already gone stale.** The
+  # line floor moved 99 -> 100 at the Phase 3 boundary and this copy kept saying 99, so every run
+  # page printed a floor the build does not enforce — found 2026-09-21, because the grep that
+  # chased the ratchet covered `*.md` and `*.rb` and this one lives in YAML.
+  #
+  # `spec/spec_helper.rb` is the authority (CLAUDE.md). This reads both and fails when they
+  # disagree, which is the check the "five documents kept saying 95" episode should have left
+  # behind instead of an instruction to grep.
+  it "summarises the same coverage floors the build enforces" do
+    step = workflows.fetch("test.yml").fetch("jobs").fetch("spec").fetch("steps")
+                    .find { |s| s["name"].to_s.include?("Summarise coverage") }
+    gate = File.read(File.expand_path("spec_helper.rb", __dir__), encoding: "UTF-8")
+
+    enforced = gate[/minimum_coverage\s+(.+)/, 1].scan(/(\w+):\s*(\d+)/).to_h
+    summarised = step.fetch("run").scan(/"(\w+)"\s*=>\s*(\d+)/).to_h
+
+    expect(summarised).to eq(enforced)
+  end
+
   # The recording is the expensive artifact in this repository — one permanent, unwithdrawable
   # TEST invoice per example. It must survive a failed *replay* and must never be published
   # after a failed *credential scan*, which `if: always()` would do. See the step's comment.

@@ -12,6 +12,41 @@ gem version for which API state".
 
 ### Changed
 
+- **`test.yml` now runs on a schedule as well as on push and pull request**, at 01:30 UTC.
+  Development-only; nothing shipped changes.
+
+  `Gemfile.lock` is gitignored by library convention, so every matrix leg resolves fresh — which
+  makes the unit tier the only thing in this repository that can see a dependency break, and
+  makes it blind in any week nobody pushes. That is not hypothetical: **twice in one month an
+  upstream release broke `main` with no commit here.** `json` 3.0.0 on 2026-09-07, then faraday
+  2.14.4 on 2026-09-15 — and the second sat red on `main` for five days, under five consecutive
+  *green* nightlies, because `nightly.yml` runs only `--tag integration` and cannot reach it.
+
+  01:30 UTC is an hour ahead of the nightly on purpose: if the dependencies broke, that failure
+  arrives first and the integration failure an hour later is explained rather than investigated.
+  The nightly keeps 02:30 because its slot has an external constraint (Ministry maintenance);
+  this one touches no network and needs no credential.
+
+  The scheduled leg posts **no** Coveralls status. Coveralls posts a commit status whatever
+  triggered the run and compares against the previous build, so a daily drift check would
+  re-stat `main`'s tip and could turn a green commit red with no change to blame — it counts
+  lines *and* branches together, so even deleting fully covered code reads as a decrease.
+
+  Three properties are asserted in `spec/workflows_spec.rb` rather than left to review: that the
+  schedule exists, that the step stays `bundle exec rspec` with **no selector** — any selector
+  switches the coverage gate off and the run would pass having proved nothing, which already
+  shipped once through `rake spec`'s `--pattern` — and that Coveralls is skipped on schedule.
+
+- **Fixed a coverage floor the run-page summary had been misreporting.** `test.yml` restates the
+  floors to render them on the run page, and its copy still said line 99 after the ratchet to
+  100 — so every run page printed a floor the build does not enforce. Found because this change
+  touched the file; the grep that chased the ratchet covered `*.md` and `*.rb`, and this copy
+  lives in YAML.
+
+  `spec/workflows_spec.rb` now reads both the workflow and `spec/spec_helper.rb` and fails when
+  they disagree, which is the check the "five documents kept saying 95" episode should have left
+  behind instead of an instruction to grep. Verified it fires by reverting the number.
+
 - **The `json` 3 decoder shim is removed, and the faraday floor is now `>= 2.14.4`.** Faraday
   2.14.4 (released 2026-09-15) shipped PR #1687: `Faraday::Response::Json#parse` now calls
   `decoder.public_send(method_name, body, **(@parser_options || {}))` — keywords rather than a
